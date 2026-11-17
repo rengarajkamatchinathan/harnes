@@ -1815,3 +1815,140 @@ mod wiring {
         ));
     }
 }
+
+// ------------------------------------------------------------------ tool_search (06 §7)
+
+/// A stand-in for an MCP tool with a long definition.
+struct FakeMcp {
+    name: &'static str,
+    desc: String,
+}
+
+#[async_trait]
+impl Tool for FakeMcp {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self, _env: &ToolEnv) -> Cow<'_, str> {
+        Cow::Borrowed(&self.desc)
+    }
+    fn input_schema(&self) -> &Value {
+        Echo::schema()
+    }
+    fn kind(&self) -> ToolKind {
+        ToolKind::ReadOnly
+    }
+    async fn execute(&self, input: Value, _ctx: ToolCtx) -> Result<ToolOutput, ToolError> {
+        let i: TextIn = genie_tools::parse_input(input, Echo::schema())?;
+        Ok(ToolOutput::Text(format!("{} ran with {}", self.name, i.text)))
+    }
+}
+
+fn tool_names(body: &Value) -> Vec<String> {
+    body["tools"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| t["name"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn large_mcp_tool_sets_are_deferred_behind_tool_search() {
+    // 3 × ~10k tokens of MCP definitions > 10 % of a 200k window.
+    let filler = "lorem ipsum dolor sit amet ".repeat(1600);
+    let tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(FakeMcp {
+            name: "mcp__jira__create_issue",
+            desc: format!("Create a Jira issue in a project. {filler}"),
+        }),
+        Arc::new(FakeMcp {
+            name: "mcp__jira__search",
+            desc: format!("Search Jira issues with JQL. {filler}"),
+        }),
+        Arc::new(FakeMcp {
+            name: "mcp__drive__upload",
+            desc: format!("Upload a file to Drive. {filler}"),
+        }),
+        Arc::new(Echo),
+    ];
+    let mut h = harness(
+        vec![
+            reply(
+                &[tool_block(
+                    0,
+                    "tu_1",
+                    "tool_search",
+                    json!({"query": "jira create", "max_results": 1}),
+                )],
+                "tool_use",
+            ),
+            reply(
+                &[tool_block(
+                    0,
+                    "tu_2",
+                    "mcp__jira__create_issue",
+                    json!({"text": "bug"}),
+                )],
+                "tool_use",
+            ),
+            text(&["Filed."]),
+        ],
+        |_| {},
+        tools,
+        None,
+    );
+    h.s.prompt("file a bug", Delivery::Steer).unwrap();
+    let ev = h.settle().await;
+    assert_eq!(settled(&ev).status, TurnStatus::Completed);
+    let bodies = h.bodies();
+    assert_eq!(bodies.len(), 3);
+
+    // Step 1: MCP definitions left out, `tool_search` names them; built-ins stay.
+    let first = tool_names(&bodies[0]);
+    assert!(first.contains(&"tool_search".to_string()), "{first:?}");
+    assert!(first.contains(&"echo".to_string()));
+    assert!(!first.iter().any(|n| n.starts_with("mcp__")), "{first:?}");
+    let ts = bodies[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "tool_search")
+        .unwrap();
+    let desc = ts["description"].as_str().unwrap();
+    assert!(desc.contains("mcp__drive__upload") && desc.contains("mcp__jira__search"));
+
+    // Step 2: only the loaded definition joins the request.
+    let searched = ev.iter().any(|e| {
+        matches!(e, SessionEvent::ToolEnded(t) if t.call_id == "tu_1" && t.outcome == ToolOutcome::Ok)
+    });
+    assert!(searched, "{ev:?}");
+    let second = tool_names(&bodies[1]);
+    assert!(second.contains(&"mcp__jira__create_issue".to_string()), "{second:?}");
+    assert!(!second.contains(&"mcp__jira__search".to_string()), "{second:?}");
+    assert!(!second.contains(&"mcp__drive__upload".to_string()), "{second:?}");
+    assert!(bodies[1].to_string().contains("These tools are now available"));
+
+    // The loaded tool ran.
+    let ran = ev.iter().any(|e| {
+        matches!(e, SessionEvent::ToolEnded(t) if t.call_id == "tu_2" && t.outcome == ToolOutcome::Ok)
+    });
+    assert!(ran, "{ev:?}");
+    assert!(bodies[2].to_string().contains("mcp__jira__create_issue ran with bug"));
+}
+
+#[tokio::test]
+async fn small_mcp_tool_sets_are_sent_in_full() {
+    let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(FakeMcp {
+        name: "mcp__tiny__ping",
+        desc: "Ping.".into(),
+    })];
+    let mut h = harness(vec![text(&["ok"])], |_| {}, tools, None);
+    h.s.prompt("hi", Delivery::Steer).unwrap();
+    h.settle().await;
+    let names = tool_names(&h.bodies()[0]);
+    assert!(names.contains(&"mcp__tiny__ping".to_string()));
+    assert!(!names.contains(&"tool_search".to_string()));
+}

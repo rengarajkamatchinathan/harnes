@@ -103,6 +103,10 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
         p.ready(&settings).await;
     }
     let registry = rt.registry_for(&sid, &settings);
+    // Large MCP tool sets are deferred behind `tool_search` (06 §7).
+    let registry = rt
+        .tool_search
+        .prepare(&sid, registry, &env, model.context_window());
     let turns = rt.turns.clone();
     let _active = turns.enter(&turn);
     // A new turn commits a staged rewind (D49 two-phase).
@@ -604,7 +608,10 @@ impl Run {
         let compat = &self.model.route.compat;
         let messages = lower_updates(history, self.model.route.protocol.kind(), compat);
         let messages = self.rt.prepare_media(messages, &self.model.route.model);
-        let specs = self.registry.specs(&self.env);
+        let specs = self
+            .rt
+            .tool_search
+            .filter(&self.sid, self.registry.specs(&self.env));
         let names = specs.iter().map(|s| s.name.clone()).collect();
         let baseline = self.meta.baseline.clone().unwrap_or_default();
         let mut req = LlmRequest::new(self.model.route.model.clone(), messages);

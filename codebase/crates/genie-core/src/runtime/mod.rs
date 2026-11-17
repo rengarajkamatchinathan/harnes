@@ -17,7 +17,7 @@
 //! Extra built-in tools (shell, web, browser …) are registered with
 //! [`RuntimeBuilder::tools`] / [`RuntimeBuilder::chat_tool`] / [`RuntimeBuilder::code_tool`].
 //!
-//! Extension points left typed for other specs: code tools, shell, `tool_search` deferral,
+//! Extension points left typed for other specs: code tools, shell,
 //! web, browser, skills, subagents (`finish = stop` with children running), hooks
 //! (`turn.end` continue), checkpoints, native compaction.
 
@@ -45,6 +45,7 @@ pub mod prompts;
 pub mod retrieval;
 pub mod skills;
 pub mod subagents;
+pub mod tool_search;
 mod turn;
 pub mod wire;
 
@@ -144,6 +145,8 @@ pub struct AgentRuntime {
     pub subagents: Option<Arc<subagents::SubagentHub>>,
     /// Hooks (06 §12, Code only).
     pub hooks: Option<Arc<hooks::HooksHub>>,
+    /// `tool_search` deferral of large MCP tool sets (06 §7).
+    pub tool_search: Arc<tool_search::ToolSearch>,
 }
 
 impl AgentRuntime {
@@ -305,6 +308,7 @@ impl RuntimeBuilder {
                 agents: None,
                 subagents: None,
                 hooks: None,
+                tool_search: tool_search::ToolSearch::new(tool_search::DEFAULT_FRACTION),
             },
             subagents: None,
             config_hub: None,
