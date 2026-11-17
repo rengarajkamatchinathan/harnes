@@ -315,6 +315,53 @@ async fn project_methods_and_files() {
         .read(|c| genie_store::retrieval::project_stats(c, &p))
         .unwrap();
     assert_eq!(chunks, 1);
+
+    // Same name again: identical content is a no-op, changed content re-indexes in place.
+    let same = c
+        .call::<m::ProjectFileAdd>(ProjectFileAddParams {
+            project_id: p.clone(),
+            blob_id: blob.clone(),
+            name: "notes.md".into(),
+        })
+        .await
+        .unwrap()
+        .file_id;
+    assert_eq!(same, f);
+    let changed = upload(
+        &c,
+        b"# Notes\n\nThe launch moved to Monday.\n\n# Risks\n\nWeather.\n",
+        "text/markdown",
+    )
+    .await;
+    let again = c
+        .call::<m::ProjectFileAdd>(ProjectFileAddParams {
+            project_id: p.clone(),
+            blob_id: changed.clone(),
+            name: "notes.md".into(),
+        })
+        .await
+        .unwrap()
+        .file_id;
+    assert_eq!(again, f, "same file, updated");
+    let files = mem
+        .store
+        .read(|cn| genie_store::projects::files(cn, &p))
+        .unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].blob_id.as_deref(), Some(changed.as_str()));
+    let text: Vec<String> = mem
+        .store
+        .read(|cn| {
+            let mut st = cn.prepare("SELECT text FROM kchunk WHERE file_id = ?1")?;
+            let rows = st.query_map([&f], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .unwrap();
+    assert!(text.iter().any(|t| t.contains("Monday")), "{text:?}");
+    assert!(!text.iter().any(|t| t.contains("Friday")), "{text:?}");
+    // The old blob is no longer referenced.
+    assert_eq!(mem.store.blob_row(&blob).unwrap().unwrap().refcount, 0);
+
     // A binary file is refused with a reason; unknown ids are not found.
     let bin = upload(&c, &[0, 1, 2, 3, 0, 9], "application/zip").await;
     let e = c

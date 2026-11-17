@@ -142,6 +142,28 @@ pub fn add_file(
     .map_err(Into::into)
 }
 
+/// Point an existing file at new content (re-upload of a changed file); `added` is
+/// refreshed. The caller replaces its chunks in the same transaction.
+pub fn update_file(
+    conn: &Connection,
+    id: &str,
+    mime: Option<&str>,
+    blob_id: &str,
+    tokens: Option<i64>,
+) -> Result<ProjectFile> {
+    conn.execute(
+        "UPDATE project_file SET mime = ?2, blob_id = ?3, sha256 = ?3, tokens = ?4, added = ?5
+         WHERE id = ?1",
+        params![id, mime, blob_id, tokens, now_ms()],
+    )?;
+    conn.query_row(
+        &format!("SELECT {FILE_COLS} FROM project_file WHERE id = ?1"),
+        [id],
+        file_row,
+    )
+    .map_err(Into::into)
+}
+
 pub fn files(conn: &Connection, project_id: &str) -> Result<Vec<ProjectFile>> {
     let mut st = conn.prepare(&format!(
         "SELECT {FILE_COLS} FROM project_file WHERE project_id = ?1 ORDER BY added, id"
