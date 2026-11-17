@@ -657,6 +657,14 @@ persisted; the four toggle combinations → Anthropic server tools), `permission
 
 ## Known gaps and deviations
 
+- **Development builds don't use the OS keychain.** A debug `genie` (what `cargo build` and
+  `pnpm tauri dev` run) keeps its secrets in `secrets.enc` with a random per-install passphrase
+  in `secrets.dev-passphrase` (0600), so macOS never shows keychain prompts during development
+  (an unsigned binary changes identity on every rebuild). Set `secrets.backend: "keychain"` to
+  test the keychain. If a dev DB's key was in the keychain, the DB is renamed to
+  `genie.db.unreadable-<date>` and a fresh one is created. Release builds are unchanged: the
+  keychain, which a code-signed app reads without prompting (needs the Apple Developer ID).
+
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
   Windows SID helpers). The other direction would pull the engine into the Tauri side.
   `xtask check-deps` allows exactly this edge.

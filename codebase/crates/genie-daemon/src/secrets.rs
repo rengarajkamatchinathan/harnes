@@ -80,6 +80,47 @@ fn configured_backend(config_dir: &Path) -> Option<String> {
         .map(String::from)
 }
 
+/// File next to `secrets.enc` holding the generated passphrase of a development build.
+pub const DEV_PASSPHRASE_FILE: &str = "secrets.dev-passphrase";
+
+/// Development builds (`debug_assertions`) don't use the OS keychain unless settings say
+/// `secrets.backend: "keychain"`. An unsigned dev binary changes code identity on every
+/// rebuild, so macOS would ask for keychain access again and again. Instead the secrets
+/// live in `secrets.enc`, unlocked with a random per-install passphrase kept in a 0600
+/// file beside it. Release builds are unchanged: keychain (a signed app is never asked).
+pub fn dev_secrets_mode(config_dir: &Path) -> bool {
+    cfg!(debug_assertions) && configured_backend(config_dir).is_none()
+}
+
+/// The dev passphrase, created on first use (32 random bytes, hex, file mode 0600).
+fn dev_passphrase(data_dir: &Path) -> std::io::Result<SecretString> {
+    let path = data_dir.join(DEV_PASSPHRASE_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(s) if !s.trim().is_empty() => return Ok(SecretString::from(s.trim().to_string())),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    std::fs::create_dir_all(data_dir)?;
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let pass = hex::encode(bytes);
+    let tmp = path.with_extension("tmp");
+    {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        use std::io::Write;
+        opts.open(&tmp)?.write_all(pass.as_bytes())?;
+    }
+    std::fs::rename(&tmp, &path)?;
+    Ok(SecretString::from(pass))
+}
+
 /// Keychain service name per channel: `genie`, `genie-beta`, `genie-dev`.
 pub fn keychain_service(ep: &Endpoint) -> String {
     format!("genie{}", ep.channel.dir_suffix())
@@ -97,6 +138,22 @@ impl Secrets {
             SecretsChoice::Backend(b) => (b.clone(), None),
             SecretsChoice::File(p) => {
                 let v = file(*p);
+                (v.clone(), Some(v))
+            }
+            SecretsChoice::Auto if dev_secrets_mode(&ep.config_dir) => {
+                let v = file(KdfParams::default());
+                match dev_passphrase(&ep.data_dir) {
+                    Ok(p) => {
+                        if let Err(e) = v.unlock(&p) {
+                            tracing::error!(error = %e, "dev secrets file did not unlock");
+                        }
+                    }
+                    Err(e) => tracing::error!(error = %e, "could not create the dev passphrase"),
+                }
+                tracing::warn!(
+                    "development build: secrets are in secrets.enc with a local dev passphrase, \
+                     not the OS keychain (set secrets.backend = \"keychain\" to use it)"
+                );
                 (v.clone(), Some(v))
             }
             SecretsChoice::Auto => {
@@ -325,6 +382,37 @@ pub(crate) async fn locked_phase(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_passphrase_is_created_once_private_and_reused() {
+        use genie_secrets::ExposeSecret;
+        let dir = tempfile::tempdir().unwrap();
+        let a = dev_passphrase(dir.path()).unwrap();
+        let b = dev_passphrase(dir.path()).unwrap();
+        assert_eq!(a.expose_secret(), b.expose_secret());
+        assert_eq!(a.expose_secret().len(), 64);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.path().join(DEV_PASSPHRASE_FILE))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn dev_mode_only_in_debug_builds_without_an_explicit_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(dev_secrets_mode(dir.path()), cfg!(debug_assertions));
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"secrets":{"backend":"keychain"}}"#,
+        )
+        .unwrap();
+        assert!(!dev_secrets_mode(dir.path()));
+    }
     use genie_secrets::MemoryBackend;
     use genie_store::KeyStore;
 

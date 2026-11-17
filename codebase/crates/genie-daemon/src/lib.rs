@@ -153,7 +153,29 @@ pub fn open_store(
     if let Err(e) = secrets::migrate_placeholder(&ep.data_dir, keys) {
         tracing::error!(error = %e, "placeholder keystore migration failed; file kept");
     }
-    genie_store::Store::open_with_keystore(&opts, keys).map(Arc::new)
+    match genie_store::Store::open_with_keystore(&opts, keys) {
+        // A development build switched from the keychain to its local secrets file, so
+        // the old DB's key is out of reach. Set the DB aside (renamed, never deleted,
+        // 04 §2) and start fresh instead of running without a store.
+        Err(genie_store::StoreError::KeyMissing { .. })
+            if secrets::dev_secrets_mode(&ep.config_dir) =>
+        {
+            let date = genie_protocol::rfc3339_ms(genie_core::bus::now_ms());
+            let date = date.get(..10).unwrap_or("unknown");
+            let moved =
+                genie_store::keys::quarantine_unreadable(&ep.data_dir, &opts_name(ep), date)?;
+            tracing::warn!(
+                ?moved,
+                "dev build: previous DB is unreadable without its keychain key; set aside, starting fresh"
+            );
+            genie_store::Store::open_with_keystore(&opts, keys).map(Arc::new)
+        }
+        r => r.map(Arc::new),
+    }
+}
+
+fn opts_name(ep: &Endpoint) -> String {
+    format!("genie{}.db", ep.channel.dir_suffix())
 }
 
 /// The org audit stream (08 §6): local rotating JSONL in `<data dir>/audit/` (or the
