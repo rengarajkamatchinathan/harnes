@@ -59,7 +59,10 @@ impl Scrubber {
 
     pub fn new(home: Option<&str>, user: Option<&str>) -> Scrubber {
         let mut homes = Vec::new();
-        if let Some(h) = home.map(|h| h.trim_end_matches(['/', '\\'])).filter(|h| h.len() > 1) {
+        if let Some(h) = home
+            .map(|h| h.trim_end_matches(['/', '\\']))
+            .filter(|h| h.len() > 1)
+        {
             homes.push(h.to_string());
             // The other separator style (paths in logs written by another tool).
             let alt = if h.contains('\\') {
@@ -145,7 +148,10 @@ mod tests {
 
         let strict = Scrubber::new(Some(r"C:\Users\alice"), None).strict();
         let out = strict.scrub(r"at C:\Users\alice\secret-client\main.rs:3 and C:/Users/alice/x");
-        assert!(!out.contains("secret-client") && !out.contains("/x"), "{out}");
+        assert!(
+            !out.contains("secret-client") && !out.contains("/x"),
+            "{out}"
+        );
     }
 
     #[test]

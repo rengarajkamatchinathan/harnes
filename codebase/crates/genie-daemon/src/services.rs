@@ -57,7 +57,10 @@ pub struct Services {
     /// Telemetry (08 §7): consent from settings + policy, local queue, export loop.
     pub telemetry: Option<Arc<genie_audit::Telemetry>>,
     /// OTLP audit export queue and its transport (08 §6).
-    pub otlp: Option<(Arc<genie_audit::OtlpSink>, Arc<dyn genie_audit::OtlpTransport>)>,
+    pub otlp: Option<(
+        Arc<genie_audit::OtlpSink>,
+        Arc<dyn genie_audit::OtlpTransport>,
+    )>,
     /// The secrets backend (doctor: backend kind, lock state).
     pub secrets: Option<Arc<crate::secrets::Secrets>>,
 }

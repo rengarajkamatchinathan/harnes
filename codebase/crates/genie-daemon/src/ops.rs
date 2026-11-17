@@ -51,9 +51,12 @@ pub(crate) fn dispatch(
         let res: Result<Value, RpcError> = if r.method == m::DoctorRun::NAME {
             let checks = run_checks(&svc, &st).await;
             if let Some(t) = &svc.telemetry {
-                t.usage(genie_audit::UsageEvent::new(genie_audit::UsageName::DoctorRun));
+                t.usage(genie_audit::UsageEvent::new(
+                    genie_audit::UsageName::DoctorRun,
+                ));
             }
-            serde_json::to_value(DoctorResult { checks }).map_err(|e| RpcError::internal(e.to_string()))
+            serde_json::to_value(DoctorResult { checks })
+                .map_err(|e| RpcError::internal(e.to_string()))
         } else {
             let p: DiagnosticsParams = if r.params.is_null() {
                 DiagnosticsParams {
@@ -155,8 +158,16 @@ pub(crate) fn disk_check(dir: &Path) -> DoctorCheck {
             CheckStatus::Warn,
             format!("{} free for Genie data", human_bytes(free)),
         ),
-        Ok(free) => check("disk", CheckStatus::Ok, format!("{} free", human_bytes(free))),
-        Err(e) => check("disk", CheckStatus::Unknown, format!("can't read free space: {e}")),
+        Ok(free) => check(
+            "disk",
+            CheckStatus::Ok,
+            format!("{} free", human_bytes(free)),
+        ),
+        Err(e) => check(
+            "disk",
+            CheckStatus::Unknown,
+            format!("can't read free space: {e}"),
+        ),
     }
 }
 
@@ -188,8 +199,9 @@ async fn webkit_checks(out: &mut Vec<DoctorCheck>) {
         CheckStatus::Ok,
         match dmabuf.as_deref() {
             Some("1") => "DMABUF renderer disabled (workaround active)".to_string(),
-            _ => "DMABUF renderer enabled; the desktop app disables it on affected GPUs"
-                .to_string(),
+            _ => {
+                "DMABUF renderer enabled; the desktop app disables it on affected GPUs".to_string()
+            }
         },
     ));
 }
@@ -221,7 +233,11 @@ pub(crate) async fn run_checks(svc: &Services, st: &DaemonState) -> Vec<DoctorCh
     skew.sort();
     skew.dedup();
     out.push(if skew.is_empty() {
-        check("versions", CheckStatus::Ok, "clients match the engine version")
+        check(
+            "versions",
+            CheckStatus::Ok,
+            "clients match the engine version",
+        )
     } else {
         check(
             "versions",
@@ -242,7 +258,11 @@ pub(crate) async fn run_checks(svc: &Services, st: &DaemonState) -> Vec<DoctorCh
                         format!("{kind} backend is locked (passphrase required)"),
                     )
                 } else if kind == "memory" {
-                    check("keychain", CheckStatus::Warn, "in-memory secrets (not persisted)")
+                    check(
+                        "keychain",
+                        CheckStatus::Warn,
+                        "in-memory secrets (not persisted)",
+                    )
                 } else {
                     check("keychain", CheckStatus::Ok, format!("{kind} backend"))
                 }
@@ -257,7 +277,11 @@ pub(crate) async fn run_checks(svc: &Services, st: &DaemonState) -> Vec<DoctorCh
     out.push(if svc.store.is_some() {
         check("database", CheckStatus::Ok, "encrypted store open")
     } else if locked {
-        check("database", CheckStatus::Warn, "waiting for the secrets passphrase")
+        check(
+            "database",
+            CheckStatus::Warn,
+            "waiting for the secrets passphrase",
+        )
     } else {
         check(
             "database",
@@ -289,7 +313,11 @@ pub(crate) async fn run_checks(svc: &Services, st: &DaemonState) -> Vec<DoctorCh
             } else if ready.is_empty() {
                 check("providers", CheckStatus::Warn, "no provider is signed in")
             } else {
-                check("providers", CheckStatus::Ok, format!("ready: {}", ready.join(", ")))
+                check(
+                    "providers",
+                    CheckStatus::Ok,
+                    format!("ready: {}", ready.join(", ")),
+                )
             },
             "genie://settings/providers",
         ));
@@ -351,7 +379,11 @@ pub(crate) async fn run_checks(svc: &Services, st: &DaemonState) -> Vec<DoctorCh
     ] {
         out.push(match tool_version(tool).await {
             Some(v) => check(id, CheckStatus::Ok, v),
-            None => check(id, CheckStatus::Warn, format!("`{tool}` not found on PATH ({why})")),
+            None => check(
+                id,
+                CheckStatus::Warn,
+                format!("`{tool}` not found on PATH ({why})"),
+            ),
         });
     }
 
@@ -403,7 +435,10 @@ pub(crate) async fn run_checks(svc: &Services, st: &DaemonState) -> Vec<DoctorCh
                     } else {
                         CheckStatus::Ok
                     },
-                    format!("{} problem(s), {errors} error(s); see `genie config doctor`", diags.len()),
+                    format!(
+                        "{} problem(s), {errors} error(s); see `genie config doctor`",
+                        diags.len()
+                    ),
                 )
             },
             "genie://settings/developer",
@@ -441,7 +476,11 @@ pub(crate) async fn run_checks(svc: &Services, st: &DaemonState) -> Vec<DoctorCh
                 if c.crash_reports { "on" } else { "off" },
                 if c.usage { "on" } else { "off" },
                 t.queued(),
-                if dsn { "" } else { " (no endpoint configured; kept on device)" }
+                if dsn {
+                    ""
+                } else {
+                    " (no endpoint configured; kept on device)"
+                }
             ),
         ));
     }
@@ -470,7 +509,10 @@ pub(crate) async fn collect(svc: &Services, st: &DaemonState, include_logs: bool
     };
     let status = st.status();
     let cfg = st.config();
-    line("Genie diagnostics (sanitised: no conversation content, credentials or settings values)".into());
+    line(
+        "Genie diagnostics (sanitised: no conversation content, credentials or settings values)"
+            .into(),
+    );
     line(format!(
         "generated: {}",
         genie_audit::audit::rfc3339_millis(std::time::SystemTime::now())

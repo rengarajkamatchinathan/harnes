@@ -249,8 +249,7 @@ impl RegistryReader for MemoryRegistry {
 const BOOL_KEYS: &[&str] = &["audit.includeContent", "updates.auto"];
 
 fn is_bool_key(key: &str) -> bool {
-    BOOL_KEYS.contains(&key)
-        || matches!(merge_rule(key), MergeRule::Enable | MergeRule::Disable)
+    BOOL_KEYS.contains(&key) || matches!(merge_rule(key), MergeRule::Enable | MergeRule::Disable)
 }
 
 fn is_list_key(key: &str) -> bool {
@@ -330,7 +329,9 @@ fn walk(
         key.values.iter().filter(|(n, _)| !n.is_empty()).collect();
     let is_list = !prefix.is_empty()
         && !named.is_empty()
-        && named.iter().all(|(n, _)| n.parse::<u32>().is_ok_and(|i| i > 0));
+        && named
+            .iter()
+            .all(|(n, _)| n.parse::<u32>().is_ok_and(|i| i > 0));
     if is_list {
         let mut items: Vec<(u32, Value)> = named
             .iter()
@@ -503,7 +504,8 @@ mod tests {
 
     #[test]
     fn mobileconfig_payloads() {
-        let fixture = include_str!("../../../policy-templates/macos/com.synergech.genie.mobileconfig");
+        let fixture =
+            include_str!("../../../policy-templates/macos/com.synergech.genie.mobileconfig");
         let v = parse_mobileconfig(fixture.as_bytes()).unwrap();
         assert_eq!(v["org.name"], json!("Example Corp"));
         assert_eq!(v["telemetry.level"], json!("crash-only"));
@@ -569,7 +571,11 @@ mod tests {
                 "webFetch.domains",
                 RegValue::Sz("example.com; docs.rs".into()),
             )
-            .set(k, "mcp.allowed", RegValue::Sz(r#"[{"name":"github"}]"#.into()))
+            .set(
+                k,
+                "mcp.allowed",
+                RegValue::Sz(r#"[{"name":"github"}]"#.into()),
+            )
             .set(
                 &format!(r"{k}\permissions.deny"),
                 "2",
@@ -630,7 +636,10 @@ mod tests {
             ace(CREATOR_OWNER, full),
         ];
         assert!(acl_admin_only(admins, Some(&good)));
-        assert!(!acl_admin_only("S-1-5-21-1-2-3-1001", Some(&good)), "user-owned");
+        assert!(
+            !acl_admin_only("S-1-5-21-1-2-3-1001", Some(&good)),
+            "user-owned"
+        );
         assert!(!acl_admin_only(admins, None), "NULL DACL");
         let mut bad = good.to_vec();
         bad.push(ace(users, 0x2)); // Users: write data

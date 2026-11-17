@@ -673,8 +673,14 @@ mod tests {
         assert!(!r(Some(false), None, None).crash_reports);
         assert!(!r(None, Some(true), Some("crash-only")).usage);
         assert!(r(None, None, Some("crash-only")).crash_reports);
-        assert_eq!(r(None, Some(true), Some("off")), TelemetryConsent::default());
-        assert_eq!(r(None, Some(true), Some("bogus")), TelemetryConsent::default());
+        assert_eq!(
+            r(None, Some(true), Some("off")),
+            TelemetryConsent::default()
+        );
+        assert_eq!(
+            r(None, Some(true), Some("bogus")),
+            TelemetryConsent::default()
+        );
     }
 
     #[test]
@@ -702,9 +708,18 @@ mod tests {
             "   0: std::backtrace::Backtrace::create::h0123456789abcdef\n             at /rustc/abc/library/std/src/backtrace.rs:331:13\n   1: genie_core::session::run\n             at /home/bob/genie/crates/genie-core/src/session.rs:120:9\n",
         );
         assert!(!report.message.contains("acme") && !report.message.contains("abc123"));
-        assert_eq!(report.location.as_deref(), Some("genie-core/src/session.rs:120"));
-        assert_eq!(report.frames[0].function, "std::backtrace::Backtrace::create");
-        assert_eq!(report.frames[1].module.as_deref(), Some("genie-core/src/session.rs"));
+        assert_eq!(
+            report.location.as_deref(),
+            Some("genie-core/src/session.rs:120")
+        );
+        assert_eq!(
+            report.frames[0].function,
+            "std::backtrace::Backtrace::create"
+        );
+        assert_eq!(
+            report.frames[1].module.as_deref(),
+            Some("genie-core/src/session.rs")
+        );
         assert_eq!(report.frames[1].line, Some(120));
         t.crash(report);
         assert_eq!(t.queued(), 2);
@@ -713,7 +728,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let m = fs::metadata(dir.path().join("queue.jsonl")).unwrap().permissions().mode();
+            let m = fs::metadata(dir.path().join("queue.jsonl"))
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(m & 0o777, 0o600);
         }
 
@@ -757,7 +775,10 @@ mod tests {
         assert_eq!(run(&ok).unwrap(), 1);
         assert_eq!(t.queued(), 0);
         let env = ok.0.lock().unwrap()[0].clone();
-        let lines: Vec<Value> = env.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let lines: Vec<Value> = env
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert_eq!(lines[1]["type"], "event");
         assert_eq!(lines[2]["level"], "fatal");
         assert_eq!(lines[2]["release"], "genie@0.1.0");

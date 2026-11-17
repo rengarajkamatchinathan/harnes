@@ -20,6 +20,10 @@ allow = [
   "Unicode-3.0",
   "Zlib",
 ]
+# `notify` (settings/policy file watcher, D23) is CC0-1.0 (public-domain dedication).
+[[licenses.exceptions]]
+allow = ["CC0-1.0"]
+crate = "notify"
 # Our own crates.
 [[licenses.exceptions]]
 allow = ["LicenseRef-Synergech-Proprietary"]

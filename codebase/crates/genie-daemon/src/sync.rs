@@ -42,7 +42,10 @@ pub struct HttpPolicyFetcher {
 /// `https`, or `http` to a loopback host (tests, local mirrors).
 pub fn check_policy_url(url: &str) -> Result<reqwest::Url, String> {
     let u = reqwest::Url::parse(url).map_err(|e| format!("bad policyUrl: {e}"))?;
-    let loopback = matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]" | "::1"));
+    let loopback = matches!(
+        u.host_str(),
+        Some("127.0.0.1" | "localhost" | "[::1]" | "::1")
+    );
     match u.scheme() {
         "https" => Ok(u),
         "http" if loopback => Ok(u),

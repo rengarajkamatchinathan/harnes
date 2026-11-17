@@ -35,7 +35,11 @@ fn anchor(file: &Path) -> Option<(PathBuf, PathBuf)> {
 
 /// Directories to watch for `files` (deepest existing ancestors).
 pub fn watch_dirs(files: &[PathBuf]) -> BTreeSet<PathBuf> {
-    files.iter().filter_map(|f| anchor(f)).map(|(d, _)| d).collect()
+    files
+        .iter()
+        .filter_map(|f| anchor(f))
+        .map(|(d, _)| d)
+        .collect()
 }
 
 fn relevant(event_path: &Path, targets: &BTreeSet<PathBuf>) -> bool {

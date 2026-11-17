@@ -109,7 +109,11 @@ impl AuditSink for OtlpSink {
 
 /// Send everything queued, batch by batch. A failed batch goes back to the front of the
 /// queue and the error is returned (the caller retries later). Returns records sent.
-pub async fn flush(sink: &OtlpSink, transport: &dyn OtlpTransport, version: &str) -> Result<usize, String> {
+pub async fn flush(
+    sink: &OtlpSink,
+    transport: &dyn OtlpTransport,
+    version: &str,
+) -> Result<usize, String> {
     let mut sent = 0;
     loop {
         let batch = sink.take(OTLP_BATCH);
@@ -137,8 +141,12 @@ pub fn any_value(v: &Value) -> Value {
             None => json!({ "doubleValue": n.as_f64().unwrap_or_default() }),
         },
         Value::String(s) => json!({ "stringValue": s }),
-        Value::Array(a) => json!({ "arrayValue": { "values": a.iter().map(any_value).collect::<Vec<_>>() } }),
-        Value::Object(m) => json!({ "kvlistValue": { "values": m.iter().map(|(k, v)| kv(k, any_value(v))).collect::<Vec<_>>() } }),
+        Value::Array(a) => {
+            json!({ "arrayValue": { "values": a.iter().map(any_value).collect::<Vec<_>>() } })
+        }
+        Value::Object(m) => {
+            json!({ "kvlistValue": { "values": m.iter().map(|(k, v)| kv(k, any_value(v))).collect::<Vec<_>>() } })
+        }
     }
 }
 
@@ -177,7 +185,9 @@ pub fn rfc3339_nanos(ts: &str) -> u128 {
         let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
         let days = era * 146_097 + doe - 719_468;
         let secs = days * 86_400 + h * 3600 + mi * 60 + se;
-        u128::try_from(secs).ok().map(|s| s * 1_000_000_000 + millis as u128)
+        u128::try_from(secs)
+            .ok()
+            .map(|s| s * 1_000_000_000 + millis as u128)
     };
     parse().unwrap_or(0)
 }
@@ -188,7 +198,10 @@ pub fn logs_request(records: &[AuditRecord], version: &str) -> Value {
         .iter()
         .map(|r| {
             let mut attrs = vec![
-                kv("audit_schema", json!({ "intValue": AUDIT_SCHEMA.to_string() })),
+                kv(
+                    "audit_schema",
+                    json!({ "intValue": AUDIT_SCHEMA.to_string() }),
+                ),
                 kv("event.name", s(&r.event)),
                 kv("genie.install_id", s(&r.install_id)),
                 kv("user.name", s(&r.user)),
@@ -256,7 +269,10 @@ mod tests {
 
     #[test]
     fn encodes_log_records() {
-        assert_eq!(rfc3339_nanos("2026-11-18T11:06:40.250Z"), 1_795_000_000_250_000_000);
+        assert_eq!(
+            rfc3339_nanos("2026-11-18T11:06:40.250Z"),
+            1_795_000_000_250_000_000
+        );
         assert_eq!(rfc3339_nanos("1970-01-01T00:00:01Z"), 1_000_000_000);
         assert_eq!(rfc3339_nanos("garbage"), 0);
         let body = logs_request(&[rec(5)], "0.1.0");
@@ -264,7 +280,12 @@ mod tests {
         assert_eq!(lr["timeUnixNano"], "1795000000250000000");
         assert_eq!(lr["eventName"], "tool.called");
         let attrs = lr["attributes"].as_array().unwrap();
-        let get = |k: &str| attrs.iter().find(|a| a["key"] == k).map(|a| a["value"].clone());
+        let get = |k: &str| {
+            attrs
+                .iter()
+                .find(|a| a["key"] == k)
+                .map(|a| a["value"].clone())
+        };
         assert_eq!(get("genie.tool"), Some(json!({"stringValue": "shell"})));
         assert_eq!(get("genie.duration_ms"), Some(json!({"intValue": "5"})));
         assert_eq!(get("genie.ok"), Some(json!({"boolValue": true})));
@@ -322,6 +343,9 @@ mod tests {
         assert!(sink.is_empty());
         let got = t.got.lock().unwrap();
         let first = &got[0]["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["attributes"];
-        assert!(first.to_string().contains("\"intValue\":\"2\""), "oldest dropped first");
+        assert!(
+            first.to_string().contains("\"intValue\":\"2\""),
+            "oldest dropped first"
+        );
     }
 }

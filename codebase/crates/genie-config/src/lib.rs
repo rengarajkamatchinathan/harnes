@@ -26,6 +26,6 @@ pub use policy::{
     EffectivePolicy, FilePolicySource, PolicyFetcher, PolicyManager, PolicySource,
     PolicySourceKind, SignedPolicy, StaticPolicySource, endpoint_allowed, system_sources,
 };
-pub use watch::PathWatcher;
 pub use settings::{ModeSetting, PermissionsSettings, Settings};
 pub use trust::{Definition, TrustError, TrustPolicy, TrustStore, definition_hash};
+pub use watch::PathWatcher;

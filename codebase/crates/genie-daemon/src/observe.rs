@@ -17,17 +17,17 @@ use std::time::{Duration, Instant};
 use genie_audit::otlp::BoxFuture;
 use genie_audit::telemetry::{Dsn, TelemetryContext, TelemetryExporter, TelemetryRecord};
 use genie_audit::{
-    Attrs, AuditEvent, Auditor, OtlpTransport, Telemetry, TelemetryConsent, UsageEvent,
-    UsageName, UsageProp,
+    Attrs, AuditEvent, Auditor, OtlpTransport, Telemetry, TelemetryConsent, UsageEvent, UsageName,
+    UsageProp,
 };
 use genie_core::bus::Envelope;
 use genie_core::config::ConfigHub;
 use genie_core::error::Defect;
 use genie_core::ids::{SessionId, TurnId};
 use genie_core::journal::{Journal, TurnRecord};
-use genie_protocol::session::TurnFinish;
 use genie_protocol::common::SessionKind;
 use genie_protocol::event::{SessionEvent, ToolOutcome, TurnStatus};
+use genie_protocol::session::TurnFinish;
 use serde_json::Value;
 
 /// Keychain account holding the OTLP export headers (`{"Authorization": "…"}`).
@@ -146,18 +146,18 @@ impl EventTap {
                 );
                 self.usage(UsageEvent::new(UsageName::BrowserUsed));
             }
-            SessionEvent::SessionCreated(c) => self.usage(
-                UsageEvent::new(UsageName::SessionCreated).with(
+            SessionEvent::SessionCreated(c) => {
+                self.usage(UsageEvent::new(UsageName::SessionCreated).with(
                     "kind",
                     UsageProp::Enum(match c.kind {
                         SessionKind::Chat => "chat",
                         SessionKind::Code => "code",
                         SessionKind::Unknown => "other",
                     }),
-                ),
-            ),
-            SessionEvent::TurnSettled(t) => self.usage(
-                UsageEvent::new(UsageName::TurnCompleted).with(
+                ))
+            }
+            SessionEvent::TurnSettled(t) => {
+                self.usage(UsageEvent::new(UsageName::TurnCompleted).with(
                     "status",
                     UsageProp::Enum(match t.status {
                         TurnStatus::Completed => "completed",
@@ -165,8 +165,8 @@ impl EventTap {
                         TurnStatus::Cancelled => "cancelled",
                         TurnStatus::Unknown => "unknown",
                     }),
-                ),
-            ),
+                ))
+            }
             SessionEvent::ArtifactVersioned(a) if a.n <= 1 => {
                 self.usage(UsageEvent::new(UsageName::ArtifactCreated));
             }
@@ -391,8 +391,14 @@ mod tests {
     #[test]
     fn otlp_url() {
         let c = reqwest::Client::new();
-        assert_eq!(HttpOtlp::new(c.clone(), "https://o/", vec![]).url, "https://o/v1/logs");
-        assert_eq!(HttpOtlp::new(c, "https://o/v1/logs", vec![]).url, "https://o/v1/logs");
+        assert_eq!(
+            HttpOtlp::new(c.clone(), "https://o/", vec![]).url,
+            "https://o/v1/logs"
+        );
+        assert_eq!(
+            HttpOtlp::new(c, "https://o/v1/logs", vec![]).url,
+            "https://o/v1/logs"
+        );
     }
 
     #[test]

@@ -173,9 +173,7 @@ pub fn endpoint_allowed(url: &str, patterns: &[String]) -> bool {
                 return false;
             }
             match host.strip_prefix("*.") {
-                Some(apex) => {
-                    target.host == apex || target.host.ends_with(&format!(".{apex}"))
-                }
+                Some(apex) => target.host == apex || target.host.ends_with(&format!(".{apex}")),
                 None => target.host == host,
             }
         }

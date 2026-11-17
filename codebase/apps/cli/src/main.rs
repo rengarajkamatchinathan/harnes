@@ -540,11 +540,7 @@ async fn doctor(channel: Channel) -> Result<u8> {
     .await;
     match remote {
         Ok(res) => {
-            println!(
-                "     {:<18} cli {}",
-                "client",
-                env!("CARGO_PKG_VERSION")
-            );
+            println!("     {:<18} cli {}", "client", env!("CARGO_PKG_VERSION"));
             for c in res.checks {
                 let tag = match c.status {
                     CheckStatus::Ok => "ok  ",

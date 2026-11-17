@@ -46,12 +46,12 @@ pub use providers::{Feed, HttpFeed, ProviderHub};
 pub use secrets::{Secrets, SecretsChoice, SecretsKeyStore};
 
 pub use blobs::Uploads;
-pub use observe::{EventTap, HttpOtlp, OTLP_HEADERS_ACCOUNT, SentryExporter};
-pub use sync::{HttpPolicyFetcher, fetch_signed};
 pub use lease::LEASE_GRACE;
+pub use observe::{EventTap, HttpOtlp, OTLP_HEADERS_ACCOUNT, SentryExporter};
 pub use registry::Registry;
 pub use server::{DaemonState, ShutdownReason, serve_stream};
 pub use services::Services;
+pub use sync::{HttpPolicyFetcher, fetch_signed};
 
 /// Per-subscription outbound queue bound (02 §3.1, SA-10).
 pub const SUB_QUEUE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -175,12 +175,11 @@ fn build_auditor(
         .and_then(|v| v.as_str())
         .filter(|e| !e.trim().is_empty())
         .map(|endpoint| {
-            let transport: Arc<dyn genie_audit::OtlpTransport> =
-                Arc::new(observe::HttpOtlp::new(
-                    genie_providers::oauth::http_client().unwrap_or_default(),
-                    endpoint,
-                    observe::otlp_headers(secrets.backend().as_ref()),
-                ));
+            let transport: Arc<dyn genie_audit::OtlpTransport> = Arc::new(observe::HttpOtlp::new(
+                genie_providers::oauth::http_client().unwrap_or_default(),
+                endpoint,
+                observe::otlp_headers(secrets.backend().as_ref()),
+            ));
             (Arc::new(genie_audit::OtlpSink::default()), transport)
         });
     let ctx = genie_audit::AuditContext {
@@ -200,7 +199,10 @@ fn build_auditor(
     (auditor, otlp)
 }
 
-fn jsonl_sink(ep: &Endpoint, policy: &genie_config::EffectivePolicy) -> Option<genie_audit::JsonlSink> {
+fn jsonl_sink(
+    ep: &Endpoint,
+    policy: &genie_config::EffectivePolicy,
+) -> Option<genie_audit::JsonlSink> {
     let dir = policy
         .get("audit.jsonl.dir")
         .and_then(|v| v.as_str())
