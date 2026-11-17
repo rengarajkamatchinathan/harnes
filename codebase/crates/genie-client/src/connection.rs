@@ -10,7 +10,8 @@ use genie_protocol::handshake::{
     ClientCapabilities, ClientKind, InitializeParams, InitializeResult,
 };
 use genie_protocol::{
-    Id, Message, Notification, Outcome, PROTOCOL_VERSION, Request, Response, RpcError, methods,
+    Id, Message, Method, Notification, Outcome, PROTOCOL_VERSION, Request, Response, RpcError,
+    methods,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -181,6 +182,11 @@ impl Connection {
     ) -> Result<R, ClientError> {
         let v = self.request_value(method, to_value(&params)?).await?;
         from_value(v)
+    }
+
+    /// Typed request via the method table: `conn.call::<SessionPrompt>(params)`.
+    pub async fn call<M: Method>(&self, params: M::Params) -> Result<M::Result, ClientError> {
+        self.request(M::NAME, params).await
     }
 
     pub async fn request_value(&self, method: &str, params: Value) -> Result<Value, ClientError> {

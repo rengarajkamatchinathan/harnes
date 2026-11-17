@@ -21,13 +21,15 @@ use std::time::{Duration, Instant};
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use genie_protocol::handshake::AskKind;
+use genie_protocol::ask::{Ask, AskAnswer, AskKind, AutoResolver, Decision, ResolvedBy};
+use genie_protocol::event::{self as wire, InboxItemView, MessageSource, SessionEvent};
+use genie_protocol::message::{InputPart, Role};
 use genie_protocol::session::{Delivery, LiveStatus, TurnFinish};
 use serde_json::Value;
 use tokio::sync::{Notify, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
-use crate::bus::{AskOutcome, Bus, CoreEvent};
+use crate::bus::{AskOutcome, Bus, CoreEvent, now_ms};
 use crate::error::{CoreError, Defect, TurnError};
 use crate::ids::{AskId, InboxItemId, SessionId, TurnId, new_id};
 use crate::task::TaskScope;
@@ -49,9 +51,43 @@ pub enum InboxKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InboxItem {
     pub id: InboxItemId,
+    /// The user message id this item becomes when admitted.
+    pub message_id: String,
     pub kind: InboxKind,
     pub delivery: Delivery,
+    /// Plain text of the prompt (all text parts joined).
     pub text: String,
+    pub parts: Vec<InputPart>,
+}
+
+impl InboxItem {
+    fn view(&self) -> InboxItemView {
+        const PREVIEW_CHARS: usize = 120;
+        InboxItemView {
+            id: self.id.clone(),
+            delivery: self.delivery,
+            preview: self.text.chars().take(PREVIEW_CHARS).collect(),
+        }
+    }
+
+    fn source(&self) -> MessageSource {
+        match self.kind {
+            InboxKind::User | InboxKind::Resume { .. } => MessageSource::User,
+            InboxKind::Synthetic { .. } => MessageSource::Synthetic,
+        }
+    }
+}
+
+/// Text of all text parts, joined by blank lines.
+pub fn parts_text(parts: &[InputPart]) -> String {
+    parts
+        .iter()
+        .filter_map(|p| match p {
+            InputPart::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Runs one turn. Implemented by the turn loop (spec 06); tests use fakes.
@@ -93,6 +129,7 @@ struct CurrentTurn {
 
 struct PendingAsk {
     turn_id: TurnId,
+    ask: Ask,
     tx: oneshot::Sender<Value>,
 }
 
@@ -183,7 +220,18 @@ impl SessionHandle {
         text: impl Into<String>,
         delivery: Delivery,
     ) -> Result<InboxItemId, CoreError> {
-        self.push(InboxKind::User, text.into(), delivery)
+        self.prompt_parts(vec![InputPart::text(text)], delivery)
+            .map(|(inbox, _)| inbox)
+    }
+
+    /// Like [`prompt`](Self::prompt) with structured parts. Returns
+    /// `(inbox_id, message_id)` (`session.prompt`, 02 §6.2).
+    pub fn prompt_parts(
+        &self,
+        parts: Vec<InputPart>,
+        delivery: Delivery,
+    ) -> Result<(InboxItemId, String), CoreError> {
+        self.push(InboxKind::User, parts, delivery)
     }
 
     /// Synthetic items share the inbox (01 §5.2).
@@ -197,51 +245,58 @@ impl SessionHandle {
             InboxKind::Synthetic {
                 source: source.into(),
             },
-            text.into(),
+            vec![InputPart::text(text)],
             delivery,
         )
+        .map(|(inbox, _)| inbox)
     }
 
     fn push(
         &self,
         kind: InboxKind,
-        text: String,
+        parts: Vec<InputPart>,
         delivery: Delivery,
-    ) -> Result<InboxItemId, CoreError> {
+    ) -> Result<(InboxItemId, String), CoreError> {
         if self.sh.scope.is_cancelled() {
             return Err(CoreError::InvalidState("session is closed".into()));
         }
         let item = InboxItem {
             id: new_id("inb"),
+            message_id: new_id("msg"),
             kind,
             delivery,
-            text,
+            text: parts_text(&parts),
+            parts,
         };
         let id = item.id.clone();
-        {
+        let message_id = item.message_id.clone();
+        // Publish under the state lock so `inbox.changed` snapshots arrive in order.
+        let res = {
             let mut st = self.sh.lock();
             st.inbox.push_back(item);
             st.last_activity = Instant::now();
-        }
-        self.sh.publish(CoreEvent::InboxAdded {
-            item_id: id.clone(),
-            delivery,
-        })?;
+            let items = st.inbox.iter().map(InboxItem::view).collect();
+            self.sh.publish(CoreEvent::InboxAdded {
+                item_id: id.clone(),
+                delivery,
+                items,
+            })
+        };
+        res?;
         self.sh.doorbell.notify_one();
-        Ok(id)
+        Ok((id, message_id))
     }
 
     /// Remove a waiting (not yet admitted) item (`session.inbox.remove`).
     pub fn remove_queued(&self, item_id: &str) -> Result<(), CoreError> {
-        let removed = {
-            let mut st = self.sh.lock();
-            let pos = st.inbox.iter().position(|i| i.id == item_id);
-            pos.and_then(|p| st.inbox.remove(p))
-        };
-        match removed {
+        let mut st = self.sh.lock();
+        let pos = st.inbox.iter().position(|i| i.id == item_id);
+        match pos.and_then(|p| st.inbox.remove(p)) {
             Some(_) => {
+                let items = st.inbox.iter().map(InboxItem::view).collect();
                 self.sh.publish(CoreEvent::InboxRemoved {
                     item_id: item_id.to_string(),
+                    items,
                 })?;
                 Ok(())
             }
@@ -286,11 +341,13 @@ impl SessionHandle {
             }
             let item = InboxItem {
                 id: new_id("inb"),
+                message_id: String::new(),
                 kind: InboxKind::Resume {
                     turn_id: turn_id.clone(),
                 },
                 delivery: Delivery::Queue,
                 text: String::new(),
+                parts: Vec::new(),
             };
             st.inbox.push_front(item);
             turn_id
@@ -300,8 +357,29 @@ impl SessionHandle {
         Ok(())
     }
 
-    /// Answer a pending ask from any client.
+    /// Answer a pending ask with a raw value (tests, internal callers).
     pub fn answer_ask(&self, ask_id: &str, answer: Value) -> Result<(), CoreError> {
+        let decision = serde_json::from_value::<AskAnswer>(answer.clone())
+            .ok()
+            .map(|a| a.decision);
+        self.resolve_ask(ask_id, answer, decision, None)
+    }
+
+    /// Answer a pending ask from any client (02 §7 step 3). Not lease-gated.
+    pub fn answer(&self, ask_id: &str, answer: AskAnswer, by: ResolvedBy) -> Result<(), CoreError> {
+        let decision = answer.decision;
+        let v = serde_json::to_value(&answer)
+            .map_err(|e| CoreError::Internal(crate::error::Defect::new(e.to_string())))?;
+        self.resolve_ask(ask_id, v, Some(decision), Some(by))
+    }
+
+    fn resolve_ask(
+        &self,
+        ask_id: &str,
+        answer: Value,
+        decision: Option<Decision>,
+        by: Option<ResolvedBy>,
+    ) -> Result<(), CoreError> {
         let pending = self.sh.lock().asks.remove(ask_id);
         let Some(p) = pending else {
             return Err(CoreError::NotFound(format!("ask {ask_id}")));
@@ -314,8 +392,39 @@ impl SessionHandle {
         self.sh.publish(CoreEvent::AskResolved {
             ask_id: ask_id.to_string(),
             outcome: AskOutcome::Answered,
+            decision,
+            by,
         })?;
         Ok(())
+    }
+
+    /// Asks waiting for an answer, oldest first (`permission.pending`).
+    pub fn pending_ask_list(&self) -> Vec<Ask> {
+        let mut v: Vec<Ask> = self
+            .sh
+            .lock()
+            .asks
+            .values()
+            .map(|p| p.ask.clone())
+            .collect();
+        v.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+        v
+    }
+
+    /// Whether `ask_id` is still waiting.
+    pub fn has_ask(&self, ask_id: &str) -> bool {
+        self.sh.lock().asks.contains_key(ask_id)
+    }
+
+    /// Publish a durable wire event on this session (lease changes, metadata updates).
+    pub fn publish_wire(&self, event: SessionEvent) -> Result<u64, CoreError> {
+        let env = self.sh.deps.bus.publish(
+            &self.sh.id,
+            CoreEvent::Wire {
+                event: Box::new(event),
+            },
+        )?;
+        Ok(env.seq.unwrap_or(0))
     }
 
     pub fn status(&self) -> LiveStatus {
@@ -336,6 +445,11 @@ impl SessionHandle {
         AttachGuard {
             sh: self.sh.clone(),
         }
+    }
+
+    /// Number of attached (subscribed) clients.
+    pub fn attached(&self) -> usize {
+        self.sh.subscribers.load(Ordering::SeqCst)
     }
 
     pub fn pending_inbox(&self) -> Vec<InboxItem> {
@@ -437,6 +551,15 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
         });
         st.last_activity = Instant::now();
     }
+    if !resume {
+        // Admission: the item leaves the queue and becomes a user message.
+        let items = sh.lock().inbox.iter().map(InboxItem::view).collect();
+        sh.publish_logged(CoreEvent::InboxRemoved {
+            item_id: item.id.clone(),
+            items,
+        });
+        sh.publish_logged(admitted(&item));
+    }
     if let Err(d) = journal.claim_turn(&sh.id, &turn_id) {
         tracing::error!(incident_id = %d.incident_id, "claim_turn failed");
     }
@@ -445,6 +568,7 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
         turn_id: turn_id.clone(),
         item_id: item.id.clone(),
         resume,
+        message_id: (!resume).then(|| item.message_id.clone()),
     });
 
     let ctx = TurnCtx {
@@ -500,10 +624,7 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
         ids
     };
     for ask_id in orphaned {
-        sh.publish_logged(CoreEvent::AskResolved {
-            ask_id,
-            outcome: AskOutcome::Cancelled,
-        });
+        sh.publish_logged(cancelled_ask(ask_id));
     }
 
     if let Err(d) = journal.settle_turn(&sh.id, &turn_id, finish) {
@@ -517,11 +638,34 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
     if finish == TurnFinish::Interrupted {
         sh.publish_logged(CoreEvent::TurnInterrupted {
             turn_id: turn_id.clone(),
+            crash: false,
         });
         sh.lock().interrupted_turn = Some(turn_id);
         sh.set_status(LiveStatus::Interrupted);
     } else {
         sh.set_status(LiveStatus::Idle);
+    }
+}
+
+fn admitted(item: &InboxItem) -> CoreEvent {
+    CoreEvent::Wire {
+        event: Box::new(SessionEvent::MessageAdmitted(wire::MessageAdmitted {
+            message_id: item.message_id.clone(),
+            parent_id: None,
+            role: Role::User,
+            parts: item.parts.clone(),
+            delivery: item.delivery,
+            source: item.source(),
+        })),
+    }
+}
+
+fn cancelled_ask(ask_id: AskId) -> CoreEvent {
+    CoreEvent::AskResolved {
+        ask_id,
+        outcome: AskOutcome::Cancelled,
+        decision: Some(Decision::Cancel),
+        by: Some(ResolvedBy::Auto(AutoResolver::System)),
     }
 }
 
@@ -552,19 +696,22 @@ impl TurnCtx {
     /// Call between steps (after the step's tool calls are joined). Returns the steer
     /// items to inject as user messages, in inbox order (01 §5.2).
     pub fn step_boundary(&self) -> Vec<InboxItem> {
-        let taken: Vec<InboxItem> = {
-            let mut st = self.sh.lock();
-            let (steer, rest): (VecDeque<_>, VecDeque<_>) = st.inbox.drain(..).partition(|i| {
-                i.delivery == Delivery::Steer && !matches!(i.kind, InboxKind::Resume { .. })
-            });
-            st.inbox = rest;
-            steer.into()
-        };
+        let mut st = self.sh.lock();
+        let (steer, rest): (VecDeque<_>, VecDeque<_>) = st.inbox.drain(..).partition(|i| {
+            i.delivery == Delivery::Steer && !matches!(i.kind, InboxKind::Resume { .. })
+        });
+        st.inbox = rest;
+        let taken: Vec<InboxItem> = steer.into();
         if !taken.is_empty() {
+            let items = st.inbox.iter().map(InboxItem::view).collect();
             self.sh.publish_logged(CoreEvent::SteerInjected {
                 turn_id: self.turn_id.clone(),
                 item_ids: taken.iter().map(|i| i.id.clone()).collect(),
+                items,
             });
+            for i in &taken {
+                self.sh.publish_logged(admitted(i));
+            }
         }
         taken
     }
@@ -579,34 +726,89 @@ impl TurnCtx {
         }
     }
 
-    /// Ephemeral live text (token deltas).
+    /// Ephemeral live text (token deltas) for no particular part.
     pub fn emit_delta(&self, text: impl Into<String>) {
-        self.sh
+        self.emit_part_delta(String::new(), text);
+    }
+
+    /// Ephemeral text delta of a streamed part (`part.delta`).
+    pub fn emit_part_delta(&self, part_id: impl Into<String>, text: impl Into<String>) {
+        self.sh.deps.bus.publish_ephemeral(
+            &self.session_id,
+            CoreEvent::Delta {
+                text: text.into(),
+                part_id: part_id.into(),
+            },
+        );
+    }
+
+    /// Publish a durable wire event (`part.started`, `tool.ended`, …). Returns its seq.
+    pub fn publish(&self, event: SessionEvent) -> Result<u64, TurnError> {
+        let env = self
+            .sh
             .deps
             .bus
-            .publish_ephemeral(&self.session_id, CoreEvent::Delta { text: text.into() });
+            .publish(
+                &self.session_id,
+                CoreEvent::Wire {
+                    event: Box::new(event),
+                },
+            )
+            .map_err(TurnError::Internal)?;
+        Ok(env.seq.unwrap_or(0))
+    }
+
+    /// Publish an ephemeral wire event (`tool.progress`, `usage.updated`, …).
+    pub fn publish_ephemeral(&self, event: SessionEvent) {
+        self.sh.deps.bus.publish_ephemeral(
+            &self.session_id,
+            CoreEvent::Wire {
+                event: Box::new(event),
+            },
+        );
     }
 
     /// Ask the user. The wait is a `oneshot` raced against the turn token (01 §6).
     /// With no client attached the session shows as `Paused` and an OS notification is
     /// raised; the ask can be answered later from any client.
     pub async fn ask(&self, kind: AskKind) -> Result<Value, TurnError> {
-        let ask_id = new_id("ask");
+        self.ask_with(Ask::new("", "", kind, "")).await
+    }
+
+    /// Ask with a full [`Ask`] (tool, preview, form …). `id`, `session_id`, `turn_id`
+    /// and `created_at` are filled in when empty. The answer is an [`AskAnswer`] value
+    /// when it came from a client.
+    pub async fn ask_with(&self, mut ask: Ask) -> Result<Value, TurnError> {
+        if ask.id.is_empty() {
+            ask.id = new_id("ask");
+        }
+        ask.session_id.clone_from(&self.session_id);
+        ask.turn_id = Some(self.turn_id.clone());
+        if ask.created_at.is_empty() {
+            ask.created_at = genie_protocol::rfc3339_ms(now_ms());
+        }
+        let ask_id = ask.id.clone();
+        let kind = ask.kind;
         let (tx, rx) = oneshot::channel();
-        self.sh.lock().asks.insert(
-            ask_id.clone(),
-            PendingAsk {
-                turn_id: self.turn_id.clone(),
-                tx,
-            },
-        );
-        self.sh
-            .publish(CoreEvent::AskCreated {
+        // Insert and publish under one lock so `permission.pending` and the event agree.
+        let published = {
+            let mut st = self.sh.lock();
+            st.asks.insert(
+                ask_id.clone(),
+                PendingAsk {
+                    turn_id: self.turn_id.clone(),
+                    ask: ask.clone(),
+                    tx,
+                },
+            );
+            self.sh.publish(CoreEvent::AskCreated {
                 ask_id: ask_id.clone(),
                 turn_id: self.turn_id.clone(),
                 kind,
+                ask: Some(Box::new(ask)),
             })
-            .map_err(TurnError::Internal)?;
+        };
+        published.map_err(TurnError::Internal)?;
         if self.sh.subscribers.load(Ordering::SeqCst) == 0 {
             self.sh.set_status(LiveStatus::Paused);
             self.sh
@@ -623,10 +825,7 @@ impl TurnCtx {
         };
 
         if res.is_err() && self.sh.lock().asks.remove(&ask_id).is_some() {
-            self.sh.publish_logged(CoreEvent::AskResolved {
-                ask_id,
-                outcome: AskOutcome::Cancelled,
-            });
+            self.sh.publish_logged(cancelled_ask(ask_id));
         }
         if !self.token().is_cancelled() && self.sh.lock().asks.is_empty() {
             self.sh.set_status(LiveStatus::Running);

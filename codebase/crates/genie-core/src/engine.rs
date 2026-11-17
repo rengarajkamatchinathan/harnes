@@ -165,6 +165,18 @@ impl Engine {
         h
     }
 
+    /// The actor for `id` if it is loaded (no journal access, no spawn).
+    pub fn loaded(&self, id: &str) -> Option<SessionHandle> {
+        self.sessions().get(id).cloned()
+    }
+
+    /// Close and drop the actor for `id` (`session.delete`).
+    pub fn close_session(&self, id: &str) {
+        if let Some(h) = self.sessions().remove(id) {
+            h.close();
+        }
+    }
+
     /// Get the actor for `id`, creating it on first subscribe or prompt (01 §5.5).
     pub fn session(&self, id: &str) -> Result<SessionHandle, Defect> {
         if let Some(h) = self.sessions().get(id) {
@@ -204,6 +216,7 @@ impl Engine {
                 session,
                 CoreEvent::TurnInterrupted {
                     turn_id: turn.clone(),
+                    crash: true,
                 },
             )?;
             tracing::info!(session_id = %session, turn_id = %turn, "turn interrupted by daemon restart");

@@ -48,6 +48,10 @@ pub trait Journal: Send + Sync + 'static {
     fn last_turn(&self, session: &str) -> Result<Option<TurnRecord>, Defect>;
     /// Every session whose latest turn is still claimed (scanned on daemon start).
     fn unsettled_claims(&self) -> Result<Vec<(SessionId, TurnId)>, Defect>;
+    /// `log_floor_seq` (02 §9): durable events up to here were pruned. 0 = none.
+    fn log_floor(&self, _session: &str) -> Result<u64, Defect> {
+        Ok(0)
+    }
 }
 
 #[derive(Default)]

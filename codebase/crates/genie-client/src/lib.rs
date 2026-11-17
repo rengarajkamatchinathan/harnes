@@ -8,9 +8,11 @@ pub mod connection;
 pub mod endpoint;
 pub mod ensure;
 pub mod framing;
+pub mod stream;
 #[cfg(windows)]
 pub mod win;
 
 pub use connection::{ClientError, ClientInfo, Connection, Incoming};
 pub use endpoint::{Address, Endpoint};
 pub use ensure::{EnsureOptions, EnsureOutcome, EnsureState, ensure};
+pub use stream::{Action, SessionTracker};

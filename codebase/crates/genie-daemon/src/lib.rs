@@ -9,7 +9,9 @@
 //! * Version skew (01 §4.2), idle exit after 10 min (01 §4.3, SA-01), clean shutdown,
 //!   crash recovery via execution claims, standalone lease mode (01 §4.4).
 
+mod lease;
 mod listener;
+mod registry;
 mod server;
 mod token;
 
@@ -22,7 +24,12 @@ use std::time::Duration;
 use genie_client::Endpoint;
 use genie_core::{Engine, EngineBuilder, TaskScope};
 
+pub use lease::LEASE_GRACE;
 pub use server::{DaemonState, ShutdownReason, serve_stream};
+
+/// Per-subscription outbound queue bound (02 §3.1, SA-10).
+pub const SUB_QUEUE_MAX_BYTES: usize = 8 * 1024 * 1024;
+pub const SUB_QUEUE_MAX_MSGS: usize = 20_000;
 
 /// 01 §4.3, SA-01.
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -41,6 +48,11 @@ pub struct DaemonConfig {
     /// Standalone (01 §4.4): exit when stdin reaches EOF (the parent's lease).
     pub lease_on_stdin: bool,
     pub write_logs: bool,
+    /// Driver lease reconnect grace (02 §5, SA-11).
+    pub lease_grace: Duration,
+    /// Subscription queue bounds (SA-10).
+    pub sub_queue_max_bytes: usize,
+    pub sub_queue_max_msgs: usize,
 }
 
 impl DaemonConfig {
@@ -52,6 +64,9 @@ impl DaemonConfig {
             idle_timeout: IDLE_TIMEOUT,
             lease_on_stdin: false,
             write_logs: true,
+            lease_grace: LEASE_GRACE,
+            sub_queue_max_bytes: SUB_QUEUE_MAX_BYTES,
+            sub_queue_max_msgs: SUB_QUEUE_MAX_MSGS,
         }
     }
 }

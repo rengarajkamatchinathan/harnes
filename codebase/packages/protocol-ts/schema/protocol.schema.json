@@ -1,0 +1,6416 @@
+{
+  "$defs": {
+    "Activity": {
+      "description": "What the turn is doing right now (spinner text).",
+      "enum": [
+        "thinking",
+        "retrying",
+        "compacting",
+        "interrupting",
+        "waiting_for_children",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "Annotations": {
+      "properties": {
+        "destructive_hint": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "read_only_hint": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ApproveDecision": {
+      "enum": [
+        "approve",
+        "skip",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ApproveDefinitionParams": {
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/ApproveDecision"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DefinitionKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind",
+        "name",
+        "hash",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "ArtifactGetParams": {
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "n": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "n"
+      ],
+      "type": "object"
+    },
+    "ArtifactGetResult": {
+      "properties": {
+        "blob_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "title"
+      ],
+      "type": "object"
+    },
+    "ArtifactListParams": {
+      "properties": {
+        "leaf_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "ArtifactListResult": {
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifacts"
+      ],
+      "type": "object"
+    },
+    "ArtifactSummary": {
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "versions": {
+          "description": "Version numbers on the active path.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "type",
+        "title",
+        "versions"
+      ],
+      "type": "object"
+    },
+    "ArtifactVersioned": {
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "n": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "n",
+        "message_id",
+        "type",
+        "title"
+      ],
+      "type": "object"
+    },
+    "Ask": {
+      "properties": {
+        "annotations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Annotations"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "MCP hints; informational only, never trusted for decisions (t13)."
+        },
+        "browser": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BrowserConfirm"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "form": {
+          "description": "JSON Schema of the form to fill."
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/AskKind"
+        },
+        "preview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Preview"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sampling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SamplingInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "save_suggestions": {
+          "items": {
+            "$ref": "#/$defs/SaveSuggestion"
+          },
+          "type": "array"
+        },
+        "sensitive_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "subagent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubagentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Labels prompts raised by a subagent (D47)."
+        },
+        "tool": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "session_id",
+        "kind",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "AskAnswer": {
+      "description": "The answer to an ask: the result of the `permission.ask` request, and the body of\n`permission.respond` (minus `ask_id`).",
+      "properties": {
+        "data": {
+          "description": "Elicitation / question form values."
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "message": {
+          "description": "`reject` with a message sends it to the model as feedback (02 §7 step 5).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuleScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where to save an `always` rule."
+        }
+      },
+      "required": [
+        "decision"
+      ],
+      "type": "object"
+    },
+    "AskKind": {
+      "description": "Ask kinds a client can render (02 §7).",
+      "enum": [
+        "permission",
+        "elicitation",
+        "sampling",
+        "question",
+        "browser_confirm",
+        "definition_hash",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "AskParams": {
+      "description": "Daemon → client request `permission.ask`; the result is an [`AskAnswer`].",
+      "properties": {
+        "ask": {
+          "$ref": "#/$defs/Ask"
+        }
+      },
+      "required": [
+        "ask"
+      ],
+      "type": "object"
+    },
+    "AuthUrlResult": {
+      "properties": {
+        "auth_url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "auth_url"
+      ],
+      "type": "object"
+    },
+    "AutoResolver": {
+      "oneOf": [
+        {
+          "enum": [
+            "rule",
+            "hook",
+            "policy",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "system",
+          "description": "The turn ended (interrupt, failure) while the ask was open: resolved as `cancel`.",
+          "type": "string"
+        }
+      ]
+    },
+    "BlobGetParams": {
+      "properties": {
+        "blob_id": {
+          "type": "string"
+        },
+        "len": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "blob_id",
+        "offset",
+        "len"
+      ],
+      "type": "object"
+    },
+    "BlobGetResult": {
+      "properties": {
+        "data_b64": {
+          "type": "string"
+        },
+        "size": {
+          "description": "Total blob size, so readers know when to stop.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "data_b64",
+        "size"
+      ],
+      "type": "object"
+    },
+    "BlobIdParams": {
+      "properties": {
+        "blob_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blob_id"
+      ],
+      "type": "object"
+    },
+    "BlobMimeResult": {
+      "properties": {
+        "blob_id": {
+          "type": "string"
+        },
+        "mime": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blob_id",
+        "mime"
+      ],
+      "type": "object"
+    },
+    "BlobPutBeginParams": {
+      "properties": {
+        "mime": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size"
+      ],
+      "type": "object"
+    },
+    "BlobPutChunkParams": {
+      "properties": {
+        "data_b64": {
+          "type": "string"
+        },
+        "offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "upload_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id",
+        "offset",
+        "data_b64"
+      ],
+      "type": "object"
+    },
+    "BlobPutPathParams": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "BlobPutResult": {
+      "properties": {
+        "blob_id": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blob_id",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "BranchSwitched": {
+      "properties": {
+        "active_leaf_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "active_leaf_id"
+      ],
+      "type": "object"
+    },
+    "BrowserAction": {
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        },
+        "thumbnail_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tab_id",
+        "tool",
+        "origin",
+        "decision",
+        "status"
+      ],
+      "type": "object"
+    },
+    "BrowserConfirm": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "screenshot_blob": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin",
+        "action",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "BrowserFrame": {
+      "description": "Screencast frame (02 §6.6).",
+      "properties": {
+        "device_scale": {
+          "format": "double",
+          "type": "number"
+        },
+        "frame_seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "h": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "jpeg_b64": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "w": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stream_id",
+        "frame_seq",
+        "tab_id",
+        "jpeg_b64",
+        "w",
+        "h",
+        "device_scale",
+        "ts"
+      ],
+      "type": "object"
+    },
+    "BrowserInputParams": {
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/InputEvent"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id",
+        "event"
+      ],
+      "type": "object"
+    },
+    "BrowserKind": {
+      "enum": [
+        "chrome",
+        "edge",
+        "chromium",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "BrowserStatus": {
+      "properties": {
+        "installed": {
+          "items": {
+            "$ref": "#/$defs/InstalledBrowser"
+          },
+          "type": "array"
+        },
+        "profile_path": {
+          "type": "string"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "installed",
+        "running",
+        "profile_path"
+      ],
+      "type": "object"
+    },
+    "BudgetSetParams": {
+      "properties": {
+        "monthly_usd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CancelRequest": {
+      "description": "`$/cancelRequest`: the daemon withdraws a request it sent (e.g. an ask answered\nelsewhere, or the lease moved).",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "CatalogSource": {
+      "enum": [
+        "bundled",
+        "cached",
+        "fresh",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "CatalogStatus": {
+      "properties": {
+        "etag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fetched_at": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogSource"
+        }
+      },
+      "required": [
+        "source",
+        "fetched_at"
+      ],
+      "type": "object"
+    },
+    "CatalogUpdated": {
+      "description": "`catalog.updated`.",
+      "properties": {
+        "fetched_at": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogSource"
+        }
+      },
+      "required": [
+        "source",
+        "fetched_at"
+      ],
+      "type": "object"
+    },
+    "Channel": {
+      "description": "A release stream. Each channel has its own binaries, data dir, socket and DB (D40).",
+      "enum": [
+        "stable",
+        "beta",
+        "dev"
+      ],
+      "type": "string"
+    },
+    "CheckStatus": {
+      "enum": [
+        "ok",
+        "warn",
+        "fail",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "CheckpointCreated": {
+      "properties": {
+        "after_tree": {
+          "type": "string"
+        },
+        "before_tree": {
+          "type": "string"
+        },
+        "skipped": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "step_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_ref",
+        "before_tree",
+        "after_tree"
+      ],
+      "type": "object"
+    },
+    "CheckpointEntry": {
+      "properties": {
+        "files_changed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "files_changed"
+      ],
+      "type": "object"
+    },
+    "CheckpointListResult": {
+      "properties": {
+        "checkpoints": {
+          "items": {
+            "$ref": "#/$defs/CheckpointEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "checkpoints"
+      ],
+      "type": "object"
+    },
+    "CheckpointParams": {
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "restore": {
+          "$ref": "#/$defs/RestoreWhat"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "message_id",
+        "restore"
+      ],
+      "type": "object"
+    },
+    "CheckpointPreview": {
+      "properties": {
+        "external_changes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/FileChange"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files",
+        "external_changes",
+        "skipped"
+      ],
+      "type": "object"
+    },
+    "Citation": {
+      "description": "A citation span on a text part (D36).",
+      "properties": {
+        "end": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "description": "Chat citation (`chat_search`): the cited session/message.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "ClearWhat": {
+      "enum": [
+        "cookies",
+        "all",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ClientCapabilities": {
+      "properties": {
+        "asks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AskKind"
+          },
+          "type": "array"
+        },
+        "notifications": {
+          "default": false,
+          "type": "boolean"
+        },
+        "screencast": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "terminal": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ClientKind": {
+      "enum": [
+        "desktop",
+        "cli",
+        "headless"
+      ],
+      "type": "string"
+    },
+    "ClientRef": {
+      "description": "A client as named in leases, ask resolutions and `daemon.status` (02 §5).",
+      "properties": {
+        "client_instance_id": {
+          "type": "string"
+        },
+        "client_kind": {
+          "$ref": "#/$defs/ClientKind"
+        },
+        "label": {
+          "description": "Human label shown on the \"Take over\" banner, e.g. \"Desktop\" or \"CLI (pid 4211)\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "client_instance_id",
+        "client_kind"
+      ],
+      "type": "object"
+    },
+    "CommitThen": {
+      "enum": [
+        "push",
+        "pr",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "CompactParams": {
+      "properties": {
+        "focus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "ConfigChanged": {
+      "description": "`config.changed`.",
+      "properties": {
+        "keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        }
+      },
+      "required": [
+        "keys",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ConfigDiagnosticsResult": {
+      "properties": {
+        "problems": {
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "problems"
+      ],
+      "type": "object"
+    },
+    "ConfigGetParams": {
+      "properties": {
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfigScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ConfigGetResult": {
+      "properties": {
+        "locked": {
+          "description": "Keys locked by managed policy (D38).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ConfigSource"
+          },
+          "type": "object"
+        },
+        "values": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "values",
+        "sources",
+        "locked"
+      ],
+      "type": "object"
+    },
+    "ConfigSchemaResult": {
+      "description": "JSON Schema of the config plus Settings UI metadata (D23, D34).",
+      "properties": {
+        "schema": true,
+        "ui": {
+          "default": null
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "type": "object"
+    },
+    "ConfigScope": {
+      "description": "Config write scopes (D23). `policy` is only ever a *source*, never a target.",
+      "enum": [
+        "user",
+        "project",
+        "local",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ConfigSetParams": {
+      "properties": {
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        },
+        "value": true
+      },
+      "required": [
+        "key",
+        "value",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ConfigSource": {
+      "description": "Where a config value came from.",
+      "enum": [
+        "default",
+        "user",
+        "project",
+        "local",
+        "policy",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ConnectedClient": {
+      "description": "One connected client as `daemon.status` reports it.",
+      "properties": {
+        "client_instance_id": {
+          "type": "string"
+        },
+        "client_kind": {
+          "$ref": "#/$defs/ClientKind"
+        },
+        "client_version": {
+          "type": "string"
+        },
+        "connection_id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "degraded": {
+          "default": false,
+          "description": "Served in degraded mode because the daemon is older and busy (01 §4.2).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "connection_id",
+        "client_kind",
+        "client_version",
+        "client_instance_id"
+      ],
+      "type": "object"
+    },
+    "Cost": {
+      "description": "Cost in US dollars, as estimated from the catalog prices (D27).",
+      "properties": {
+        "usd": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "usd"
+      ],
+      "type": "object"
+    },
+    "CreateParams": {
+      "properties": {
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "incognito": {
+          "default": false,
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktree": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorktreeChoice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "model"
+      ],
+      "type": "object"
+    },
+    "CreateResult": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "CredentialAddParams": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CredentialKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "secret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "label",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "CredentialAddResult": {
+      "properties": {
+        "credential_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_id"
+      ],
+      "type": "object"
+    },
+    "CredentialIdParams": {
+      "properties": {
+        "credential_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_id"
+      ],
+      "type": "object"
+    },
+    "CredentialInfo": {
+      "description": "Never contains the secret itself.",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "credential_id": {
+          "type": "string"
+        },
+        "hint": {
+          "description": "Last 4 characters of a key, or the account name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CredentialKind"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_id",
+        "label",
+        "kind",
+        "active"
+      ],
+      "type": "object"
+    },
+    "CredentialKind": {
+      "enum": [
+        "key",
+        "oauth",
+        "external",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "CwdParams": {
+      "properties": {
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DaemonCapabilities": {
+      "properties": {
+        "features": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "DaemonRestartParams": {
+      "properties": {
+        "stop_running": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "DaemonRestartingParams": {
+      "description": "`daemon.restarting` notification (01 §4.2).",
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "DaemonStatus": {
+      "properties": {
+        "channel": {
+          "$ref": "#/$defs/Channel"
+        },
+        "clients": {
+          "items": {
+            "$ref": "#/$defs/ConnectedClient"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessions_running": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "socket": {
+          "type": "string"
+        },
+        "uptime_s": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "channel",
+        "uptime_s",
+        "pid",
+        "socket",
+        "sessions_running",
+        "clients"
+      ],
+      "type": "object"
+    },
+    "DataClearParams": {
+      "properties": {
+        "what": {
+          "$ref": "#/$defs/ClearWhat"
+        }
+      },
+      "required": [
+        "what"
+      ],
+      "type": "object"
+    },
+    "Decision": {
+      "enum": [
+        "once",
+        "always",
+        "reject",
+        "submit",
+        "cancel",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "DefinitionKind": {
+      "enum": [
+        "mcp",
+        "hook",
+        "setup",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "Delivery": {
+      "description": "How a prompt is delivered to a session (01 §5.2).",
+      "oneOf": [
+        {
+          "const": "steer",
+          "description": "Injected at the next step boundary of a running turn, or starts a turn if idle.",
+          "type": "string"
+        },
+        {
+          "const": "queue",
+          "description": "A new turn after the current turn settles.",
+          "type": "string"
+        }
+      ]
+    },
+    "Diagnostic": {
+      "description": "A config / trust diagnostic.",
+      "properties": {
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "severity",
+        "message"
+      ],
+      "type": "object"
+    },
+    "DiagnosticsParams": {
+      "properties": {
+        "include_logs": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "DiagnosticsResult": {
+      "description": "Sanitised; never contains prompt content (D34).",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "DirectoryEntry": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "extra": {
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "name",
+        "description"
+      ],
+      "type": "object"
+    },
+    "DirectoryInstallParams": {
+      "properties": {
+        "confirm": {
+          "default": false,
+          "description": "First call without it returns the \"what will run\" manifest; second call installs.",
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DirectoryKind"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "DirectoryInstallResult": {
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "manifest": {
+          "description": "Commands, URLs and permissions the entry will use."
+        }
+      },
+      "required": [
+        "installed",
+        "manifest"
+      ],
+      "type": "object"
+    },
+    "DirectoryKind": {
+      "enum": [
+        "connectors",
+        "skills",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "DirectoryListParams": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/DirectoryKind"
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "DirectoryListResult": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/DirectoryEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "DoctorCheck": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "fix_link": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "DoctorResult": {
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/DoctorCheck"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "checks"
+      ],
+      "type": "object"
+    },
+    "Empty": {
+      "description": "`{}` params or result. Unknown fields are ignored (02 §10).",
+      "type": "object"
+    },
+    "ErrorInfo": {
+      "description": "A user-facing error: stable code, message, optional fix link (01 §7).",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "link": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "ExportAllParams": {
+      "properties": {
+        "include_blobs": {
+          "default": false,
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "json",
+        "markdown",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ExportParams": {
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "sanitize": {
+          "default": false,
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "format"
+      ],
+      "type": "object"
+    },
+    "ExportResult": {
+      "description": "Either a blob (large exports) or inline text.",
+      "properties": {
+        "blob_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "FileChange": {
+      "properties": {
+        "change": {
+          "description": "`added` | `modified` | `deleted`.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "change"
+      ],
+      "type": "object"
+    },
+    "FileIdResult": {
+      "properties": {
+        "file_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_id"
+      ],
+      "type": "object"
+    },
+    "FileNode": {
+      "properties": {
+        "dir": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "dir"
+      ],
+      "type": "object"
+    },
+    "FilesReadResult": {
+      "properties": {
+        "blob_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "size"
+      ],
+      "type": "object"
+    },
+    "FilesTreeResult": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/FileNode"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "type": "object"
+    },
+    "ForkParams": {
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "message_id"
+      ],
+      "type": "object"
+    },
+    "GetParams": {
+      "properties": {
+        "leaf_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "GetResult": {
+      "properties": {
+        "path": {
+          "description": "Root → leaf.",
+          "items": {
+            "$ref": "#/$defs/Message"
+          },
+          "type": "array"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "siblings": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "For each message on the path with siblings: the sibling ids, in order.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "session",
+        "path",
+        "siblings"
+      ],
+      "type": "object"
+    },
+    "GitCommitParams": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "then": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitThen"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "message"
+      ],
+      "type": "object"
+    },
+    "GitCommitResult": {
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "pr_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "commit"
+      ],
+      "type": "object"
+    },
+    "GitStatusResult": {
+      "properties": {
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/FileChange"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "type": "object"
+    },
+    "HookRan": {
+      "properties": {
+        "decision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event": {
+          "type": "string"
+        },
+        "hook_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "hook_id",
+        "duration_ms"
+      ],
+      "type": "object"
+    },
+    "Id": {
+      "anyOf": [
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "Request id. Genie clients use numbers; strings are accepted for other tools."
+    },
+    "IdResult": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ImportParams": {
+      "description": "Importer (D53, 07 §5); the report shapes are owned by spec 07.",
+      "properties": {
+        "options": {
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "ImportResult": {
+      "properties": {
+        "report": true
+      },
+      "required": [
+        "report"
+      ],
+      "type": "object"
+    },
+    "InboxChanged": {
+      "description": "The queue shown above the composer: the full current list.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/InboxItemView"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "InboxItemView": {
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/Delivery"
+        },
+        "id": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "delivery",
+        "preview"
+      ],
+      "type": "object"
+    },
+    "InboxRemoveParams": {
+      "properties": {
+        "inbox_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "inbox_id"
+      ],
+      "type": "object"
+    },
+    "IndexMode": {
+      "enum": [
+        "full",
+        "retrieval",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "IndexStatus": {
+      "properties": {
+        "capacity_pct": {
+          "format": "double",
+          "type": "number"
+        },
+        "files": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "indexing": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/IndexMode"
+        },
+        "tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mode",
+        "files",
+        "tokens",
+        "capacity_pct",
+        "indexing"
+      ],
+      "type": "object"
+    },
+    "InitializeParams": {
+      "description": "Client → daemon; must be the first request on a connection.",
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/ClientCapabilities",
+          "default": {
+            "asks": [],
+            "notifications": false
+          }
+        },
+        "client_instance_id": {
+          "description": "Stable per app install/window; used for lease reclaim (02 §5).",
+          "type": "string"
+        },
+        "client_kind": {
+          "$ref": "#/$defs/ClientKind"
+        },
+        "client_version": {
+          "description": "Build version of the client.",
+          "type": "string"
+        },
+        "protocol": {
+          "description": "Semver of `genie-protocol` the client was built with.",
+          "type": "string"
+        },
+        "token": {
+          "description": "Contents of `daemon.token` (01 §1.2). Never logged.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "client_kind",
+        "client_version",
+        "client_instance_id",
+        "token"
+      ],
+      "type": "object"
+    },
+    "InitializeResult": {
+      "properties": {
+        "build": {
+          "type": "string"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/DaemonCapabilities",
+          "default": {
+            "features": []
+          }
+        },
+        "channel": {
+          "$ref": "#/$defs/Channel"
+        },
+        "engine_version": {
+          "type": "string"
+        },
+        "locked": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LockedInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "restart_pending": {
+          "description": "Version-skew path (01 §4.2): the daemon will drain and exit; re-run ensure.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "engine_version",
+        "build",
+        "channel",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "InputEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "action": {
+              "description": "`pressed` | `released` | `moved`.",
+              "type": "string"
+            },
+            "button": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "click_count": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "modifiers": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "mouse",
+              "type": "string"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "action",
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "action": {
+              "description": "`down` | `up` | `char`.",
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "modifiers": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "key",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "action",
+            "key",
+            "code"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "delta_x": {
+              "format": "double",
+              "type": "number"
+            },
+            "delta_y": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "wheel",
+              "type": "string"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "x",
+            "y",
+            "delta_x",
+            "delta_y"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "selection_end": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "selection_start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "text": {
+              "description": "Composition text; empty ends the composition.",
+              "type": "string"
+            },
+            "type": {
+              "const": "ime",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "selection_start",
+            "selection_end"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "insert_text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InputPart": {
+      "description": "What a client sends in `session.prompt` (02 §6.2).",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "blob_id": {
+              "type": "string"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "attachment",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "blob_id",
+            "name",
+            "mime"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An MCP resource (`@server:uri`).",
+          "properties": {
+            "server": {
+              "type": "string"
+            },
+            "type": {
+              "const": "resource",
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "server",
+            "uri"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "skill",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "const": "file_ref",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InstalledBrowser": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/BrowserKind"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "path"
+      ],
+      "type": "object"
+    },
+    "InterruptParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "stop_subagents": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "InterruptReason": {
+      "enum": [
+        "daemon_restart",
+        "crash",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "InterruptResult": {
+      "properties": {
+        "interrupted": {
+          "description": "False when no turn was running.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "interrupted"
+      ],
+      "type": "object"
+    },
+    "LeaseChanged": {
+      "properties": {
+        "driver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LeaseLost": {
+      "description": "`lease.lost` (02 §5): sent to the old driver on `take_over` or when the lease lapses.",
+      "properties": {
+        "new_driver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "LinesResult": {
+      "properties": {
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "lines"
+      ],
+      "type": "object"
+    },
+    "ListParams": {
+      "properties": {
+        "archived": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ListResult": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "ListedChange": {
+      "enum": [
+        "created",
+        "updated",
+        "deleted",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "LiveStatus": {
+      "description": "Ephemeral status reported live; a superset of [`SessionStatus`].",
+      "oneOf": [
+        {
+          "enum": [
+            "idle",
+            "running",
+            "awaiting_ask",
+            "compacting",
+            "interrupting",
+            "interrupted"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "paused",
+          "description": "`AwaitingAsk` with no client attached; an OS notification was raised.",
+          "type": "string"
+        }
+      ]
+    },
+    "LockedInfo": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "LoginMethod": {
+      "enum": [
+        "pkce",
+        "device_code",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "LoginStartParams": {
+      "properties": {
+        "method": {
+          "$ref": "#/$defs/LoginMethod"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "method"
+      ],
+      "type": "object"
+    },
+    "LoginStartResult": {
+      "properties": {
+        "auth_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "login_id": {
+          "type": "string"
+        },
+        "user_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verification_uri": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "login_id"
+      ],
+      "type": "object"
+    },
+    "LoginState": {
+      "enum": [
+        "pending",
+        "done",
+        "failed",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "LoginStatusParams": {
+      "properties": {
+        "login_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login_id"
+      ],
+      "type": "object"
+    },
+    "LoginStatusResult": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/LoginState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "McpAddParams": {
+      "properties": {
+        "config": {
+          "description": "Server definition as in `settings.json` `mcpServers` (D30)."
+        },
+        "name": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        }
+      },
+      "required": [
+        "scope",
+        "name",
+        "config"
+      ],
+      "type": "object"
+    },
+    "McpItemsResult": {
+      "description": "`mcp.tools` / `mcp.resources` / `mcp.prompts`: MCP's own list items, passed through.",
+      "properties": {
+        "items": {
+          "items": true,
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "McpListResult": {
+      "properties": {
+        "servers": {
+          "items": {
+            "$ref": "#/$defs/McpServerInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "servers"
+      ],
+      "type": "object"
+    },
+    "McpLogsParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "tail": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "tail"
+      ],
+      "type": "object"
+    },
+    "McpRemoveParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        }
+      },
+      "required": [
+        "scope",
+        "name"
+      ],
+      "type": "object"
+    },
+    "McpResourceReadParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "uri"
+      ],
+      "type": "object"
+    },
+    "McpServerInfo": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ConfigScope"
+        },
+        "status": {
+          "$ref": "#/$defs/McpStatus"
+        },
+        "tools": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "scope",
+        "tools"
+      ],
+      "type": "object"
+    },
+    "McpSetEnabledParams": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "McpStatus": {
+      "enum": [
+        "pending",
+        "connected",
+        "disabled",
+        "failed",
+        "needs_auth",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "McpStatusChanged": {
+      "description": "`mcp.status`.",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/McpStatus"
+        }
+      },
+      "required": [
+        "name",
+        "status"
+      ],
+      "type": "object"
+    },
+    "MemoryChanged": {
+      "properties": {
+        "memory_id": {
+          "type": "string"
+        },
+        "op": {
+          "description": "`add` | `update` | `delete`.",
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "memory_id",
+        "op",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "MemoryIdParams": {
+      "properties": {
+        "memory_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "memory_id"
+      ],
+      "type": "object"
+    },
+    "MemoryItem": {
+      "properties": {
+        "memory_id": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "memory_id",
+        "scope",
+        "text",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "MemoryListResult": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/MemoryItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "MemoryScopeParams": {
+      "properties": {
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MemorySetStateParams": {
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/MemoryState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "MemoryState": {
+      "enum": [
+        "on",
+        "paused",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "MemoryUpdateParams": {
+      "properties": {
+        "memory_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "memory_id",
+        "text"
+      ],
+      "type": "object"
+    },
+    "Message": {
+      "properties": {
+        "created_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/Part"
+          },
+          "type": "array"
+        },
+        "role": {
+          "$ref": "#/$defs/Role"
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "parts",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "MessageAdmitted": {
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/Delivery"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/InputPart"
+          },
+          "type": "array"
+        },
+        "role": {
+          "$ref": "#/$defs/Role",
+          "description": "Always `user`."
+        },
+        "source": {
+          "$ref": "#/$defs/MessageSource"
+        }
+      },
+      "required": [
+        "message_id",
+        "role",
+        "parts",
+        "delivery",
+        "source"
+      ],
+      "type": "object"
+    },
+    "MessageSource": {
+      "enum": [
+        "user",
+        "synthetic",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "Mode": {
+      "description": "Permission mode (D25, 06 §4).",
+      "enum": [
+        "default",
+        "accept_edits",
+        "plan",
+        "bypass",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ModelInfo": {
+      "description": "Model as merged from catalog + discovery + overrides (D27). The full catalog\nrecord lives in `extra` until spec 03 fixes the client-facing subset.",
+      "properties": {
+        "context_window": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "effort_levels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "extra": {
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ModelListParams": {
+      "properties": {
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelListResult": {
+      "properties": {
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ModelInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "models"
+      ],
+      "type": "object"
+    },
+    "NameParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "OkResult": {
+      "description": "`{ok: true}`.",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "type": "object"
+    },
+    "Part": {
+      "description": "A stored message part, final value (`part.ended`).",
+      "oneOf": [
+        {
+          "properties": {
+            "citations": {
+              "items": {
+                "$ref": "#/$defs/Citation"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "redacted": {
+              "default": false,
+              "type": "boolean"
+            },
+            "text": {
+              "default": "",
+              "description": "Readable summary; may be empty when the provider only returns opaque data.",
+              "type": "string"
+            },
+            "type": {
+              "const": "reasoning",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "input": true,
+            "name": {
+              "type": "string"
+            },
+            "provider_executed": {
+              "default": false,
+              "description": "Server-side tool (web search, code execution) run by the provider (D36).",
+              "type": "boolean"
+            },
+            "type": {
+              "const": "tool_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "call_id",
+            "name",
+            "input"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "content": {
+              "description": "Text, JSON or rich parts; spilled results carry `spill_ref` instead (D32)."
+            },
+            "id": {
+              "type": "string"
+            },
+            "is_error": {
+              "default": false,
+              "type": "boolean"
+            },
+            "spill_ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "tool_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "call_id",
+            "content"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "blob_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "media",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "blob_id",
+            "mime"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Compaction boundary (D33): our summary text, or a provider checkpoint.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "native": {
+              "default": false,
+              "type": "boolean"
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "compaction",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A part type this client does not know (02 §10).",
+          "properties": {
+            "type": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PartDelta": {
+      "properties": {
+        "json": {
+          "description": "Tool-input JSON fragment.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "part_id": {
+          "type": "string"
+        },
+        "text": {
+          "description": "Text / reasoning delta.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "part_id"
+      ],
+      "type": "object"
+    },
+    "PartEnded": {
+      "properties": {
+        "part": {
+          "$ref": "#/$defs/Part"
+        },
+        "part_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "part_id",
+        "part"
+      ],
+      "type": "object"
+    },
+    "PartKind": {
+      "description": "Which kind of streamed part a `part.started` opens.",
+      "enum": [
+        "text",
+        "reasoning",
+        "tool_call",
+        "tool_result",
+        "media",
+        "compaction",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "PartStarted": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PartKind"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "part_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "part_id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PathParams": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "PendingDefinition": {
+      "properties": {
+        "diff": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DefinitionKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "hash",
+        "diff"
+      ],
+      "type": "object"
+    },
+    "PendingDefinitionsResult": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/PendingDefinition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "PendingParams": {
+      "properties": {
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PendingResult": {
+      "properties": {
+        "asks": {
+          "items": {
+            "$ref": "#/$defs/Ask"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "asks"
+      ],
+      "type": "object"
+    },
+    "PermissionAsked": {
+      "properties": {
+        "ask": {
+          "$ref": "#/$defs/Ask"
+        }
+      },
+      "required": [
+        "ask"
+      ],
+      "type": "object"
+    },
+    "PermissionResolved": {
+      "properties": {
+        "ask_id": {
+          "type": "string"
+        },
+        "by": {
+          "$ref": "#/$defs/ResolvedBy"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "saved_rule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ask_id",
+        "decision",
+        "by"
+      ],
+      "type": "object"
+    },
+    "PolicyChanged": {
+      "description": "`policy.changed`.",
+      "properties": {
+        "keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "keys"
+      ],
+      "type": "object"
+    },
+    "PolicyEffectiveResult": {
+      "properties": {
+        "source_per_key": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "values": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "values",
+        "source_per_key"
+      ],
+      "type": "object"
+    },
+    "Preview": {
+      "description": "What the ask card shows for a permission ask.",
+      "oneOf": [
+        {
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "const": "diff",
+              "type": "string"
+            },
+            "unified": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "unified"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "url",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": true,
+            "server": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "const": "mcp_args",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "server",
+            "tool",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProjectCreateParams": {
+      "properties": {
+        "instructions": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "ProjectFileAddParams": {
+      "properties": {
+        "blob_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "blob_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ProjectFileRemoveParams": {
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "file_id"
+      ],
+      "type": "object"
+    },
+    "ProjectIdParams": {
+      "properties": {
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "ProjectIdResult": {
+      "properties": {
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "ProjectInfo": {
+      "properties": {
+        "instructions": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "starred": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "project_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ProjectListResult": {
+      "properties": {
+        "projects": {
+          "items": {
+            "$ref": "#/$defs/ProjectInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "projects"
+      ],
+      "type": "object"
+    },
+    "ProjectUpdateParams": {
+      "properties": {
+        "instructions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "starred": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "PromptParams": {
+      "properties": {
+        "client_msg_id": {
+          "description": "Idempotency key: a retry with the same id returns the first result.",
+          "type": "string"
+        },
+        "delivery": {
+          "$ref": "#/$defs/Delivery"
+        },
+        "parent_id": {
+          "description": "Edit = prompt with `parent_id` set to the edited message's parent (D24).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/InputPart"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "parts",
+        "delivery",
+        "client_msg_id"
+      ],
+      "type": "object"
+    },
+    "PromptResult": {
+      "properties": {
+        "inbox_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "inbox_id"
+      ],
+      "type": "object"
+    },
+    "ProviderInfo": {
+      "properties": {
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/CredentialInfo"
+          },
+          "type": "array"
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ProviderStatus"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "credentials"
+      ],
+      "type": "object"
+    },
+    "ProviderListResult": {
+      "properties": {
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/ProviderInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "providers"
+      ],
+      "type": "object"
+    },
+    "ProviderParams": {
+      "properties": {
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object"
+    },
+    "ProviderStatus": {
+      "enum": [
+        "ready",
+        "needs_auth",
+        "error",
+        "disabled",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ProviderStatusChanged": {
+      "description": "`provider.status`.",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ProviderStatus"
+        }
+      },
+      "required": [
+        "provider",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ProviderTestResult": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latency_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "latency_ms"
+      ],
+      "type": "object"
+    },
+    "RegenerateParams": {
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "message_id"
+      ],
+      "type": "object"
+    },
+    "ResolvedBy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClientRef"
+        },
+        {
+          "$ref": "#/$defs/AutoResolver"
+        }
+      ],
+      "description": "Who resolved an ask (`permission.resolved.by`): a client, or an automatic source."
+    },
+    "RespondParams": {
+      "description": "The answer to an ask: the result of the `permission.ask` request, and the body of\n`permission.respond` (minus `ask_id`).",
+      "properties": {
+        "ask_id": {
+          "type": "string"
+        },
+        "data": {
+          "description": "Elicitation / question form values."
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "message": {
+          "description": "`reject` with a message sends it to the model as feedback (02 §7 step 5).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuleScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where to save an `always` rule."
+        }
+      },
+      "required": [
+        "ask_id",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "RestoreWhat": {
+      "enum": [
+        "files",
+        "conversation",
+        "both",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ResyncRequired": {
+      "description": "`session.resync_required` (02 §3.1). With `snapshot`, reload with `session.get`\nand subscribe from its `head_seq`; otherwise re-subscribe with `after_seq = from_seq`.",
+      "properties": {
+        "from_seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "snapshot": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id",
+        "from_seq"
+      ],
+      "type": "object"
+    },
+    "RetryScheduled": {
+      "properties": {
+        "after_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error_class": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt",
+        "after_ms",
+        "error_class"
+      ],
+      "type": "object"
+    },
+    "Role": {
+      "enum": [
+        "user",
+        "assistant",
+        "system",
+        "tool",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "RuleScope": {
+      "description": "Scopes a saved permission rule can go to (t13).",
+      "enum": [
+        "session",
+        "local",
+        "user",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "SamplingInfo": {
+      "properties": {
+        "budget_left_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "est_cost_usd": {
+          "format": "double",
+          "type": "number"
+        },
+        "messages_preview": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "messages_preview",
+        "model",
+        "est_cost_usd",
+        "budget_left_tokens"
+      ],
+      "type": "object"
+    },
+    "SaveSuggestion": {
+      "properties": {
+        "rule": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/RuleScope"
+        }
+      },
+      "required": [
+        "rule",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ScreencastAckParams": {
+      "properties": {
+        "frame_seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream_id",
+        "frame_seq"
+      ],
+      "type": "object"
+    },
+    "ScreencastStartParams": {
+      "properties": {
+        "max_height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "quality": {
+          "description": "JPEG quality 1–100.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "max_width",
+        "max_height",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "SearchHit": {
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "snippet": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "message_id",
+        "snippet"
+      ],
+      "type": "object"
+    },
+    "SearchParams": {
+      "properties": {
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query": {
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SearchScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "SearchResult": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/SearchHit"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hits"
+      ],
+      "type": "object"
+    },
+    "SearchScope": {
+      "enum": [
+        "all",
+        "project",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "SessionCompacted": {
+      "properties": {
+        "compaction_message_id": {
+          "type": "string"
+        },
+        "native": {
+          "type": "boolean"
+        },
+        "tokens_after": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tokens_before": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trigger": {
+          "description": "`auto` | `manual` | `overflow`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "compaction_message_id",
+        "trigger",
+        "tokens_before",
+        "tokens_after",
+        "native"
+      ],
+      "type": "object"
+    },
+    "SessionCreated": {
+      "properties": {
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "model": {
+          "type": "string"
+        },
+        "parent_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "model",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "SessionError": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "link": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "SessionEvent": {
+      "description": "02 §4. Discriminated by `type`.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SessionCreated",
+          "properties": {
+            "type": {
+              "const": "session.created",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SessionUpdated",
+          "properties": {
+            "type": {
+              "const": "session.updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/MessageAdmitted",
+          "properties": {
+            "type": {
+              "const": "message.admitted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/InboxChanged",
+          "properties": {
+            "type": {
+              "const": "inbox.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/TurnStarted",
+          "properties": {
+            "type": {
+              "const": "turn.started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/StepStarted",
+          "properties": {
+            "type": {
+              "const": "step.started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PartStarted",
+          "properties": {
+            "type": {
+              "const": "part.started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PartEnded",
+          "properties": {
+            "type": {
+              "const": "part.ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ToolStarted",
+          "properties": {
+            "type": {
+              "const": "tool.started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ToolEnded",
+          "properties": {
+            "type": {
+              "const": "tool.ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PermissionAsked",
+          "properties": {
+            "type": {
+              "const": "permission.asked",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PermissionResolved",
+          "properties": {
+            "type": {
+              "const": "permission.resolved",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/StepEnded",
+          "properties": {
+            "type": {
+              "const": "step.ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/RetryScheduled",
+          "properties": {
+            "type": {
+              "const": "retry.scheduled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/TurnSettled",
+          "properties": {
+            "type": {
+              "const": "turn.settled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/TurnInterrupted",
+          "properties": {
+            "type": {
+              "const": "turn.interrupted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SessionCompacted",
+          "properties": {
+            "type": {
+              "const": "session.compacted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ArtifactVersioned",
+          "properties": {
+            "type": {
+              "const": "artifact.versioned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/MemoryChanged",
+          "properties": {
+            "type": {
+              "const": "memory.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SubagentStarted",
+          "properties": {
+            "type": {
+              "const": "subagent.started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SubagentEnded",
+          "properties": {
+            "type": {
+              "const": "subagent.ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/CheckpointCreated",
+          "properties": {
+            "type": {
+              "const": "checkpoint.created",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BranchSwitched",
+          "properties": {
+            "type": {
+              "const": "branch.switched",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/LeaseChanged",
+          "properties": {
+            "type": {
+              "const": "lease.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BrowserAction",
+          "properties": {
+            "type": {
+              "const": "browser.action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/HookRan",
+          "properties": {
+            "type": {
+              "const": "hook.ran",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/SessionError",
+          "properties": {
+            "type": {
+              "const": "session.error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PartDelta",
+          "properties": {
+            "type": {
+              "const": "part.delta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ToolProgress",
+          "properties": {
+            "type": {
+              "const": "tool.progress",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/UsageUpdated",
+          "properties": {
+            "type": {
+              "const": "usage.updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/StatusEvent",
+          "properties": {
+            "type": {
+              "const": "status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BrowserFrame",
+          "properties": {
+            "type": {
+              "const": "browser.frame",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/TerminalOutput",
+          "properties": {
+            "type": {
+              "const": "terminal.output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An event type from a newer daemon. Skip it.",
+          "properties": {
+            "type": {
+              "const": "Unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SessionEventEnvelope": {
+      "description": "02 §3.3.",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/SessionEvent"
+        },
+        "ref_seq": {
+          "description": "Ephemeral only.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "seq": {
+          "description": "Durable only.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "step": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "subagent_of": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ts": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "ts",
+        "event"
+      ],
+      "type": "object"
+    },
+    "SessionIdParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionInfo": {
+      "description": "Full session record (`session.get`).",
+      "properties": {
+        "active_leaf_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archived": {
+          "default": false,
+          "type": "boolean"
+        },
+        "created_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "driver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "head_seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "incognito": {
+          "default": false,
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "model": {
+          "type": "string"
+        },
+        "parent_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/LiveStatus"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "kind",
+        "status",
+        "updated_at",
+        "model",
+        "mode",
+        "head_seq",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "SessionKind": {
+      "description": "Session kind: Chat or Code mode (D54).",
+      "enum": [
+        "chat",
+        "code",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "SessionListed": {
+      "description": "`session.listed`.",
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/ListedChange"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionSummary"
+        }
+      },
+      "required": [
+        "change",
+        "session"
+      ],
+      "type": "object"
+    },
+    "SessionPathParams": {
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionSummary": {
+      "description": "One row in the session list (02 §6.2, workspace feed).",
+      "properties": {
+        "archived": {
+          "default": false,
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKind"
+        },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/LiveStatus"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "kind",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "SessionSynced": {
+      "description": "`session.synced`: replay done, live from here (02 §3.1).",
+      "properties": {
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq"
+      ],
+      "type": "object"
+    },
+    "SessionUpdated": {
+      "description": "Only the changed fields are present.",
+      "properties": {
+        "active_leaf_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archived": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinned": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "error",
+        "warning",
+        "info",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "SitePermission": {
+      "properties": {
+        "origin": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/SiteState"
+        }
+      },
+      "required": [
+        "origin",
+        "state"
+      ],
+      "type": "object"
+    },
+    "SiteState": {
+      "enum": [
+        "blocked",
+        "ask",
+        "read",
+        "act",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "SitesListResult": {
+      "properties": {
+        "sites": {
+          "items": {
+            "$ref": "#/$defs/SitePermission"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sites"
+      ],
+      "type": "object"
+    },
+    "SkillInfo": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "enabled",
+        "source"
+      ],
+      "type": "object"
+    },
+    "SkillListResult": {
+      "properties": {
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "skills"
+      ],
+      "type": "object"
+    },
+    "SkillSetEnabledParams": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "StatusEvent": {
+      "description": "Live status. `state` is the session state machine (01 §5.1); `activity` the finer\nspinner state of 02 §4.2.",
+      "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Activity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/LiveStatus"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "StepEnded": {
+      "properties": {
+        "cost": {
+          "$ref": "#/$defs/Cost"
+        },
+        "finish": {
+          "$ref": "#/$defs/StepFinish"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "required": [
+        "finish",
+        "usage",
+        "cost"
+      ],
+      "type": "object"
+    },
+    "StepFinish": {
+      "enum": [
+        "stop",
+        "tool_use",
+        "length",
+        "content_filter",
+        "error",
+        "cancelled",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "StepStarted": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "route": {
+          "description": "Provider route, e.g. `anthropic/default`.",
+          "type": "string"
+        },
+        "step": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "step",
+        "model",
+        "route"
+      ],
+      "type": "object"
+    },
+    "StreamIdParams": {
+      "properties": {
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream_id"
+      ],
+      "type": "object"
+    },
+    "StreamIdResult": {
+      "properties": {
+        "stream_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream_id"
+      ],
+      "type": "object"
+    },
+    "SubagentEnded": {
+      "properties": {
+        "child_session_id": {
+          "type": "string"
+        },
+        "cost": {
+          "$ref": "#/$defs/Cost"
+        },
+        "status": {
+          "$ref": "#/$defs/TurnStatus"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "child_session_id",
+        "status",
+        "cost"
+      ],
+      "type": "object"
+    },
+    "SubagentRef": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "agent"
+      ],
+      "type": "object"
+    },
+    "SubagentStarted": {
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "child_session_id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "child_session_id",
+        "agent",
+        "description"
+      ],
+      "type": "object"
+    },
+    "SubscribeParams": {
+      "properties": {
+        "after_seq": {
+          "description": "Omit to replay from the start of the retained log.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SubscribeResult": {
+      "properties": {
+        "driver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "head_seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/LiveStatus"
+        }
+      },
+      "required": [
+        "head_seq",
+        "status"
+      ],
+      "type": "object"
+    },
+    "TabActivateParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id"
+      ],
+      "type": "object"
+    },
+    "TabInfo": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "tab_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tab_id",
+        "url",
+        "title",
+        "active"
+      ],
+      "type": "object"
+    },
+    "TabsResult": {
+      "properties": {
+        "tabs": {
+          "items": {
+            "$ref": "#/$defs/TabInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tabs"
+      ],
+      "type": "object"
+    },
+    "TerminalAttachParams": {
+      "properties": {
+        "offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal_id",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "TerminalAttachResult": {
+      "properties": {
+        "checkpoint_b64": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "end_offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "replay_b64": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "truncated",
+        "replay_b64",
+        "end_offset"
+      ],
+      "type": "object"
+    },
+    "TerminalExited": {
+      "description": "`terminal.exited` (02 §6.7).",
+      "properties": {
+        "code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "terminal_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal_id"
+      ],
+      "type": "object"
+    },
+    "TerminalIdParams": {
+      "properties": {
+        "terminal_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal_id"
+      ],
+      "type": "object"
+    },
+    "TerminalInputParams": {
+      "properties": {
+        "data_b64": {
+          "type": "string"
+        },
+        "terminal_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal_id",
+        "data_b64"
+      ],
+      "type": "object"
+    },
+    "TerminalOpenParams": {
+      "properties": {
+        "cols": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rows": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "shell": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "TerminalOutput": {
+      "properties": {
+        "data_b64": {
+          "type": "string"
+        },
+        "end": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal_id",
+        "start",
+        "end",
+        "data_b64"
+      ],
+      "type": "object"
+    },
+    "TerminalResizeParams": {
+      "properties": {
+        "cols": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal_id",
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "TextResult": {
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "ToolEnded": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ToolOutcome"
+        },
+        "result_part_id": {
+          "type": "string"
+        },
+        "spill_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "call_id",
+        "outcome",
+        "result_part_id"
+      ],
+      "type": "object"
+    },
+    "ToolOutcome": {
+      "enum": [
+        "ok",
+        "error",
+        "declined",
+        "blocked",
+        "cancelled",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "ToolProgress": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "fraction": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_tail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "call_id"
+      ],
+      "type": "object"
+    },
+    "ToolStarted": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resource": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "call_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "TrustDecision": {
+      "enum": [
+        "trust",
+        "once",
+        "deny",
+        "revoke",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "TrustGetResult": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/TrustState"
+        }
+      },
+      "required": [
+        "path",
+        "state"
+      ],
+      "type": "object"
+    },
+    "TrustSetParams": {
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/TrustDecision"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "TrustState": {
+      "enum": [
+        "trusted",
+        "once",
+        "denied",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "TurnInterrupted": {
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/InterruptReason"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "TurnSettled": {
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/TurnStatus"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "TurnStarted": {
+      "properties": {
+        "message_id": {
+          "description": "The admitted user message (or inbox item id until the store assigns messages).",
+          "type": "string"
+        },
+        "resume": {
+          "default": false,
+          "type": "boolean"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "message_id"
+      ],
+      "type": "object"
+    },
+    "TurnStatus": {
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "UnlockParams": {
+      "properties": {
+        "passphrase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "passphrase"
+      ],
+      "type": "object"
+    },
+    "UpdateParams": {
+      "properties": {
+        "active_leaf_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archived": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinned": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "UploadIdParams": {
+      "properties": {
+        "upload_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id"
+      ],
+      "type": "object"
+    },
+    "UploadIdResult": {
+      "properties": {
+        "upload_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id"
+      ],
+      "type": "object"
+    },
+    "Usage": {
+      "description": "Token usage of a step or session.",
+      "properties": {
+        "cache_read_tokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cache_write_tokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_tokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reasoning_tokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "UsageGroup": {
+      "enum": [
+        "day",
+        "provider",
+        "model",
+        "project",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "UsageQueryParams": {
+      "properties": {
+        "from": {
+          "description": "RFC 3339 date or date-time.",
+          "type": "string"
+        },
+        "group_by": {
+          "items": {
+            "$ref": "#/$defs/UsageGroup"
+          },
+          "type": "array"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "group_by"
+      ],
+      "type": "object"
+    },
+    "UsageQueryResult": {
+      "properties": {
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/UsageRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows"
+      ],
+      "type": "object"
+    },
+    "UsageRow": {
+      "properties": {
+        "compaction_tokens": {
+          "default": 0,
+          "description": "Tokens spent on compaction (D34).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cost": {
+          "$ref": "#/$defs/Cost"
+        },
+        "keys": {
+          "description": "One value per `group_by` entry, in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "required": [
+        "keys",
+        "usage",
+        "cost"
+      ],
+      "type": "object"
+    },
+    "UsageUpdated": {
+      "properties": {
+        "context_tokens": {
+          "description": "Context meter (D32).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "context_window": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cost": {
+          "$ref": "#/$defs/Cost"
+        },
+        "session": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "required": [
+        "session",
+        "cost",
+        "context_tokens",
+        "context_window"
+      ],
+      "type": "object"
+    },
+    "UserNotification": {
+      "description": "`notification`: something the desktop app should show as an OS notification\n(e.g. \"Genie needs your approval\", 02 §7 step 2).",
+      "properties": {
+        "ask_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "link": {
+          "description": "`genie://…` deep link.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "type": "object"
+    },
+    "WorkspaceSnapshot": {
+      "description": "`workspace.snapshot`.",
+      "properties": {
+        "clients": {
+          "items": {
+            "$ref": "#/$defs/ClientRef"
+          },
+          "type": "array"
+        },
+        "pending_asks": {
+          "description": "Asks waiting across all sessions (badge count).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions",
+        "pending_asks",
+        "clients"
+      ],
+      "type": "object"
+    },
+    "WorktreeAction": {
+      "enum": [
+        "merge",
+        "pr",
+        "keep",
+        "discard",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "WorktreeChoice": {
+      "enum": [
+        "auto",
+        "new",
+        "none",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "WorktreeFinishParams": {
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/WorktreeAction"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://genie.synergech.com/schema/protocol.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Genie protocol",
+  "version": "1.0.0"
+}

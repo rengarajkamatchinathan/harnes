@@ -14,7 +14,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use genie_protocol::handshake::AskKind;
+use genie_protocol::ask::{Ask, AskKind, AutoResolver, Decision, ResolvedBy};
+use genie_protocol::event::{
+    self as wire, Activity, InboxItemView, InterruptReason, SessionEvent, SessionEventEnvelope,
+    StatusEvent, TurnStatus,
+};
 use genie_protocol::session::{Delivery, LiveStatus, TurnFinish};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -23,35 +27,51 @@ use crate::error::Defect;
 use crate::ids::SessionId;
 use crate::journal::Journal;
 
-/// Core-level session events. The wire `SessionEvent` (02 §4) is a superset added by
-/// the protocol work; these are the ones the actor itself produces.
+/// Core-level session events. Every durable core event maps to exactly one wire
+/// [`SessionEvent`] ([`Envelope::to_wire`]), so the wire `seq` stays gap-free (02 §3.1).
+/// Subsystems (turn loop, tools, lease) publish wire events directly via [`CoreEvent::Wire`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoreEvent {
     InboxAdded {
         item_id: String,
         delivery: Delivery,
+        /// The full queue after the change (`inbox.changed`).
+        #[serde(default)]
+        items: Vec<InboxItemView>,
     },
     InboxRemoved {
         item_id: String,
+        #[serde(default)]
+        items: Vec<InboxItemView>,
     },
     TurnStarted {
         turn_id: String,
         item_id: String,
         resume: bool,
+        #[serde(default)]
+        message_id: Option<String>,
     },
     SteerInjected {
         turn_id: String,
         item_ids: Vec<String>,
+        #[serde(default)]
+        items: Vec<InboxItemView>,
     },
     AskCreated {
         ask_id: String,
         turn_id: String,
         kind: AskKind,
+        #[serde(default)]
+        ask: Option<Box<Ask>>,
     },
     AskResolved {
         ask_id: String,
         outcome: AskOutcome,
+        #[serde(default)]
+        decision: Option<Decision>,
+        #[serde(default)]
+        by: Option<ResolvedBy>,
     },
     TurnSettled {
         turn_id: String,
@@ -60,15 +80,21 @@ pub enum CoreEvent {
     },
     TurnInterrupted {
         turn_id: String,
+        /// Found unsettled at daemon start (crash) rather than settled by a clean
+        /// shutdown.
+        #[serde(default)]
+        crash: bool,
     },
     /// Ephemeral.
-    Status {
-        status: LiveStatus,
-    },
+    Status { status: LiveStatus },
     /// Ephemeral, e.g. token deltas.
     Delta {
         text: String,
+        #[serde(default)]
+        part_id: String,
     },
+    /// A wire event published as-is by a subsystem.
+    Wire { event: Box<SessionEvent> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +116,155 @@ pub struct Envelope {
     /// Unix milliseconds.
     pub ts_ms: u64,
     pub event: CoreEvent,
+}
+
+impl Envelope {
+    /// The wire envelope for this event (02 §3.3).
+    pub fn to_wire(&self) -> SessionEventEnvelope {
+        let (event, turn_id) = self.event.to_wire();
+        SessionEventEnvelope {
+            session_id: self.session_id.clone(),
+            seq: self.seq,
+            ref_seq: self.ref_seq,
+            ts: genie_protocol::rfc3339_ms(self.ts_ms),
+            turn_id,
+            step: None,
+            subagent_of: None,
+            event,
+        }
+    }
+}
+
+impl CoreEvent {
+    /// Map to the wire event and the turn it belongs to.
+    pub fn to_wire(&self) -> (SessionEvent, Option<String>) {
+        match self {
+            CoreEvent::InboxAdded { items, .. } | CoreEvent::InboxRemoved { items, .. } => (
+                SessionEvent::InboxChanged(wire::InboxChanged {
+                    items: items.clone(),
+                }),
+                None,
+            ),
+            CoreEvent::SteerInjected { turn_id, items, .. } => (
+                SessionEvent::InboxChanged(wire::InboxChanged {
+                    items: items.clone(),
+                }),
+                Some(turn_id.clone()),
+            ),
+            CoreEvent::TurnStarted {
+                turn_id,
+                item_id,
+                resume,
+                message_id,
+            } => (
+                SessionEvent::TurnStarted(wire::TurnStarted {
+                    turn_id: turn_id.clone(),
+                    message_id: message_id.clone().unwrap_or_else(|| item_id.clone()),
+                    resume: *resume,
+                }),
+                Some(turn_id.clone()),
+            ),
+            CoreEvent::AskCreated {
+                ask_id,
+                turn_id,
+                kind,
+                ask,
+            } => {
+                let ask = match ask {
+                    Some(a) => (**a).clone(),
+                    None => {
+                        let mut a = Ask::new(ask_id.clone(), "", *kind, "");
+                        a.turn_id = Some(turn_id.clone());
+                        a
+                    }
+                };
+                (
+                    SessionEvent::PermissionAsked(wire::PermissionAsked { ask: Box::new(ask) }),
+                    Some(turn_id.clone()),
+                )
+            }
+            CoreEvent::AskResolved {
+                ask_id,
+                outcome,
+                decision,
+                by,
+            } => (
+                SessionEvent::PermissionResolved(wire::PermissionResolved {
+                    ask_id: ask_id.clone(),
+                    decision: decision.unwrap_or(match outcome {
+                        AskOutcome::Answered => Decision::Once,
+                        AskOutcome::Cancelled => Decision::Cancel,
+                    }),
+                    by: by.clone().unwrap_or(ResolvedBy::Auto(AutoResolver::System)),
+                    saved_rule: None,
+                }),
+                None,
+            ),
+            CoreEvent::TurnSettled {
+                turn_id,
+                finish,
+                error_code,
+            } => {
+                let status = match finish {
+                    TurnFinish::Completed => TurnStatus::Completed,
+                    TurnFinish::Failed => TurnStatus::Failed,
+                    TurnFinish::Cancelled | TurnFinish::Interrupted => TurnStatus::Cancelled,
+                };
+                let error = match (finish, error_code) {
+                    (_, Some(code)) => Some(wire::ErrorInfo {
+                        code: code.clone(),
+                        message: code.clone(),
+                        link: None,
+                    }),
+                    (TurnFinish::Interrupted, None) => Some(wire::ErrorInfo {
+                        code: "interrupted".into(),
+                        message: "the engine stopped while this turn was running".into(),
+                        link: None,
+                    }),
+                    _ => None,
+                };
+                (
+                    SessionEvent::TurnSettled(wire::TurnSettled {
+                        turn_id: turn_id.clone(),
+                        status,
+                        error,
+                    }),
+                    Some(turn_id.clone()),
+                )
+            }
+            CoreEvent::TurnInterrupted { turn_id, crash } => (
+                SessionEvent::TurnInterrupted(wire::TurnInterrupted {
+                    turn_id: turn_id.clone(),
+                    reason: if *crash {
+                        InterruptReason::Crash
+                    } else {
+                        InterruptReason::DaemonRestart
+                    },
+                }),
+                Some(turn_id.clone()),
+            ),
+            CoreEvent::Status { status } => (
+                SessionEvent::Status(StatusEvent {
+                    state: *status,
+                    activity: match status {
+                        LiveStatus::Compacting => Some(Activity::Compacting),
+                        LiveStatus::Interrupting => Some(Activity::Interrupting),
+                        _ => None,
+                    },
+                }),
+                None,
+            ),
+            CoreEvent::Delta { text, part_id } => (
+                SessionEvent::PartDelta(wire::PartDelta {
+                    part_id: part_id.clone(),
+                    text: Some(text.clone()),
+                    json: None,
+                }),
+                None,
+            ),
+            CoreEvent::Wire { event } => ((**event).clone(), None),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,6 +338,30 @@ impl Bus {
         let _ = self.tx.send(env);
     }
 
+    /// Durable events at or below this seq were pruned (02 §9). A subscribe with
+    /// `after_seq` below it must reload a snapshot instead.
+    pub fn log_floor(&self, session: &str) -> Result<u64, Defect> {
+        self.journal.log_floor(session)
+    }
+
+    /// Highest durable seq of `session`.
+    pub fn head_seq(&self, session: &str) -> Result<u64, Defect> {
+        if let Some(s) = self
+            .seqs
+            .lock()
+            .map_err(|_| Defect::new("bus lock poisoned"))?
+            .get(session)
+        {
+            return Ok(*s);
+        }
+        self.journal.last_seq(session)
+    }
+
+    /// Every event of every session, live only (the workspace feed pump).
+    pub fn subscribe_all(&self) -> broadcast::Receiver<Envelope> {
+        self.tx.subscribe()
+    }
+
     /// Subscribe to `session` resuming after `after_seq`.
     pub fn subscribe(&self, session: &str, after_seq: u64) -> Result<Subscription, Defect> {
         // Subscribe to live first so nothing published during replay is lost.
@@ -229,7 +428,8 @@ impl Subscription {
     }
 }
 
-fn now_ms() -> u64 {
+/// Unix milliseconds now.
+pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
@@ -244,6 +444,7 @@ mod tests {
     fn ev(n: u32) -> CoreEvent {
         CoreEvent::InboxRemoved {
             item_id: n.to_string(),
+            items: vec![],
         }
     }
 
@@ -264,7 +465,13 @@ mod tests {
             }
         }
         assert_eq!(got, [2, 3]);
-        bus.publish_ephemeral("ses_a", CoreEvent::Delta { text: "x".into() });
+        bus.publish_ephemeral(
+            "ses_a",
+            CoreEvent::Delta {
+                text: "x".into(),
+                part_id: String::new(),
+            },
+        );
         bus.publish("ses_a", ev(4)).unwrap();
         let SubItem::Event(e) = sub.next().await.unwrap() else {
             panic!()

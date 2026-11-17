@@ -1,0 +1,9 @@
+{
+  "name": "@genie/protocol",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generated from crates/genie-protocol by `cargo xtask schema`. Do not edit.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

@@ -1,0 +1,1589 @@
+{
+  "methods": [
+    {
+      "direction": "request",
+      "ident": "Initialize",
+      "name": "initialize",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/InitializeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InitializeResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "Ping",
+      "name": "$/ping",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DaemonStatusMethod",
+      "name": "daemon.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/DaemonStatus"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DaemonRestart",
+      "name": "daemon.restart",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/DaemonRestartParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SecretsUnlock",
+      "name": "secrets.unlock",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/UnlockParams"
+      },
+      "result": {
+        "$ref": "#/$defs/OkResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DoctorRun",
+      "name": "doctor.run",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/DoctorResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DiagnosticsCollect",
+      "name": "diagnostics.collect",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/DiagnosticsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/DiagnosticsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionSubscribe",
+      "name": "session.subscribe",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SubscribeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SubscribeResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionUnsubscribe",
+      "name": "session.unsubscribe",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "WorkspaceSubscribe",
+      "name": "workspace.subscribe",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionList",
+      "name": "session.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ListParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionGet",
+      "name": "session.get",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/GetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GetResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionCreate",
+      "name": "session.create",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CreateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CreateResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionUpdate",
+      "name": "session.update",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/UpdateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionDelete",
+      "name": "session.delete",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionPrompt",
+      "name": "session.prompt",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/PromptParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PromptResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionRegenerate",
+      "name": "session.regenerate",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/RegenerateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionInterrupt",
+      "name": "session.interrupt",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/InterruptParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InterruptResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionResume",
+      "name": "session.resume",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionTakeOver",
+      "name": "session.take_over",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionRelease",
+      "name": "session.release",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionFork",
+      "name": "session.fork",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ForkParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CreateResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionCompact",
+      "name": "session.compact",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/CompactParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionInboxRemove",
+      "name": "session.inbox.remove",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/InboxRemoveParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionExport",
+      "name": "session.export",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ExportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExportResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SessionSearch",
+      "name": "session.search",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SearchParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SearchResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PermissionPending",
+      "name": "permission.pending",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PendingParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PendingResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PermissionRespond",
+      "name": "permission.respond",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/RespondParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "server_request",
+      "ident": "PermissionAsk",
+      "name": "permission.ask",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/AskParams"
+      },
+      "result": {
+        "$ref": "#/$defs/AskAnswer"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ConfigGet",
+      "name": "config.get",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ConfigGetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ConfigGetResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ConfigSet",
+      "name": "config.set",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ConfigSetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ConfigSchema",
+      "name": "config.schema",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/ConfigSchemaResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ConfigDiagnostics",
+      "name": "config.diagnostics",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CwdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ConfigDiagnosticsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PolicyEffective",
+      "name": "policy.effective",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/PolicyEffectiveResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TrustGet",
+      "name": "trust.get",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PathParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TrustGetResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TrustSet",
+      "name": "trust.set",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/TrustSetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TrustPendingDefinitions",
+      "name": "trust.pending_definitions",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PathParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PendingDefinitionsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TrustApproveDefinition",
+      "name": "trust.approve_definition",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ApproveDefinitionParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProviderList",
+      "name": "provider.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/ProviderListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProviderCredentialAdd",
+      "name": "provider.credential.add",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CredentialAddParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CredentialAddResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProviderCredentialRemove",
+      "name": "provider.credential.remove",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CredentialIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProviderCredentialActivate",
+      "name": "provider.credential.activate",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CredentialIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProviderLoginStart",
+      "name": "provider.login.start",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/LoginStartParams"
+      },
+      "result": {
+        "$ref": "#/$defs/LoginStartResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProviderLoginStatus",
+      "name": "provider.login.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/LoginStatusParams"
+      },
+      "result": {
+        "$ref": "#/$defs/LoginStatusResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProviderTest",
+      "name": "provider.test",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProviderParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ProviderTestResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ModelList",
+      "name": "model.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ModelListParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ModelListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "CatalogStatusMethod",
+      "name": "catalog.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/CatalogStatus"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "CatalogRefresh",
+      "name": "catalog.refresh",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/CatalogStatus"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "UsageQuery",
+      "name": "usage.query",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/UsageQueryParams"
+      },
+      "result": {
+        "$ref": "#/$defs/UsageQueryResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "UsageBudgetSet",
+      "name": "usage.budget.set",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/BudgetSetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserStatusMethod",
+      "name": "browser.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/BrowserStatus"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserScreencastStart",
+      "name": "browser.screencast.start",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ScreencastStartParams"
+      },
+      "result": {
+        "$ref": "#/$defs/StreamIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserScreencastAck",
+      "name": "browser.screencast.ack",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ScreencastAckParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserScreencastStop",
+      "name": "browser.screencast.stop",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/StreamIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserTakeover",
+      "name": "browser.takeover",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserHandback",
+      "name": "browser.handback",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserStop",
+      "name": "browser.stop",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserInput",
+      "name": "browser.input",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/BrowserInputParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserTabs",
+      "name": "browser.tabs",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TabsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserTabActivate",
+      "name": "browser.tab.activate",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/TabActivateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserPopout",
+      "name": "browser.popout",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserSitesList",
+      "name": "browser.sites.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/SitesListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserSitesSet",
+      "name": "browser.sites.set",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SitePermission"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserDataClear",
+      "name": "browser.data.clear",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/DataClearParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TerminalOpen",
+      "name": "terminal.open",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/TerminalOpenParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TerminalIdParams"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TerminalAttach",
+      "name": "terminal.attach",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/TerminalAttachParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TerminalAttachResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TerminalInput",
+      "name": "terminal.input",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/TerminalInputParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TerminalResize",
+      "name": "terminal.resize",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/TerminalResizeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "TerminalClose",
+      "name": "terminal.close",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/TerminalIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpList",
+      "name": "mcp.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CwdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpAdd",
+      "name": "mcp.add",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/McpAddParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpRemove",
+      "name": "mcp.remove",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/McpRemoveParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpSetEnabled",
+      "name": "mcp.set_enabled",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/McpSetEnabledParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpAuthStart",
+      "name": "mcp.auth.start",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/NameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/AuthUrlResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpLogs",
+      "name": "mcp.logs",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/McpLogsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/LinesResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpTools",
+      "name": "mcp.tools",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/NameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpItemsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpResources",
+      "name": "mcp.resources",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/NameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpItemsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpPrompts",
+      "name": "mcp.prompts",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/NameParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpItemsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "McpResourceRead",
+      "name": "mcp.resource.read",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/McpResourceReadParams"
+      },
+      "result": {
+        "$ref": "#/$defs/BlobMimeResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SkillList",
+      "name": "skill.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/SkillListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SkillSetEnabled",
+      "name": "skill.set_enabled",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SkillSetEnabledParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "SkillUpload",
+      "name": "skill.upload",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/BlobIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/IdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DirectoryList",
+      "name": "directory.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/DirectoryListParams"
+      },
+      "result": {
+        "$ref": "#/$defs/DirectoryListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DirectoryInstall",
+      "name": "directory.install",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/DirectoryInstallParams"
+      },
+      "result": {
+        "$ref": "#/$defs/DirectoryInstallResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectList",
+      "name": "project.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/ProjectListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectCreate",
+      "name": "project.create",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProjectCreateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ProjectIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectUpdate",
+      "name": "project.update",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProjectUpdateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectDelete",
+      "name": "project.delete",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProjectIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectFileAdd",
+      "name": "project.file.add",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProjectFileAddParams"
+      },
+      "result": {
+        "$ref": "#/$defs/FileIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectFileRemove",
+      "name": "project.file.remove",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProjectFileRemoveParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectIndexStatus",
+      "name": "project.index.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProjectIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/IndexStatus"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ArtifactList",
+      "name": "artifact.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ArtifactListParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ArtifactListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ArtifactGet",
+      "name": "artifact.get",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ArtifactGetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ArtifactGetResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "MemoryList",
+      "name": "memory.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/MemoryScopeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/MemoryListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "MemoryUpdate",
+      "name": "memory.update",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/MemoryUpdateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "MemoryDelete",
+      "name": "memory.delete",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/MemoryIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "MemorySetState",
+      "name": "memory.set_state",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/MemorySetStateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "MemoryReset",
+      "name": "memory.reset",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/MemoryScopeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BlobPutBegin",
+      "name": "blob.put.begin",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/BlobPutBeginParams"
+      },
+      "result": {
+        "$ref": "#/$defs/UploadIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BlobPutChunk",
+      "name": "blob.put.chunk",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/BlobPutChunkParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BlobPutEnd",
+      "name": "blob.put.end",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/UploadIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/BlobPutResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BlobPutPath",
+      "name": "blob.put.path",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/BlobPutPathParams"
+      },
+      "result": {
+        "$ref": "#/$defs/BlobPutResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BlobGet",
+      "name": "blob.get",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/BlobGetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/BlobGetResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "CheckpointList",
+      "name": "checkpoint.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CheckpointListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "CheckpointPreviewMethod",
+      "name": "checkpoint.preview",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CheckpointParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CheckpointPreview"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "CheckpointRewind",
+      "name": "checkpoint.rewind",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/CheckpointParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "CheckpointUndo",
+      "name": "checkpoint.undo",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "GitStatus",
+      "name": "git.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionPathParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GitStatusResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "GitDiff",
+      "name": "git.diff",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionPathParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TextResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "GitCommit",
+      "name": "git.commit",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/GitCommitParams"
+      },
+      "result": {
+        "$ref": "#/$defs/GitCommitResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "WorktreeFinish",
+      "name": "worktree.finish",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/WorktreeFinishParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "FilesTree",
+      "name": "files.tree",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionPathParams"
+      },
+      "result": {
+        "$ref": "#/$defs/FilesTreeResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "FilesRead",
+      "name": "files.read",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionPathParams"
+      },
+      "result": {
+        "$ref": "#/$defs/FilesReadResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ImportScan",
+      "name": "import.scan",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ImportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ImportResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ImportPreview",
+      "name": "import.preview",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ImportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ImportResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ImportApply",
+      "name": "import.apply",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ImportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ImportResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ExportAll",
+      "name": "export.all",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ExportAllParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "Event",
+      "name": "event",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionEventEnvelope"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "SessionSyncedNote",
+      "name": "session.synced",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionSynced"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "SessionResyncRequired",
+      "name": "session.resync_required",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ResyncRequired"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "LeaseLostNote",
+      "name": "lease.lost",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/LeaseLost"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "CancelRequestNote",
+      "name": "$/cancelRequest",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CancelRequest"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "DaemonRestarting",
+      "name": "daemon.restarting",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/DaemonRestartingParams"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "WorkspaceSnapshot",
+      "name": "workspace.snapshot",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/WorkspaceSnapshot"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "SessionListed",
+      "name": "session.listed",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionListed"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "ConfigChanged",
+      "name": "config.changed",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ConfigChanged"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "PolicyChanged",
+      "name": "policy.changed",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PolicyChanged"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "McpStatusNote",
+      "name": "mcp.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/McpStatusChanged"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "CatalogUpdated",
+      "name": "catalog.updated",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CatalogUpdated"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "ProviderStatusNote",
+      "name": "provider.status",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProviderStatusChanged"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "UserNotification",
+      "name": "notification",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/UserNotification"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "TerminalExited",
+      "name": "terminal.exited",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/TerminalExited"
+      },
+      "result": {
+        "type": "null"
+      }
+    }
+  ],
+  "version": "1.0.0"
+}

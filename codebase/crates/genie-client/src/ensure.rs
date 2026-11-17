@@ -194,11 +194,11 @@ async fn try_once(
 
 fn remove_stale_socket(ep: &Endpoint) {
     #[cfg(unix)]
-    if let crate::Address::Unix(p) = &ep.address {
-        if p.exists() {
-            tracing::info!(path = %p.display(), "removing stale daemon socket");
-            let _ = std::fs::remove_file(p);
-        }
+    if let crate::Address::Unix(p) = &ep.address
+        && p.exists()
+    {
+        tracing::info!(path = %p.display(), "removing stale daemon socket");
+        let _ = std::fs::remove_file(p);
     }
     #[cfg(windows)]
     let _ = ep; // Pipes vanish with their server; nothing to clean.
