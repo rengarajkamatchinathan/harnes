@@ -23,6 +23,7 @@ genie-browser.workspace = true
 async-trait.workspace = true
 getrandom.workspace = true
 hex.workspace = true
+ignore.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 subtle.workspace = true

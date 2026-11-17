@@ -140,6 +140,18 @@ impl Registry {
             .unwrap_or_default()
     }
 
+    /// Move a session to another folder (its worktree was merged or discarded, D50).
+    pub fn set_workspace(&self, id: &str, workspace: Option<PathBuf>) {
+        if let Some(x) = self
+            .extra
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(id)
+        {
+            x.workspace = workspace;
+        }
+    }
+
     /// Newest first. Incognito sessions are never listed (D24).
     pub fn list(&self, p: &ListParams) -> Vec<SessionSummary> {
         let q = p.query.as_deref().map(str::to_lowercase);

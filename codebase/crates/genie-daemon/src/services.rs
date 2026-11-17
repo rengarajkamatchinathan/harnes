@@ -45,6 +45,8 @@ pub struct Services {
     pub browser: Option<Arc<genie_browser::Browser>>,
     pub browser_backend: Option<Arc<dyn genie_browser::BrowserBackend>>,
     pub browser_host: Option<Arc<genie_core::runtime::browser::EngineBrowserHost>>,
+    /// Code mode: checkpoints, worktrees, git and files methods (02 §6.10).
+    pub code: Option<Arc<crate::code::CodeServices>>,
 }
 
 pub(crate) enum Handled {

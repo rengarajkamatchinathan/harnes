@@ -151,6 +151,11 @@ impl DaemonState {
         }
     }
 
+    /// The engine-backed services, if wired.
+    pub(crate) fn services(&self) -> Option<&Arc<Services>> {
+        self.services.as_ref()
+    }
+
     pub(crate) fn root_scope(&self) -> &TaskScope {
         &self.root
     }
@@ -377,6 +382,10 @@ pub(crate) struct Conn {
 }
 
 impl Conn {
+    pub(crate) fn is_headless(&self) -> bool {
+        self.client.client_kind == genie_protocol::ClientKind::Headless
+    }
+
     fn send_line(&self, line: impl Into<Arc<str>>) {
         let _ = self.out.send(Out::Line(line.into(), None));
     }
@@ -789,6 +798,10 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
             Handled::NotMine => {}
         }
     }
+    // Code mode (02 §6.10) and `session.create` with a worktree (D50).
+    if let Some(res) = crate::code::dispatch(state, conn, &r) {
+        return res;
+    }
     let result: Result<Value, RpcError> = match r.method.as_str() {
         m::PING => empty(),
         m::DAEMON_STATUS => to_result(&state.status()),
@@ -843,6 +856,7 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
             };
             state.engine.close_session(&p.session_id);
             state.leases.forget(&p.session_id);
+            crate::code::session_deleted(state, &p.session_id);
             state.listed(ListedChange::Deleted, info.summary);
             empty()
         }),
@@ -1035,7 +1049,7 @@ fn take_over(state: &Arc<DaemonState>, conn: &Arc<Conn>, session: &str) -> Resul
     empty()
 }
 
-fn session_create(
+pub(crate) fn session_create(
     state: &Arc<DaemonState>,
     p: &sp::CreateParams,
     parent: Option<String>,

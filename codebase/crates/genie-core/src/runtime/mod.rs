@@ -24,6 +24,8 @@
 pub mod active;
 pub mod bridge;
 pub mod browser;
+pub mod checkpoint;
+pub mod code;
 pub mod context;
 pub mod conversation;
 pub mod host;
@@ -116,6 +118,8 @@ pub struct AgentRuntime {
     pub shell: Option<Arc<genie_tools::shell::ShellRuntime>>,
     /// Provider-native web search policy (06 §8); `None`: never declared.
     pub web_search: Option<genie_tools::web::SearchPolicy>,
+    /// Shadow-git checkpoints around mutating steps (Code, D49).
+    pub checkpoints: Option<Arc<checkpoint::Checkpoints>>,
 }
 
 impl AgentRuntime {
@@ -213,6 +217,7 @@ impl RuntimeBuilder {
                 taints: Arc::new(host::TurnTaints::default()),
                 shell: None,
                 web_search: None,
+                checkpoints: None,
             },
         }
     }
