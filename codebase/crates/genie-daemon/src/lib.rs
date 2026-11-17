@@ -21,6 +21,7 @@ mod registry;
 pub mod secrets;
 mod server;
 mod services;
+mod terminal;
 mod token;
 
 use std::fs::File;
