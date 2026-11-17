@@ -27,7 +27,8 @@ crates/
                    parsers, overrides/policy, effort map, pricing (spec 03 §8)
   genie-{config,permissions,tools,mcp,skills,sandbox,browser,markdown}
                    placeholders: crate exists, implementation is in its own spec
-apps/cli           the `genie` binary: `genie daemon`, `genie status [--standalone]`, `genie doctor`
+apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
+                   `genie chat`, importer, `hook-adapter`; also runs `genie daemon`
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
 xtask              `cargo xtask check` = check-deps (01 §2.1 rules 1–3) + check-spawn (rule 4)
                    + schema drift/compat; `cargo xtask schema [--release]` regenerates
@@ -131,6 +132,75 @@ ask with no client → paused + notification + answered by another client, promp
 | 10.1 | credential model, precedence (stored beats env), store port + in-memory store | `genie-secrets::credentials` |
 | 11 | layer 1 cassettes (`tests/cassettes`, `CassetteTransport`, `RecordingTransport`, header scrubbing, secret check) and layer 2 goldens (`tests/golden`, `GENIE_UPDATE_GOLDEN=1`); layer 3 patch tests | `genie-providers/tests` |
 
+### Spec 07 (CLI)
+
+`apps/cli` is a library (`genie_cli`) plus a thin `main.rs`. The TUI is a pure model
+(`tui::model`: state + `update(Msg) -> Vec<Effect>`; `tui::view`: footer lines) driven by
+`tui::run`, so keys and rendering are unit-tested without a terminal.
+
+| 07 § | What | Where |
+|---|---|---|
+| 1.1 | ratatui `Viewport::Inline` + `insert_before`; append-only scrollback; live footer that grows/shrinks (viewport re-created on height change); settled Markdown blocks committed, unstable tail in the footer | `tui::run::redraw`, `tui::model` (`commit_stable`, `live_lines`), `tui::markdown::stable_prefix` |
+| 1.2 | Markdown blocks (headings, lists, quotes, fences, inline code/bold/italic/links) with a heal step for unclosed inline markers; diffs coloured +/−; Mermaid as code + "open in desktop"; LaTeX as source; rich parts (media, artifacts) as one line + `genie://session/<id>#<part>`; role-token themes, truecolor → 256 → 16, `NO_COLOR`, light/dark guess (`COLORFGBG`, luminance helper); ~10 ms delta batching | `tui::markdown`, `tui::theme`, `render`, `tui::run` (`BATCH`) |
+| 1.3 | Enter send/steer, Alt-Enter queue (newline when idle), Shift-Enter/Ctrl-J newline, Esc interrupt, Esc Esc on empty prompt → rewind, Shift-Tab mode cycle (bypass only with `--dangerously-skip-permissions`; chats stay `default`), Ctrl-C twice, `@` file completion (ignore rules via `ignore`), `/` menu from **one registry** that also holds keybindings, Up/Down history, pasted file path → attachment (`file_ref`); footer permission prompt (Allow once / Always with scope / Deny + reason, subagent label), question/elicitation forms (sensitive fields masked); status line (model · effort · mode · ctx % · cost · N subagents · Waiting for approval) | `tui::model::on_key`, `tui::commands::REGISTRY`, `tui::view` |
+| 1.4 | `ensure` with "Starting engine…"; resubscribe from the last `seq` on reconnect (`SessionTracker`, resync/reload); `-p` or non-TTY → headless | `connect`, `tui::run::{reconnect,on_incoming}`, `main::run_session` |
+| 2.1 | `genie [prompt]`, `-c`, `-r [id]` (stdin picker), `--agent/--model/--effort/--permission-mode/--dangerously-skip-permissions/--worktree [name]/--add-dir/--settings/--trust` | `args`, `session::open` |
+| 2.2 | `chat`, `sessions [--all]`, `approvals [list|approve [--always]|deny [--message]]`, `import`, `export`, `config [get|set|doctor|path]`, `doctor`, `update`, `daemon [status|stop|restart|logs]` (bare runs it), `login [--device-code]`/`logout`, `mcp [list|add|remove|auth|logs]`, `trust [list|revoke]`, `hook-adapter claude -- <script>`, `--version` (channel, commit, build date from `GENIE_COMMIT`/`GENIE_BUILD_DATE`) | `args`, `cmd`, `hook_adapter`, `main` |
+| 2.3 | `/help /model /effort /mode /compact /rewind /worktree /init /memory /skills /agents /mcp /permissions /cost /context /resume /export /clear /exit /takeover`, user commands (`~/.genie/commands`, `.genie/commands`, `$ARGUMENTS`, `dir:name`), `/skill-name` and `/server:prompt` sent as a `skill` input part | `tui::commands`, `tui::model::{submit,run_cmd}` |
+| 3 | `genie chat list` (title, project, updated), `open <id>` (prints the active branch when `session.get` has a path, else replays the log; subscribes), `new`; sending takes a vacant lease; `lease.lost` → read-only + Ctrl-T take over; citations as `[n]` + references, tool rows, thinking, rich parts as summaries + links | `cmd::chat_list`, `render::transcript`, `tui::run` |
+| 4.1 | `-p "<prompt>"`, stdin prompt, any non-TTY; all §4.1 flags parsed | `args::RunArgs`, `main::run_headless` |
+| 4.2 | `text` (final assistant text), `json` (`{session_id, result, usage, cost_usd, status, num_turns, subagents, …}`), `stream-json` (first line `system/init` with `genie_protocol`, then D22 envelopes, last line `result`) | `headless::{run,emit}` |
+| 4.3 | 0 / 1 / 2 / 3; `no_provider_configured` and other turn errors worded by `errors::turn_error` | `headless::Run::outcome` |
+| 4.4 | asks pause and wait (stderr notice with `genie approvals` hint; CI hint when `CI=true`); `--on-ask deny` denies at once; `--ask-timeout` denies, interrupts, exit 3; asks answered from any client end the wait | `headless::Run::apply` |
+| 4.5 | shared daemon by default, `--standalone` private daemon (stdin lease); waits for background subagents and follow-up turns (D47) and `--max-turns`; trust notice / `--trust` → `trust.set once` | `connect`, `headless` |
+| 5.1 | Claude Code (user/project/local settings: permissions, `defaultMode`, env with secrets split out, `additionalDirectories`; `~/.claude.json` MCP user + this project's local; `CLAUDE(.local).md` → `GENIE(.local).md` `@`-import; skills/agents/commands with `!cmd` flagged; hooks → `genie hook-adapter claude`), Claude Desktop (`mcpServers`; extensions → connector suggestions), OpenCode (`opencode.json(c)` global + project: providers with keys → keychain / `{env:…}` refs, model, permissions, MCP local/remote, agents, commands, instructions; `.opencode/{agent,command}/*.md`) | `import::sources` |
+| 5.2 | scan → preview (import / skip / conflict, per-key diagnostics: unsupported, semantic difference, secret detected, needs trust) → apply; secrets only through `SecretSink`; GENIE.md append needs confirmation; report `<genie home>/imports/<date>.json`; idempotent by id (source path) + content hash; deferred items retried | `import::{preview,apply}`, `cmd::import_cmd` |
+| 5.3 | OpenCode last-match-wins → classes; allow-after-deny dropped with a diagnostic, deny kept (SA-40); ask-after-deny kept + diagnostic; allow-after-ask diagnostic; key order preserved without `serde_json/preserve_order` | `import::perms` |
+
+Tests: unit tests for the TUI model/view/markdown/theme/commands, importer (fixture dirs only),
+hook adapter and args; `apps/cli/tests/headless.rs` runs the real daemon in-process over the
+in-memory transport with a fake `TurnRunner` (stream-json framing and gap-free seqs, text/json
+output, exit codes 0/1/2/3, `--on-ask deny`, `--ask-timeout`, an ask answered via
+`genie approvals`, `--resume`/`--continue`, unimplemented methods).
+
+#### Spec 07 gaps
+
+- **Engine-side pieces the CLI can't supply:** the daemon answers `not_implemented` for
+  `config.*`, `trust.*`, `provider.*`, `mcp.*`, `skill.*`, `memory.*`, `model.list`,
+  `usage.query`, `checkpoint.*` (`/rewind`), `worktree.finish`, `session.compact`,
+  `session.export` and `import.*`; the CLI wires each one and prints "not available in this
+  engine build yet". `session.get` returns an empty `path`, so `genie chat open` replays the
+  event log instead of printing the branch.
+- **Headless flags not applied:** `--allow/--deny`, `--settings` and `--add-dir` need a
+  session-only settings layer on the wire (not in `session.create`); they print a one-line
+  notice. `--worktree <name>` sends `worktree: new` (no name field). `system/init.tools` is
+  empty (no tool-list method).
+- **`no_provider_configured`:** core maps every `TurnError::Provider` to the bare code
+  `GENIE-PROV`, so the class is lost on the wire; the CLI words bare `GENIE-PROV` as "provider
+  failed / none configured". Suggested core change: put the class in `ErrorInfo.message` or the
+  code (`GENIE-PROV:<class>`); `errors::turn_error` already handles both.
+- **`--continue`** picks the most recent session of the kind: `SessionSummary.workspace_id` is
+  never set and `workspace_path` is not stored, so "in this folder" can't be filtered yet.
+- **Headless OS notification:** the headless client advertises no ask kinds and answers from
+  the event stream; with a client attached the core sets `awaiting_ask` (not `paused`) and so
+  raises no OS notification. Needs a daemon rule ("attached, but cannot render this kind →
+  notify").
+- **Rendering:** `genie-markdown` (patchmark port) and `syntect` highlighting are not done;
+  `tui::markdown` is a small block-stable renderer with the heal step. The OSC 11 palette query
+  is not sent (light/dark from `COLORFGBG`, default dark). No full-screen mode, images or
+  terminal Mermaid (by spec).
+- **Importer:** runs in the CLI, not behind `import.scan/preview/apply` (the daemon side can
+  call `genie_cli::import` later or the module can move to a crate). No keychain write path from
+  the CLI, so secrets are reported (`secret not imported`) and retried on the next run. Preview
+  applies all non-skipped items (no per-item picker in the CLI yet). No first-run offer.
+- **Not implemented:** `genie update` (prints a notice), the `/rewind` picker UI, `@`-mentions
+  sent as plain text (not `file_ref` parts), images pasted as data (only file paths),
+  `/resume` picker inside the TUI (lists sessions; `/resume <id>` switches), ACP (v2).
+- **Leases:** `--resume`/`--continue`/`-p` take over a session driven elsewhere
+  (`session::with_takeover`); the TUI instead shows "take over" and waits for Ctrl-T.
+- **Daemon `stop`** uses `daemon.restart` (there is no `daemon.stop`); the daemon exits and the
+  next client restarts it.
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -147,7 +217,7 @@ ask with no client → paused + notification + answered by another client, promp
   (planned with the `opencode-pty` port, D45).
 - **Windows token file** relies on the per-user `%LOCALAPPDATA%` ACL; no explicit DACL is set.
 - **Not in this milestone:** desktop app, `packages/ui` and the Platform-adapter lint rule (spec 05);
-  the `-p` headless CLI (spec 07); CI workflows.
+  CI workflows.
 
 ### Spec 02 gaps and deviations
 
