@@ -17,20 +17,20 @@ Implements the D29 scope warning ("the spec phase must estimate effort and confi
 
 | Milestone | Scope | ew (low–high) |
 |---|---|---|
-| **M1 core chat** | daemon, protocol, store, secrets, config, 4 adapters, auth, catalog, conformance, desktop shell, renderer, chat UI, projects, settings basics | **72.5–100** |
+| **M1 core chat** | daemon, protocol, store, secrets, config, 4 adapters, auth, catalog, conformance, desktop shell, renderer, chat UI, projects, settings basics | **74–102.5** |
 | **M2 tools** | tool loop, permissions + asks, web search/fetch, code execution, MCP (full v1 set), artifacts (non-React), compaction | **36.5–51.5** |
 | **M3 intelligence** | memory, chat search, incognito, instruction framework, chat skills, signed directories, React artifacts, project RAG, usage & spend | **24.5–34** |
 | **M4 browser + hardening** | browser (B + screencast), policy, audit, telemetry, recovery, packaging/signing, updater/feeds, security, a11y, D8 validation, release QA | **44–63** |
-| **Chat v1 (M1–M4)** | | **≈178–249** |
+| **Chat v1 (M1–M4)** | | **≈180–252** |
 | **M5 Code engine + CLI** | code tools, `genie-process`, shell, modes, instructions, trust, checkpoints, worktrees, agents, subagents, hooks, commands, TUI, `genie chat`, headless, importer | **48.5–64.5** |
 | **M6 Desktop Code tab** | repo-grouped sessions, tool rows, Changes/Files/Terminal panels, PTY terminal | **17.5–24.5** |
 | **Code/CLI track (M5–M6)** | | **≈66–89** |
-| **All of v1 (Chat + Code/CLI)** | | **≈244–338** |
+| **All of v1 (Chat + Code/CLI)** | | **≈246–341** |
 | Ongoing after GA | provider upkeep 0.25–0.5 FTE; catalog/directory curation 0.1–0.2 FTE | — |
 
 ## 3. Work breakdown
 
-### 3.1 M1 — core chat (72.5–100 ew)
+### 3.1 M1 — core chat (74–102.5 ew)
 
 | ID | Work item | ew | Depends on | Risk |
 |---|---|---|---|---|
@@ -57,12 +57,13 @@ Implements the D29 scope warning ("the spec phase must estimate effort and confi
 | 1.21 | Projects: CRUD, instructions, knowledge files (full mode), starred | 1.5–2.5 | 1.20 | L |
 | 1.22 | Settings framework (full page, nav, search, deep links, schema-generated controls, locked values) + General, Appearance, Providers & Models, Privacy (basic), Developer (basic) | 4–5 | 1.08 | M |
 | 1.23 | Context assembly v1: baseline message, custom + project instructions, breakpoints, token accounting, attachment conversion | 2–3 | 1.05, 1.09 | M |
+| 1.23b | Prompt content v0 (06 §2.6): base-prompt fragments, chat guidance, tag formats, system-block placement + `Compat` fallback, `<system-update>` lowering per adapter, hidden prompts, golden snapshot tests; prompt eval set (first ~40 cases) in the nightly run | 1.5–2.5 | 1.23, 1.16 | M |
 | 1.24 | Titles via small model; usage/cost recording + `usage_daily` | 1–1.5 | 1.15 | L |
 | 1.25 | First run: consent, provider setup, passphrase/recovery prompt | 1–1.5 | 1.22 | L |
 | 1.26 | Logging (`tracing`, rotation) + crash-report client | 1–1.5 | — | L |
 | 1.27 | CI build matrix on 3 OSes, dev-channel builds, perf-gate runners | 2–3 | t41 | M |
 | 1.28 | Stabilisation, cross-OS fixes, **internal alpha A1** | 2–3 | all | M |
-| | **M1 total** | **72.5–100** | | |
+| | **M1 total** (incl. 1.23b prompt content, added after the prompt review) | **74–102.5** | | |
 
 ### 3.2 M2 — tools (36.5–51.5 ew)
 
@@ -190,13 +191,13 @@ Calendar weeks = ew ÷ (N × 0.85).
 
 | Scope | 3 engineers | 4 engineers | 5 engineers |
 |---|---|---|---|
-| M1 (72.5–100) | 28–39 wk | 21–29 wk | 17–24 wk |
+| M1 (74–102.5) | 28–39 wk | 21–29 wk | 17–24 wk |
 | M2 (36.5–51.5) | 14–20 wk | 11–15 wk | 9–12 wk |
 | M3 (24.5–34) | 10–13 wk | 7–10 wk | 6–8 wk |
 | M4 (44–63) | 17–25 wk | 13–19 wk | 10–15 wk |
-| **Chat v1 (178–249)** | **70–98 wk (16–23 months)** | **52–73 wk (12–17 months)** | **42–59 wk (10–14 months)** |
+| **Chat v1 (180–252)** | **70–98 wk (16–23 months)** | **52–73 wk (12–17 months)** | **42–59 wk (10–14 months)** |
 | Code/CLI track (66–89) | 26–35 wk | 19–26 wk | 16–21 wk |
-| **All of v1 (244–338)** | **96–133 wk (22–31 months)** | **72–99 wk (17–23 months)** | **57–80 wk (13–19 months)** |
+| **All of v1 (246–341)** | **96–133 wk (22–31 months)** | **72–99 wk (17–23 months)** | **57–80 wk (13–19 months)** |
 
 The 5-engineer column assumes the work splits cleanly. In M1 it doesn't fully: the engine core (1.05) and the renderer (1.19) are each one person's critical path. Expect the 5-engineer M1 to land near the top of its range.
 
@@ -229,7 +230,7 @@ Key points of this plan:
 **Short answer: yes with 4–5 engineers and a 12–17 month horizon for Chat v1; no with 3 engineers. The Code/CLI track adds 4–8 months after that.**
 
 The evidence:
-- Chat v1 is ≈178–249 ew. That is Claude Desktop's chat feature set plus a browser agent, on 3 OSes and 4 provider families (t31's scope warning stands).
+- Chat v1 is ≈180–252 ew. That is Claude Desktop's chat feature set plus a browser agent, on 3 OSes and 4 provider families (t31's scope warning stands).
 - The largest single items are fixed costs that no cut removes: the engine core, the 4 adapters + conformance, the renderer, and signing/packaging on 3 OSes. Together they are ≈50–70 ew.
 - Two external gates can still move the plan: the **D8 macOS/Linux bench runs** and the **CI platform choice** (ticket 41).
 
@@ -270,7 +271,7 @@ Cuts 1–6 together save ≈14–19 ew (≈4–5 calendar weeks for 4 engineers)
 | R2 | **WebKitGTK specifically** (NVIDIA blank windows, Wayland, scrolling regressions, a lagging distro WebKit) | High / Medium | DMABUF workaround on NVIDIA; minimum WebKitGTK version; perf gate on real Linux hardware in CI (SA-34); fallback per D9 to Tauri 3's Chromium runtime on Linux; budget 4.16 | P |
 | R3 | **Provider maintenance burden:** 4 protocols × monthly vendor changes (new events, API versions, deprecations) | High / Medium | Named owner (D18); tolerant decoding; cassettes + golden tests + nightly live smoke with drift report (D41); 0.25–0.5 FTE after GA; catalog patches instead of code changes where possible | T (provider owner) |
 | R4 | **Browser screencast UX** (D56): frame rate, input latency, IME, clipboard, file pickers, multi-tab, HiDPI; Chrome/Edge missing on some Linux/macOS machines; CDP detectability and CAPTCHAs | Medium / High | 1-week spike at the start of 4.04 against SA-23 targets; pop-out fallback always available (cut 1); clear "install a browser" path; `browser_handoff` for CAPTCHAs; no stealth features | T |
-| R5 | **Scope and schedule:** v1 is ≈178–249 ew before Code; scope creep from "like Claude" comparisons | High / High | Fixed v1 list (t31 + amendments); internal milestones with go/no-go; cut list §5.2 pre-agreed; commit externally at the high end | Eng lead |
+| R5 | **Scope and schedule:** v1 is ≈180–252 ew before Code; scope creep from "like Claude" comparisons | High / High | Fixed v1 list (t31 + amendments); internal milestones with go/no-go; cut list §5.2 pre-agreed; commit externally at the high end | Eng lead |
 | R6 | **Prompt injection** via web, browser, MCP and repos leads to harmful actions | Medium / High | Deterministic gates, taint, trust + hash approvals, policy; red-team suites in CI; pen test; honest disclosure that risk is reduced, not removed | T + security reviewer |
 | R7 | **Artifact sandbox escape** due to engine differences (custom schemes, iframe sandbox, CSP) across WebView2/WKWebView/WebKitGTK | Low / High | Opaque origin + no capabilities + CSP; hostile-artifact CI on all 3 engines (2.12, 4.06); pen test scope | U |
 | R8 | **CI platform and repo host undecided** (t41) blocks signing, secrets for live tests and perf runners | High / Medium | Decide the CI part of t41 by **M1 week 4**; keep CI definitions thin wrappers around `xtask` commands so a later switch is cheap | P |

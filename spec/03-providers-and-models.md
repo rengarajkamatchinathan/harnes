@@ -101,7 +101,8 @@ Per-protocol notes (from research/provider-layer.md and t34's checklist):
 
 From D32 and t11:
 
-- Up to **4 breakpoints**: end of tools, end of system, end of the context baseline, conversation tail. Placed only where the route honours them (`Compat.max_cache_breakpoints`, catalog `capabilities.prompt_cache`).
+- Up to **4 breakpoints**: end of tools, end of system block 1 (base prompt), end of system block 2 (context baseline), conversation tail. Placed only where the route honours them (`Compat.max_cache_breakpoints`, catalog `capabilities.prompt_cache`).
+- **Baseline placement** (06 §2.1, SA-41): the baseline goes in a second system block (Anthropic system array, OpenAI Responses developer message, Gemini `systemInstruction` parts). Chat dialects without multi-system support fall back to a first user message in `<context>` (`Compat.baseline_as_user`). `<system-update>` lowering per protocol is in 06 §2.6.6; both are covered by conformance tests.
 - **TTL** from the catalog: 5 min default; **1 h on the baseline breakpoint when it contains project knowledge** and the model supports it.
 - OpenAI: automatic caching + `prompt_cache_key`. Gemini: last breakpoint only. Ollama/vLLM: none.
 - **Shared cache key** per root session; subagents reuse it (D47).

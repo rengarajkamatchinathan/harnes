@@ -26,7 +26,7 @@ What makes the engine work:
 
 **Release shape.** Chat v1 ships first (D6), in four milestones (D29, ticket 31): **M1 core chat → M2 tools → M3 intelligence → M4 browser + hardening**. The **Code/CLI track** (M5 engine + CLI, M6 desktop Code tab) follows. Bedrock, skill scripts in a sandbox, the CEF browser, plugins and ACP are v2.
 
-**Size.** Chat v1 (M1–M4) is about **178–249 engineer-weeks**. The Code/CLI track adds about **66–89**. With 4 engineers, Chat v1 takes about **12–17 months** of calendar time. See [10-plan-and-estimates.md](10-plan-and-estimates.md) for the breakdown, the timelines for 3–5 engineers, the risk register and the recommendation on v1 scope.
+**Size.** Chat v1 (M1–M4) is about **180–252 engineer-weeks**. The Code/CLI track adds about **66–89**. With 4 engineers, Chat v1 takes about **12–17 months** of calendar time. See [10-plan-and-estimates.md](10-plan-and-estimates.md) for the breakdown, the timelines for 3–5 engineers, the risk register and the recommendation on v1 scope.
 
 ## 2. Files
 
@@ -90,7 +90,8 @@ Terms are used with these meanings in every file.
 | **Compat / ModelPatch** | Plain-data quirk flags per route, and catalog-driven overlays per model (t03). |
 | **Origin / AccountTag** | Who produced an opaque part (provider, model, protocol, account hash); decides whether it may be replayed (D18). |
 | **Catalog** | Genie's signed model list with capabilities, pricing and quirks (D27). **Live discovery** adds models found at run time. |
-| **Context baseline** | The cache-stable first context message: instructions, project knowledge, skills index, memory, environment (D32). |
+| **Context baseline** | The cache-stable second system block (or a first `<context>` user message on dialects that need it): instructions, skills index, MCP guidance, memory, project knowledge, environment, date (D32, SA-41/42, 06 §2.1). |
+| **Base prompt** | Genie's own system prompt, built from fragments: identity, harness rules, session kind, per-tool and per-feature guidance, style (06 §2.6, SA-45). |
 | **`<system-update>`** | A small inline message that tells the model a baseline source changed, without rewriting the cached prefix (D31). |
 | **Breakpoint** | A prompt-cache marker. Up to 4 per request: tools, system, baseline, conversation tail (D32). |
 | **Spill** | Moving tool output above 2,000 lines / 50 KiB to a blob, leaving a marker the model can page (D32). |

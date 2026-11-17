@@ -48,6 +48,11 @@ How to close an item: accept the default (it becomes a build-ticket detail) or r
 | SA-38 | Crate exceptions | `genie-process` and `genie-secrets` may be used by subsystem crates directly | Leaf utilities; core-trait indirection adds no safety | 01 §2.1 |
 | SA-39 | Paging spilled output in chat | Chat-only `tool_output_read {ref, offset, limit}` tool | t11 says "a read tool"; chat has none | 06 §4.1 |
 | SA-40 | Importer conflicts | OpenCode allow-after-deny exceptions imported as the deny + diagnostic | D53: "with diagnostics"; C4 favours safe side | 07 §5.3 |
+| SA-41 | Baseline placement | Context baseline in a **second system block** where the protocol supports it; first user message `<context>` only as a `Compat` fallback | D32 said "first user/context message" for portability; system role gives org rules more weight and resists injected content better (OpenCode uses a system part) | 06 §2.1, 03 §6 |
+| SA-42 | Baseline source order | Most-shared-first: org → custom → skills → MCP guidance → global memory → project instructions → project knowledge → project memory → instruction files → env → date | D32's order put project knowledge before global sources, which stops cache-prefix sharing across projects (KB ch.04 ordering rule) | 06 §2.1 |
+| SA-43 | Per-model tuning | Appendix only (≤150 tokens, never replaces the base prompt), keyed by catalog family, applied even with agent prompts, each entry justified by evals | D32 named "a table in the provider layer" without contents; OpenCode's override approach makes behaviour differ by model | 06 §2.6.5 |
+| SA-44 | MCP server instructions | Included as a baseline source per connected server, capped at 2 KB each | Not covered by D30/D32; OpenCode has an MCP guidance source | 06 §2.6.4 |
+| SA-45 | Prompt content | Genie-written base prompt (fragments, < ~1,200 tokens), per-capability guidance, fixed tag formats, hidden prompts, golden tests + prompt eval set | Spec named the base prompt but defined no content; drafts in 06 §2.6 are v0 for tuning | 06 §2.6 |
 
 ## 2. Decisions the user should make
 
