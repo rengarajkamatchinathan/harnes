@@ -1,7 +1,7 @@
 //! What the desktop's Settings and sidebar need beyond the first protocol cut:
 //! `session.update.project_id` (+ `session.listed`), per-chat capability toggles,
 //! `project.file.list`, `trust.list` + revoke, `permissions.rules.list/remove` and
-//! `data.delete_all.begin` / `data.delete_all`. In-memory transport, real store. No network.
+//! `data.delete_all.begin` / `data.delete_all.confirm`. In-memory transport, real store. No network.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)] // test code
 
@@ -423,11 +423,7 @@ async fn trusted_folders_are_listed_and_revoked_by_path() {
     assert_eq!(ia.decision, TrustDecision::Trust);
     assert!(!ia.decided_at.is_empty());
     assert_eq!(ia.approvals, 0);
-    assert!(
-        list.items
-            .iter()
-            .any(|i| i.decision == TrustDecision::Deny)
-    );
+    assert!(list.items.iter().any(|i| i.decision == TrustDecision::Deny));
 
     // Revoke by the listed path, even after the folder is gone.
     std::fs::remove_dir_all(&a).unwrap();
@@ -494,7 +490,10 @@ async fn saved_permission_rules_per_scope() {
         (PermissionRuleScope::User, PermissionRuleClass::Allow, false)
     );
     assert!(npm.source.unwrap().ends_with("settings.json"));
-    assert_eq!(find("WebFetch(domain:evil.test)").class, PermissionRuleClass::Deny);
+    assert_eq!(
+        find("WebFetch(domain:evil.test)").class,
+        PermissionRuleClass::Deny
+    );
     let local = find("Read(./src/**)");
     assert_eq!(local.scope, PermissionRuleScope::Local);
     assert!(local.source.unwrap().ends_with("settings.local.json"));
@@ -537,7 +536,10 @@ async fn saved_permission_rules_per_scope() {
         .await
         .unwrap()
         .rules;
-    let cli = with_session.iter().find(|r| r.rule == "Bash(rm:*)").unwrap();
+    let cli = with_session
+        .iter()
+        .find(|r| r.rule == "Bash(rm:*)")
+        .unwrap();
     assert_eq!((cli.scope, cli.locked), (PermissionRuleScope::Cli, true));
     assert!(
         with_session.iter().any(|r| r.rule == "Read(./src/**)"),
@@ -656,7 +658,7 @@ async fn delete_all_data_needs_a_token_and_leaves_an_empty_store() {
     // Without the token from `begin` nothing happens.
     let e = c
         .conn
-        .call::<m::DataDeleteAll>(DeleteAllParams {
+        .call::<m::DataDeleteAllConfirm>(DeleteAllParams {
             token: "guess".into(),
         })
         .await
@@ -664,7 +666,11 @@ async fn delete_all_data_needs_a_token_and_leaves_an_empty_store() {
     assert_eq!(rpc_kind(e), ErrorKind::InvalidParams);
     assert_eq!(mem.store.data_counts().unwrap().projects, 1);
 
-    let begin = c.conn.call::<m::DataDeleteAllBegin>(Empty {}).await.unwrap();
+    let begin = c
+        .conn
+        .call::<m::DataDeleteAllBegin>(Empty {})
+        .await
+        .unwrap();
     assert_eq!(begin.sessions, 1);
     assert_eq!(begin.projects, 1);
     assert_eq!(begin.memories, 1);
@@ -673,7 +679,7 @@ async fn delete_all_data_needs_a_token_and_leaves_an_empty_store() {
     assert!(begin.expires_in_s > 0);
     let done = c
         .conn
-        .call::<m::DataDeleteAll>(DeleteAllParams {
+        .call::<m::DataDeleteAllConfirm>(DeleteAllParams {
             token: begin.token.clone(),
         })
         .await
@@ -701,14 +707,11 @@ async fn delete_all_data_needs_a_token_and_leaves_an_empty_store() {
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
                    AND sql NOT LIKE 'CREATE VIRTUAL%' AND name NOT LIKE '%_fts_%'",
             )?;
-            let names: Vec<String> = st
-                .query_map([], |r| r.get(0))?
-                .collect::<Result<_, _>>()?;
+            let names: Vec<String> = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
             let mut out = vec![];
             for n in names {
-                let k: i64 = cn.query_row(&format!("SELECT COUNT(*) FROM \"{n}\""), [], |r| {
-                    r.get(0)
-                })?;
+                let k: i64 =
+                    cn.query_row(&format!("SELECT COUNT(*) FROM \"{n}\""), [], |r| r.get(0))?;
                 out.push((n, k));
             }
             Ok(out)
@@ -722,9 +725,7 @@ async fn delete_all_data_needs_a_token_and_leaves_an_empty_store() {
                     .store
                     .read(|cn| {
                         let mut st = cn.prepare("SELECT key FROM kv ORDER BY key")?;
-                        let v = st
-                            .query_map([], |r| r.get(0))?
-                            .collect::<Result<_, _>>()?;
+                        let v = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
                         Ok(v)
                     })
                     .unwrap();
@@ -739,7 +740,9 @@ async fn delete_all_data_needs_a_token_and_leaves_an_empty_store() {
     }
     let hits = mem
         .store
-        .read(|cn| genie_store::search::chat_search(cn, "Monday", &genie_store::search::Scope::All, 5))
+        .read(|cn| {
+            genie_store::search::chat_search(cn, "Monday", &genie_store::search::Scope::All, 5)
+        })
         .unwrap();
     assert!(hits.is_empty());
     assert!(!mem.store.blob_files().exists(&blob));
@@ -767,7 +770,7 @@ async fn delete_all_data_needs_a_token_and_leaves_an_empty_store() {
         .unwrap();
     let e = c
         .conn
-        .call::<m::DataDeleteAll>(DeleteAllParams { token: begin.token })
+        .call::<m::DataDeleteAllConfirm>(DeleteAllParams { token: begin.token })
         .await
         .unwrap_err();
     assert_eq!(rpc_kind(e), ErrorKind::InvalidParams);

@@ -218,13 +218,10 @@ impl Registry {
         self.list(&ListParams::default())
     }
 
-    /// Forget every session (`data.delete_all`); returns what was there, incognito
+    /// Forget every session (`data.delete_all.confirm`); returns what was there, incognito
     /// sessions included.
     pub fn clear(&self) -> Vec<SessionInfo> {
-        self.extra
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
+        self.extra.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.lock().drain().map(|(_, v)| v).collect()
     }
 }

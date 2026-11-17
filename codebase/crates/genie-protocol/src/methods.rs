@@ -159,7 +159,7 @@ methods! {
     /// "Delete all data" step 1 (04 §8): what will go, and a short-lived confirmation token.
     DataDeleteAllBegin = "data.delete_all.begin", Request, false, Empty => config::DeleteAllBeginResult;
     /// Step 2: wipe sessions, projects, blobs, memory, artifacts, snapshots, caches (+ local audit).
-    DataDeleteAll = "data.delete_all", Request, false, config::DeleteAllParams => config::DeleteAllResult;
+    DataDeleteAllConfirm = "data.delete_all.confirm", Request, false, config::DeleteAllParams => config::DeleteAllResult;
 
     // ---- providers, catalog, usage (§6.5)
     ProviderList = "provider.list", Request, false, Empty => provider::ProviderListResult;

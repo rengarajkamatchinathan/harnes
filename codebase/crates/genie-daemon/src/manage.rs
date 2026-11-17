@@ -1,6 +1,6 @@
 //! Settings → Privacy / Permissions methods: `trust.list` (08 §4), saved permission
 //! rules per scope (`permissions.rules.list/remove`, 06 §5.4) and "Delete all data"
-//! (`data.delete_all.begin` + `data.delete_all`, 04 §8).
+//! (`data.delete_all.begin` + `data.delete_all.confirm`, 04 §8).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -54,8 +54,8 @@ pub(crate) fn dispatch(
             params::<m::PermissionRulesRemove>(r).and_then(|p| rules_remove(svc, state, &p))
         }
         n if n == m::DataDeleteAllBegin::NAME => delete_begin(svc, state),
-        n if n == m::DataDeleteAll::NAME => {
-            params::<m::DataDeleteAll>(r).and_then(|p| delete_all(svc, state, &p.token))
+        n if n == m::DataDeleteAllConfirm::NAME => {
+            params::<m::DataDeleteAllConfirm>(r).and_then(|p| delete_all(svc, state, &p.token))
         }
         _ => return None,
     };
@@ -331,7 +331,7 @@ fn delete_all(
     let store = svc
         .store
         .clone()
-        .ok_or_else(|| not_implemented(m::DataDeleteAll::NAME))?;
+        .ok_or_else(|| not_implemented(m::DataDeleteAllConfirm::NAME))?;
     {
         let mut g = svc.delete_token.lock().unwrap_or_else(|e| e.into_inner());
         let ok = matches!(&*g, Some((t, exp)) if t == token && !token.is_empty() && Instant::now() < *exp);

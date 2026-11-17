@@ -256,7 +256,7 @@ pub struct PermissionRuleRemoveParams {
 /// What "Delete all data" will remove (04 §8), and the token that confirms it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteAllBeginResult {
-    /// Pass to `data.delete_all` within `expires_in_s` seconds; single use.
+    /// Pass to `data.delete_all.confirm` within `expires_in_s` seconds; single use.
     pub token: String,
     pub expires_in_s: u32,
     pub sessions: u64,

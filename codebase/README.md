@@ -615,6 +615,25 @@ reconnect resume from the cursor, overflow resubscribe, below-floor reload, re-a
 keys, panels, first run, end to end over the mock engine incl. a relayed ask) and
 `packages/ui/test` (tokens, AA contrast, components).
 
+### Engine side of the desktop's needs (02 §6, 04 §8, 06 §5.4, §8, D32, D35, 08 §4)
+
+| § | What | Where |
+|---|---|---|
+| 02 §6.2, D32 | `session.update {project_id}` moves a Chat session into a project (`""` = out of it); unknown project → `not_found`, Code sessions → `invalid_params`; not lease-gated; the store's `session.project_id` follows (chat-search scope); `session.updated {project_id}` → `session.listed {updated}` on the feed; the next turn picks up the project's instructions/knowledge as a baseline delta | `genie-daemon::server::{session_update, move_to_project}`, `genie-store::projects::set_session_project` |
+| 06 §8, D35, 05 §2.3 | per-chat toggles `web_search` (default on) and `code_execution` (default off) on `session.create` / `session.update` (lease-gated like `model`), returned on `SessionInfo` and `session.updated`; the turn loop passes the chat toggle and Settings → Capabilities (`webSearch.enabled`) to `native_search`, drops a local `web_search` tool when off, and declares the provider `code_execution` server tool only when the chat toggle is on, the model has `code_execution_native` and `codeExecution.enabled` (settings + policy) is not false | `genie-core::runtime::{AgentRuntime::{capability, web_search_on, code_execution_on}, turn::assemble}`, `SessionSettings::{web_search_off, code_execution}` |
+| 02 §6.2, D27, D34 | per-message usage: `Message.usage` (tokens) and `Message.cost` (USD) on assistant messages from `session.get`; written per chat step to `message.usage` / `message.cost_usd` (so they survive restarts) | `UsageLine::message_id`, `genie-store::messages::set_usage`, `genie-core::runtime::wire::message` |
+| 02 §6.9 | `project.file.list {project_id}` → `{file_id, name, mime, blob_id, tokens, size, added_at}` oldest first | `genie-daemon::projects::project_files` |
+| 08 §4 | `trust.list` → stored decisions `{path, decision: trust|deny, identity, decided_at, approvals}`; revoke by path with the existing `trust.set {decision: "revoke"}` (works for folders that no longer exist) | `genie-core::config::ConfigHub::trust_list`, `genie-daemon::manage` |
+| 06 §5.4, D23 | `permissions.rules.list {scope?, cwd?, session_id?}` → `{rule, class, scope: user|project|local|managed|session|cli, source (file path / policy / session / cli), locked}` (project/local from `cwd` or the session's Code workspace); `permissions.rules.remove {rule, class, scope, cwd?, session_id?}` edits the settings file (or the session's remembered rules), drops in-memory "always" copies, audits `settings.changed`; managed and CLI rules → `locked` | `genie-daemon::manage`, `ConfigHub::{permission_rule_files, remove_permission_rule}`, `PermissionAuthorizer::{session_rules, forget_rule}` |
+| 04 §8 | "Delete all data": `data.delete_all.begin` → counts + a single-use token (5 min); `data.delete_all.confirm {token}` closes every session (actors, leases, worktree/terminal bookkeeping, `session.listed {deleted}`), empties every table in one transaction (FTS indexes rebuilt empty), removes blob files, snapshots and caches, VACUUMs, clears the local audit log unless an org audit policy applies, records `data.deleted`, then sends `memory.changed {*}` and a fresh `workspace.snapshot`; the daemon keeps serving on the empty store | `genie-store::Store::{data_counts, wipe_all_data}`, `DaemonState::{wipe_sessions, broadcast_snapshot}`, `genie-daemon::manage` |
+
+Tests: `genie-daemon/tests/manage.rs` (project move + feed + store row, toggles + lease, file
+list, trust list + revoke of a deleted folder, rules list/filter/remove/locked/not found, delete
+all: token required and single use, feed deleted + snapshot, every table empty, blobs and audit
+gone, store usable afterwards), `genie-core/tests/turn.rs` (per-message usage in memory and
+persisted; the four toggle combinations → Anthropic server tools), `permissions` unit test
+(session rules listed / forgotten by scope).
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -689,16 +708,39 @@ then remaps ids, blobs, sanitized input, `session.list`, `import.scan/preview/ap
 - **Branch switching** calls `session.update {active_leaf_id: sibling}` then
   `session.get {leaf_id: sibling}`; showing the sibling's latest descendant relies on the daemon.
 - **Missing UI:** per-message token/cost hover, model badges, "attach MCP resource",
-  `/server:prompt` argument forms, and web-search / code-execution toggles (no per-chat toggle in
-  the protocol; the menu items are disabled with "Not available from this engine yet").
+  `/server:prompt` argument forms, and web-search / code-execution toggles (the menu items are
+  disabled). The engine side now exists (see "Engine side of the desktop's needs"); the desktop
+  still has to call it.
 - **Settings placeholders:** Install-in-PATH, delete all data, licence, trusted-folder list/revoke
-  and the saved "always" approvals list (no methods); per-model Advanced overrides go through the
-  raw `models` JSON setting; usage "charts" are a table with bars.
-- **Protocol changes the app needs:** `session.update.project_id` (move a chat to a project),
-  `trust.list` (+ revoke by path), a list of saved permission rules per scope, a delete-all-data
-  method, `project.file.list` (the page only lists files added during the visit), per-session
-  capability toggles (`web_search`, `code_execution`) on `session.update`, and per-message usage
-  on `Message` for the hover card.
+  and the saved "always" approvals list; per-model Advanced overrides go through the raw `models`
+  JSON setting; usage "charts" are a table with bars. Methods for delete-all, trust list and
+  saved rules now exist; wiring them (and `session.update.project_id`, `project.file.list`,
+  `Message.usage/cost`) into the desktop is pending.
+
+### Desktop-needs engine methods: deviations
+
+- **Delete all data is an in-place wipe**, not 04 §8's "remove the DB": the daemon shares one
+  open store across subsystems, so every row is deleted and the DB vacuumed (with
+  `secure_delete`) instead. The data key, the blob key, `recovery.bin` and the migration journal
+  stay (the store must stay openable); provider credentials, settings, `trust.json`, logs,
+  telemetry queue and the browser profile are kept. `Store::delete_all_data` (the offline,
+  remove-the-files variant) is still there but nothing calls it.
+- **Audit:** the local audit JSONL is cleared only when no org audit policy applies
+  (`org.name`, `audit.includeContent`, `audit.jsonl.dir` or `audit.otlp.endpoint` set); under
+  a managed policy it is the organisation's record and is kept. `data.deleted` is always recorded.
+- **Method naming:** `data.delete_all.begin` / `data.delete_all.confirm` (not `data.delete_all`):
+  the TS client generator refuses a name that is both a method and a namespace.
+- **Moving a chat out of a project** uses `project_id: ""` (not `null`), so the field stays a plain
+  optional string on the wire.
+- **Toggles are lease-gated** (they change how the session runs, like `model`); `project_id`
+  is not (list metadata, like `pinned`).
+- **Code execution** is declared only for models whose catalog entry says `code_execution_native`;
+  the first-use "files go to <provider>'s sandbox" notice (D35) is UI work. Code-execution output
+  parts arrive as provider tool parts (no attachment extraction yet).
+- **Per-message usage** covers chat steps; compaction and title usage stay session-level lines.
+  Messages written before this change have no usage.
+- **Session counts** in `data.delete_all.begin` are the larger of the store's session rows and the
+  in-memory registry (the registry is not reloaded from the store across restarts).
 
 ### Projects, artifacts, memory, retrieval gaps and deviations
 

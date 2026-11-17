@@ -494,6 +494,66 @@
     },
     {
       "direction": "request",
+      "ident": "TrustList",
+      "name": "trust.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/TrustListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PermissionRulesList",
+      "name": "permissions.rules.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PermissionRulesListParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PermissionRulesListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PermissionRulesRemove",
+      "name": "permissions.rules.remove",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PermissionRuleRemoveParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DataDeleteAllBegin",
+      "name": "data.delete_all.begin",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/DeleteAllBeginResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "DataDeleteAllConfirm",
+      "name": "data.delete_all.confirm",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/DeleteAllParams"
+      },
+      "result": {
+        "$ref": "#/$defs/DeleteAllResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "ProviderList",
       "name": "provider.list",
       "needs_lease": false,
@@ -1114,6 +1174,18 @@
       },
       "result": {
         "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "ProjectFileList",
+      "name": "project.file.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ProjectIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ProjectFileListResult"
       }
     },
     {

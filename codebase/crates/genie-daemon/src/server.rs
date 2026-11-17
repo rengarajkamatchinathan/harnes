@@ -323,12 +323,12 @@ impl DaemonState {
     }
 
     /// A fresh `workspace.snapshot` to every workspace subscriber (after
-    /// `data.delete_all`, the feed's state changed wholesale).
+    /// `data.delete_all.confirm`, the feed's state changed wholesale).
     pub(crate) fn broadcast_snapshot(&self) {
         self.workspace_send(m::WorkspaceSnapshot::NAME, &snapshot(self));
     }
 
-    /// Close and forget every session (`data.delete_all`): actors stopped, leases,
+    /// Close and forget every session (`data.delete_all.confirm`): actors stopped, leases,
     /// worktree/terminal bookkeeping dropped, `session.listed {deleted}` on the feed.
     /// Returns how many sessions there were.
     pub(crate) fn wipe_sessions(self: &Arc<Self>) -> u64 {

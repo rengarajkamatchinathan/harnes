@@ -66,7 +66,7 @@ pub struct Services {
     /// The permission evaluator (session-scoped "always" rules for
     /// `permissions.rules.list/remove`).
     pub authz: Option<Arc<genie_core::runtime::permissions::PermissionAuthorizer>>,
-    /// The pending `data.delete_all` confirmation token and when it expires.
+    /// The pending `data.delete_all.confirm` confirmation token and when it expires.
     pub delete_token: Mutex<Option<(String, std::time::Instant)>>,
 }
 
