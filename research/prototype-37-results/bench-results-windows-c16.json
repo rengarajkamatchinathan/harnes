@@ -1,0 +1,424 @@
+{
+  "cold_start": {
+    "connected_pid": 10860,
+    "daemon_was_spawned": false,
+    "fcp_after_nav_ms": null,
+    "process_start_to_daemon_connected_ms": 1071,
+    "process_start_to_first_paint_ms": 1065,
+    "process_start_to_webview_nav_ms": 855
+  },
+  "device_pixel_ratio": 1.25,
+  "highlighters": {
+    "blocks": 6,
+    "hljs": {
+      "full_all_blocks_ms": 2.655,
+      "tail": {
+        "calls": 167,
+        "max_ms": 1.3,
+        "p50_ms": 0.2,
+        "p95_ms": 0.6
+      }
+    },
+    "langs": [
+      "rust",
+      "typescript",
+      "python",
+      "go",
+      "sql",
+      "bash"
+    ],
+    "shiki_js_engine": {
+      "full_all_blocks_ms": 66.315,
+      "init_ms": 91.8,
+      "tail": {
+        "calls": 167,
+        "max_ms": 4.7,
+        "p50_ms": 1.1,
+        "p95_ms": 3.7
+      }
+    }
+  },
+  "info": {
+    "arch": "x86_64",
+    "bench": true,
+    "coalesce_ms": 16,
+    "os": "windows",
+    "scenarios": null,
+    "start_wall_ms": 1794884610000.896
+  },
+  "kill": {
+    "chat_after_reconnect": "ok: stream completed",
+    "max_reconnect_ms": 323.5,
+    "runs": [
+      {
+        "detect_ms": 266.6,
+        "killed_pid": 10860,
+        "new_pid": 18012,
+        "reconnect_ms": 323.5
+      },
+      {
+        "detect_ms": 221.3,
+        "killed_pid": 18012,
+        "new_pid": 8284,
+        "reconnect_ms": 280.5
+      },
+      {
+        "detect_ms": 233.6,
+        "killed_pid": 8284,
+        "new_pid": 12652,
+        "reconnect_ms": 301.8
+      }
+    ]
+  },
+  "memory_end": {
+    "js_heap_mb": 38.4,
+    "rss": {
+      "app_tree_processes": 7,
+      "rss_app_tree_mb": 558.4,
+      "rss_daemon_mb": 6.2,
+      "rss_shell_mb": 31.6
+    }
+  },
+  "pass": {
+    "burst_event_loop_lag_max_lt_100": true,
+    "burst_no_longtask_gt_100": true,
+    "kill_reconnect_le_2000": true,
+    "long_scroll_p95_frame_le_16_7": false,
+    "normal_emit_to_paint_p95_le_50": true,
+    "normal_no_longtask_gt_50": false,
+    "normal_p95_frame_le_16_7": false,
+    "note": "frame p95 compares to a strict 16.7 ms; see phases.idle.frames for the vsync baseline of this display"
+  },
+  "phases": {
+    "burst": {
+      "duration_ms": 5234,
+      "emit_to_js_ms": {
+        "p50": 9.95,
+        "p95": 17.43
+      },
+      "emit_to_paint_ms": {
+        "max": 50.98,
+        "n": 5136,
+        "p50": 34.53,
+        "p95": 45.65,
+        "p99": 48.63
+      },
+      "event_loop_lag_ms": {
+        "max": 9.2,
+        "p95": 3.3
+      },
+      "frames": {
+        "count": 310,
+        "janky_over_25ms": 0,
+        "max": 17.2,
+        "p50": 16.7,
+        "p95": 16.8,
+        "p99": 16.9
+      },
+      "longtasks": {
+        "count": 0,
+        "max": null,
+        "supported": true
+      },
+      "rendered_tok_per_s": 984.4,
+      "tokens": 5152
+    },
+    "idle": {
+      "duration_ms": 2012,
+      "emit_to_js_ms": {
+        "p50": null,
+        "p95": null
+      },
+      "emit_to_paint_ms": {
+        "max": null,
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null
+      },
+      "event_loop_lag_ms": {
+        "max": 1.4,
+        "p95": 1
+      },
+      "frames": {
+        "count": 120,
+        "janky_over_25ms": 0,
+        "max": 17,
+        "p50": 16.7,
+        "p95": 16.8,
+        "p99": 17
+      },
+      "longtasks": {
+        "count": 0,
+        "max": null,
+        "supported": true
+      },
+      "rendered_tok_per_s": null,
+      "tokens": 0
+    },
+    "kill": {
+      "duration_ms": 4013,
+      "emit_to_js_ms": {
+        "p50": null,
+        "p95": null
+      },
+      "emit_to_paint_ms": {
+        "max": null,
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null
+      },
+      "event_loop_lag_ms": {
+        "max": 1660.5,
+        "p95": 1.1
+      },
+      "frames": {
+        "count": 243,
+        "janky_over_25ms": 1,
+        "max": 1650,
+        "p50": 16.7,
+        "p95": 16.8,
+        "p99": 16.9
+      },
+      "longtasks": {
+        "count": 1,
+        "max": 1662,
+        "supported": true
+      },
+      "rendered_tok_per_s": null,
+      "tokens": 0
+    },
+    "long-history": {
+      "duration_ms": 44247,
+      "emit_to_js_ms": {
+        "p50": null,
+        "p95": null
+      },
+      "emit_to_paint_ms": {
+        "max": null,
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null
+      },
+      "event_loop_lag_ms": {
+        "max": 80.3,
+        "p95": 80.3
+      },
+      "frames": {
+        "count": 17,
+        "janky_over_25ms": 2,
+        "max": 49.8,
+        "p50": 16.7,
+        "p95": 49.8,
+        "p99": 49.8
+      },
+      "longtasks": {
+        "count": 1,
+        "max": 52,
+        "supported": true
+      },
+      "rendered_tok_per_s": null,
+      "tokens": 0
+    },
+    "long-scroll": {
+      "duration_ms": 5168,
+      "emit_to_js_ms": {
+        "p50": null,
+        "p95": null
+      },
+      "emit_to_paint_ms": {
+        "max": null,
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null
+      },
+      "event_loop_lag_ms": {
+        "max": 37.8,
+        "p95": 21.2
+      },
+      "frames": {
+        "count": 300,
+        "janky_over_25ms": 10,
+        "max": 33.6,
+        "p50": 16.7,
+        "p95": 17.1,
+        "p99": 33.4
+      },
+      "longtasks": {
+        "count": 0,
+        "max": null,
+        "supported": true
+      },
+      "rendered_tok_per_s": null,
+      "tokens": 0
+    },
+    "long-scroll-down": {
+      "duration_ms": 5118,
+      "emit_to_js_ms": {
+        "p50": null,
+        "p95": null
+      },
+      "emit_to_paint_ms": {
+        "max": null,
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null
+      },
+      "event_loop_lag_ms": {
+        "max": 37.6,
+        "p95": 21.6
+      },
+      "frames": {
+        "count": 300,
+        "janky_over_25ms": 7,
+        "max": 33.5,
+        "p50": 16.7,
+        "p95": 16.9,
+        "p99": 33.3
+      },
+      "longtasks": {
+        "count": 0,
+        "max": null,
+        "supported": true
+      },
+      "rendered_tok_per_s": null,
+      "tokens": 0
+    },
+    "long-stream": {
+      "duration_ms": 21466,
+      "emit_to_js_ms": {
+        "p50": 10.22,
+        "p95": 17.87
+      },
+      "emit_to_paint_ms": {
+        "max": 51.81,
+        "n": 1714,
+        "p50": 35.51,
+        "p95": 45.06,
+        "p99": 49.1
+      },
+      "event_loop_lag_ms": {
+        "max": 8.1,
+        "p95": 2.6
+      },
+      "frames": {
+        "count": 1287,
+        "janky_over_25ms": 0,
+        "max": 17.8,
+        "p50": 16.7,
+        "p95": 16.8,
+        "p99": 17
+      },
+      "longtasks": {
+        "count": 0,
+        "max": null,
+        "supported": true
+      },
+      "rendered_tok_per_s": 79.9,
+      "tokens": 1716
+    },
+    "normal": {
+      "duration_ms": 21477,
+      "emit_to_js_ms": {
+        "p50": 10.48,
+        "p95": 18.84
+      },
+      "emit_to_paint_ms": {
+        "max": 475.28,
+        "n": 1714,
+        "p50": 34.76,
+        "p95": 47.83,
+        "p99": 271.92
+      },
+      "event_loop_lag_ms": {
+        "max": 383.1,
+        "p95": 2.7
+      },
+      "frames": {
+        "count": 1249,
+        "janky_over_25ms": 7,
+        "max": 233.3,
+        "p50": 16.7,
+        "p95": 16.9,
+        "p99": 17.4
+      },
+      "longtasks": {
+        "count": 6,
+        "max": 210,
+        "supported": true
+      },
+      "rendered_tok_per_s": 79.9,
+      "tokens": 1716
+    }
+  },
+  "rust": {
+    "coalesce_ms": 16,
+    "daemon_exe_mb": 0.44,
+    "exe": "C:\\Users\\RengarajKamatchinath\\OneDrive - Synergech Technology Solutions\\Desktop\\New folder\\prototypes\\37-streaming-chat\\target\\release\\genie-proto-37.exe",
+    "exe_mb": 5.64,
+    "metrics_at_end": {
+      "app_tree_processes": 7,
+      "rss_app_tree_mb": 558.7,
+      "rss_daemon_mb": 6.2,
+      "rss_shell_mb": 31.7
+    },
+    "reconnects_ms": [
+      323.48789999999997,
+      280.4818,
+      301.76930000000004
+    ]
+  },
+  "scenarios": {
+    "burst": {
+      "dom_nodes": 3133,
+      "heap_after_mb": 19.2,
+      "heap_before_mb": 22.3,
+      "rss": {
+        "app_tree_processes": 7,
+        "rss_app_tree_mb": 500.8,
+        "rss_daemon_mb": 6,
+        "rss_shell_mb": 31.4
+      },
+      "wall_ms": 5234
+    },
+    "long": {
+      "dom_nodes": 1986,
+      "heap_after_mb": 20.9,
+      "heap_before_mb": 19.3,
+      "messages": 201,
+      "rss": {
+        "app_tree_processes": 7,
+        "rss_app_tree_mb": 500.5,
+        "rss_daemon_mb": 7.2,
+        "rss_shell_mb": 32
+      },
+      "scroll": {
+        "frames_each_way": 300,
+        "px_up": 75979
+      },
+      "wall_ms": 21812
+    },
+    "normal": {
+      "dom_nodes": 1081,
+      "heap_after_mb": 22.3,
+      "heap_before_mb": 3.7,
+      "rss": {
+        "app_tree_processes": 7,
+        "rss_app_tree_mb": 490,
+        "rss_daemon_mb": 6,
+        "rss_shell_mb": 31.4
+      },
+      "wall_ms": 21477
+    }
+  },
+  "started_at": "2026-11-17T03:03:31.073Z",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0",
+  "window": [
+    1100,
+    844
+  ]
+}

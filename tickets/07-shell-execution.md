@@ -41,3 +41,6 @@ Resolved 2026-11-16. User decisions are marked **(user)**; the rest are defaults
 - A **command scanner** (our own, design from OpenCode) splits compound commands (`&&`, `||`, `;`, pipes, subshells) into sub-commands; each is checked against `Bash(...)`/`PowerShell(...)` rules. **Unparseable commands fail closed (ask).** "Always allow" saves a prefix from an arity table (e.g. `git commit:*`, `npm run test:*`).
 - Read-only commands (e.g. `ls`, `git status`, `Get-ChildItem`) can be auto-allowed by a built-in list in `default` mode; everything else asks. `plan` mode: no shell (D25).
 - The working directory must stay inside the workspace + `additionalDirectories`; `cd` outside asks.
+
+### Amendment (D55, 2026-11-17)
+- The interactive **Terminal tab** ships with the Code tab: PTY mode of `genie-process` (portable-pty + libghostty-vt) + xterm.js in the webview. The PTY feature and Zig in CI move forward accordingly. Reattach after reload uses the ported checkpoint + replay-offset model (KB ch.16).

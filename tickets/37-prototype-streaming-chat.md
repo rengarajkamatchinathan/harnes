@@ -1,6 +1,6 @@
 # 37 — Prototype: Tauri + React streaming chat on the daemon
 
-type: wayfinder:prototype · status: blocked (env: no MSVC Build Tools on Windows) · claimed-by: prototype-agent (2026-11-16) · blocked-by: 02,03,30
+type: wayfinder:prototype · status: resolved-pending-review (Windows done; macOS/Linux pending) · claimed-by: prototype-agent (2026-11-17) · blocked-by: 02,03,30
 
 ## Question
 Prove token streaming from the daemon into React, with incremental markdown and code highlighting, on Windows, macOS and Linux.
@@ -17,8 +17,21 @@ Prove token streaming from the daemon into React, with incremental markdown and 
 - OpenCode ch.18: [18-app-ui-and-gui-plugins.md](../knowledge/opencode/18-app-ui-and-gui-plugins.md) — read TL;DR, Architecture, Genie takeaways
 
 ## Resolution
-**Blocked, not resolved (2026-11-16).** Report: [research/prototype-37.md](../research/prototype-37.md).
-- The Windows machine has Rust 1.99.1 (MSVC target), Node 22, pnpm 10 and WebView2 157, but **no MSVC C++ Build Tools and no Windows SDK**, so no Rust binary links (`cargo build` of hello-world fails, and Git's GNU `link.exe` is picked up instead).
-- No prototype code was built and no numbers were measured. All pass criteria (normal/burst/long frame times, emit→paint, kill→reconnect ≤ 2 s, cold start, bundle size) are **not run** on Windows, macOS or Linux.
-- To unblock (admin): install VS Build Tools 2022+ with the "Desktop development with C++" workload, e.g. `winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`, then re-run this ticket.
-- The planned design, pass criteria and macOS/Linux steps are in the report. The D8 gate is still open.
+**Windows done; macOS/Linux pending (2026-11-17).** Report: [research/prototype-37.md](../research/prototype-37.md), section "Run 2 (windows-gnu)". Code: [prototypes/37-streaming-chat/](../prototypes/37-streaming-chat/).
+- **Build.** The user-level `stable-x86_64-pc-windows-gnu` toolchain built everything, with no MSVC and no admin rights. It needed three local workarounds, all automated in `run-bench.ps1`:
+  - llvm-dlltool from the llvm-mingw release zip, because the bundled GNU dlltool needs `as`;
+  - rust-lld via an `ld.exe` shim, because GNU ld mis-links llvm-dlltool import libs (crash `0xc0000005`), and the shim also re-quotes response files for paths with spaces;
+  - a `windres --no-preprocess` shim. Tauri resources are still embedded.
+- **Windows 11 / WebView2 157 at 60 Hz, 16 ms coalescing.**
+  - `burst`: 984 tok/s, 0 long tasks, lag max 9 ms. **PASS.**
+  - `normal`: emit→paint p95 47.8 ms. **PASS.**
+  - Kill→reconnect: 281–324 ms. **PASS.**
+  - `normal`: 6 long tasks, max 210 ms. **FAIL.** They are attributed to Mermaid's first load and render; the cached re-run in `long` had 0.
+  - Frame p95 in `normal` (16.9 ms) and in the `long` scroll (17.1 ms) fail the strict 16.7 ms criterion, but idle vsync p95 on this display is already 16.8 ms, so the criterion should be made relative to idle.
+  - Other numbers: cold start ~1.07 s to first paint; app exe 5.6 MB (gnu/lld build, not representative of MSVC); app process tree 558 MB RSS; JS heap 38 MB.
+- **Recommendations:**
+  - Keep the settled/tail block split, rAF-batched commits and the virtualised transcript.
+  - Pre-warm Mermaid and render it off the critical path.
+  - Use highlight.js for the streaming tail; it is ~6× cheaper than shiki per call.
+  - Use ~8 ms Rust coalescing rather than 16 ms; uncoalesced was fine at 1,000 tok/s on WebView2.
+- **Still open: the D8 gate.** Someone needs to run `./run-bench.sh` on macOS (oldest supported version) and on Linux (Ubuntu LTS, with and without `WEBKIT_DISABLE_DMABUF_RENDERER=1`, on X11 and Wayland). The step-by-step instructions are in the report. The Unix code paths were not compiled on this machine.
