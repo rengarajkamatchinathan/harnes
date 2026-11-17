@@ -12,6 +12,7 @@ pub mod audit;
 pub mod otlp;
 pub mod rotating;
 pub mod scrub;
+pub mod sys;
 pub mod telemetry;
 
 use std::io;

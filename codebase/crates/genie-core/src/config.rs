@@ -202,6 +202,20 @@ impl ConfigHub {
 
     // ---------------------------------------------------------------- settings
 
+    /// Every settings file of the loaded stores, including ones that don't exist yet
+    /// (the daemon's file watcher).
+    pub fn watched_paths(&self) -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = self
+            .lock()
+            .stores
+            .values()
+            .flat_map(|s| s.watched_paths())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
     /// Re-read every settings file (debounced watcher / poll). Emits `config.changed`.
     pub fn refresh(&self) {
         let mut out = Vec::new();

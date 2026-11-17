@@ -518,23 +518,46 @@ async fn status_standalone(channel: Channel) -> Result<DaemonStatus> {
     Ok(st?)
 }
 
+/// `genie doctor` (01 §8): the daemon's `doctor.run` checks; local git/rg checks when the
+/// daemon can't be reached.
 async fn doctor(channel: Channel) -> Result<u8> {
+    use genie_protocol::api::daemon::{CheckStatus, DoctorResult};
+    use genie_protocol::methods::Method;
     let mut failed = false;
     let mut row = |name: &str, ok: bool, detail: String| {
         failed |= !ok;
         println!("{} {name:<18} {detail}", if ok { "ok  " } else { "FAIL" });
     };
-    match status_shared(channel).await {
-        Ok(st) => row(
-            "daemon",
-            true,
-            format!(
-                "engine {} on {} (cli {})",
-                st.version,
-                st.socket,
+    let remote: Result<DoctorResult> = async {
+        let l = link(channel).await?;
+        let r = l
+            .conn
+            .request(m::DoctorRun::NAME, serde_json::Value::Null)
+            .await;
+        l.shutdown().await;
+        Ok(r?)
+    }
+    .await;
+    match remote {
+        Ok(res) => {
+            println!(
+                "     {:<18} cli {}",
+                "client",
                 env!("CARGO_PKG_VERSION")
-            ),
-        ),
+            );
+            for c in res.checks {
+                let tag = match c.status {
+                    CheckStatus::Ok => "ok  ",
+                    CheckStatus::Warn => "warn",
+                    CheckStatus::Fail => "FAIL",
+                    CheckStatus::Unknown => "?   ",
+                };
+                failed |= c.status == CheckStatus::Fail;
+                let link = c.fix_link.map(|l| format!("  → {l}")).unwrap_or_default();
+                println!("{tag} {:<18} {}{link}", c.id, c.detail);
+            }
+            return Ok(u8::from(failed));
+        }
         Err(e) => row("daemon", false, format!("{e:#}")),
     }
     for (name, args) in [("git", ["--version"]), ("rg", ["--version"])] {

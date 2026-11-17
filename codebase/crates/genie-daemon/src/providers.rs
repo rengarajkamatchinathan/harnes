@@ -444,6 +444,42 @@ impl ProviderHub {
             .is_none_or(|l| l.iter().any(|x| x == id))
     }
 
+    /// Where requests to provider `id` go: the configured base URL or the preset's default
+    /// (`None` = not configured yet; Azure / OpenAI-compatible need a base URL).
+    fn endpoint_of(&self, id: &str) -> Option<String> {
+        let s = self.settings(id);
+        if let Some(b) = s.base_url.clone() {
+            return Some(b);
+        }
+        let url = match self.kind_of(id)?.as_str() {
+            "anthropic" => "https://api.anthropic.com".to_string(),
+            "openai" => "https://api.openai.com".to_string(),
+            "google" if s.project.is_some() => match s.location.as_deref() {
+                None | Some("global") => "https://aiplatform.googleapis.com".to_string(),
+                Some(loc) => format!("https://{loc}-aiplatform.googleapis.com"),
+            },
+            "google" => "https://generativelanguage.googleapis.com".to_string(),
+            "openrouter" => "https://openrouter.ai/api".to_string(),
+            "ollama" => genie_providers::route::OLLAMA_DEFAULT_BASE.to_string(),
+            _ => return None,
+        };
+        Some(url)
+    }
+
+    /// Policy `endpoints.allowed` (08 §5.2): `Err(message)` when the provider's endpoint is
+    /// not on the list.
+    fn endpoint_check(&self, id: &str) -> Result<(), String> {
+        let Some(list) = self.policy_list("endpoints.allowed") else {
+            return Ok(());
+        };
+        match self.endpoint_of(id) {
+            Some(url) if !genie_config::endpoint_allowed(&url, &list) => Err(format!(
+                "the {id} endpoint {url} is not allowed by your organization's policy"
+            )),
+            _ => Ok(()),
+        }
+    }
+
     fn method_allowed(&self, k: CredentialKind) -> bool {
         self.policy_list("auth.methods")
             .is_none_or(|l| l.iter().any(|x| x == method_name(k)))
@@ -503,6 +539,7 @@ impl ProviderHub {
         if !self.allowed(id) {
             return Err(format!("{id} is not allowed by your organization's policy"));
         }
+        self.endpoint_check(id)?;
         let s = self.settings(id);
         let key_preset = match kind.as_str() {
             "anthropic" => Preset::Anthropic,
@@ -619,7 +656,7 @@ impl ProviderHub {
     }
 
     fn status_of(&self, id: &str) -> ProviderStatus {
-        if !self.allowed(id) {
+        if !self.allowed(id) || self.endpoint_check(id).is_err() {
             return ProviderStatus::Disabled;
         }
         if self.secrets.is_locked() {
@@ -814,6 +851,8 @@ impl ProviderHub {
                 ),
             ));
         }
+        self.endpoint_check(&p.provider)
+            .map_err(|e| policy_blocked("endpoints.allowed", e))?;
         let kind = match p.kind {
             WireKind::Key => CredentialKind::Key,
             WireKind::External => CredentialKind::External,
@@ -954,6 +993,8 @@ impl ProviderHub {
                 format!("{provider} is not allowed by your organization's policy"),
             ));
         }
+        self.endpoint_check(provider)
+            .map_err(|e| policy_blocked("endpoints.allowed", e))?;
         if !self.method_allowed(CredentialKind::OAuth) {
             return Err(policy_blocked(
                 "auth.methods",
@@ -1268,6 +1309,19 @@ impl ProviderHub {
                 .map(|e| e.provider.clone())
                 .filter(|p| !allowed.contains(p))
                 .collect();
+        }
+        // Providers whose endpoint the policy refuses are hidden too (`endpoints.allowed`).
+        if self.policy_list("endpoints.allowed").is_some() {
+            let blocked: Vec<String> = cat
+                .entries()
+                .map(|e| e.provider.clone())
+                .filter(|p| self.endpoint_check(p).is_err())
+                .collect();
+            for p in blocked {
+                if !pol.hidden_providers.contains(&p) {
+                    pol.hidden_providers.push(p);
+                }
+            }
         }
         let allowed_models = self.policy_list("models.allowed");
         let blocked = self.policy_list("models.blocked").unwrap_or_default();
