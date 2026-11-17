@@ -15,12 +15,15 @@ mod code;
 mod keystore;
 mod lease;
 mod listener;
+mod observe;
+mod ops;
 mod projects;
 mod providers;
 mod registry;
 pub mod secrets;
 mod server;
 mod services;
+mod sync;
 mod terminal;
 mod token;
 mod transfer;
@@ -46,9 +49,11 @@ pub use secrets::{Secrets, SecretsChoice, SecretsKeyStore};
 
 pub use blobs::Uploads;
 pub use lease::LEASE_GRACE;
+pub use observe::{EventTap, HttpOtlp, OTLP_HEADERS_ACCOUNT, SentryExporter};
 pub use registry::Registry;
 pub use server::{DaemonState, ShutdownReason, serve_stream};
 pub use services::Services;
+pub use sync::{HttpPolicyFetcher, fetch_signed};
 
 /// Per-subscription outbound queue bound (02 §3.1, SA-10).
 pub const SUB_QUEUE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -152,10 +157,54 @@ pub fn open_store(
 
 /// The org audit stream (08 §6): local rotating JSONL in `<data dir>/audit/` (or the
 /// policy's `audit.jsonl.dir`), content only with `audit.includeContent`.
+///
+/// With policy `audit.otlp.endpoint` the records are also queued for the OTLP exporter
+/// (headers from the keychain account `audit.otlp.headers`), flushed by `sync`.
+#[allow(clippy::type_complexity)]
 fn build_auditor(
     ep: &Endpoint,
     policy: &genie_config::EffectivePolicy,
-) -> Option<Arc<genie_audit::Auditor>> {
+    secrets: &Secrets,
+) -> (
+    Option<Arc<genie_audit::Auditor>>,
+    Option<(
+        Arc<genie_audit::OtlpSink>,
+        Arc<dyn genie_audit::OtlpTransport>,
+    )>,
+) {
+    let otlp = policy
+        .get("audit.otlp.endpoint")
+        .and_then(|v| v.as_str())
+        .filter(|e| !e.trim().is_empty())
+        .map(|endpoint| {
+            let transport: Arc<dyn genie_audit::OtlpTransport> = Arc::new(observe::HttpOtlp::new(
+                genie_providers::oauth::http_client().unwrap_or_default(),
+                endpoint,
+                observe::otlp_headers(secrets.backend().as_ref()),
+            ));
+            (Arc::new(genie_audit::OtlpSink::default()), transport)
+        });
+    let ctx = genie_audit::AuditContext {
+        install_id: install_id(ep),
+        user: genie_audit::AuditContext::os_user(),
+        org: policy.org_name().map(String::from),
+        include_content: policy.include_content(),
+    };
+    let mut auditor = genie_audit::Auditor::new(ctx);
+    if let Some(sink) = jsonl_sink(ep, policy) {
+        auditor = auditor.with_sink(Arc::new(sink));
+    }
+    if let Some((sink, _)) = &otlp {
+        auditor = auditor.with_sink(sink.clone());
+    }
+    let auditor = auditor.is_enabled().then(|| Arc::new(auditor));
+    (auditor, otlp)
+}
+
+fn jsonl_sink(
+    ep: &Endpoint,
+    policy: &genie_config::EffectivePolicy,
+) -> Option<genie_audit::JsonlSink> {
     let dir = policy
         .get("audit.jsonl.dir")
         .and_then(|v| v.as_str())
@@ -172,15 +221,7 @@ fn build_auditor(
             return None;
         }
     };
-    Some(Arc::new(
-        genie_audit::Auditor::new(genie_audit::AuditContext {
-            install_id: install_id(ep),
-            user: genie_audit::AuditContext::os_user(),
-            org: policy.org_name().map(String::from),
-            include_content: policy.include_content(),
-        })
-        .with_sink(Arc::new(sink)),
-    ))
+    Some(sink)
 }
 
 /// A random id per install, kept in `<data dir>/install_id`.
@@ -226,16 +267,32 @@ fn build_engine(
         }
     };
     if let Some(hub) = &hub {
-        let mut pm = genie_config::PolicyManager::new(vec![Box::new(
-            genie_config::FilePolicySource::system(),
-        )])
-        .with_remote_cache(ep.data_dir.join("policy-remote.json"));
+        // System file + MDM (macOS profile / Windows registry), signed remote URL (08 §5.1).
+        let mut pm = genie_config::PolicyManager::new(genie_config::system_sources())
+            .with_remote_cache(ep.data_dir.join("policy-remote.json"));
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            pm = pm.with_remote(Arc::new(sync::HttpPolicyFetcher {
+                client: genie_providers::oauth::http_client().unwrap_or_default(),
+                handle,
+            }));
+        }
         pm.refresh_local();
         pm.load_remote_cache();
         hub.set_policy(pm.effective());
-        services.audit = build_auditor(ep, &hub.policy());
+        let (audit, otlp) = build_auditor(ep, &hub.policy(), &secrets);
+        services.audit = audit;
+        services.otlp = otlp;
         services.policy = Some(std::sync::Mutex::new(pm));
     }
+    // Telemetry (08 §7): crash reports from panics; consent applied by `sync::start`.
+    services.telemetry = observe::open_telemetry(&ep.data_dir, ep.channel.as_str());
+    if let Some(t) = &services.telemetry {
+        if let Some(h) = &hub {
+            t.set_consent(observe::consent_from(h));
+        }
+        t.install_panic_hook();
+    }
+    services.secrets = Some(secrets.clone());
     let store = match open_store(ep, &SecretsKeyStore(secrets.backend())) {
         Ok(s) => Some(s),
         Err(e) => {
@@ -245,7 +302,7 @@ fn build_engine(
     };
     // Providers, credentials and the catalog (03 §8, §10); the model resolver reads both.
     let providers = Arc::new(
-        ProviderHub::new(secrets, ep.data_dir.clone())
+        ProviderHub::new(secrets.clone(), ep.data_dir.clone())
             .with_config(hub.clone())
             .with_store(store.clone())
             .with_audit(services.audit.clone()),
@@ -263,8 +320,17 @@ fn build_engine(
     let mut eb = EngineBuilder::new();
     if let Some(store) = &store {
         rb = rb.store(store.clone());
-        eb = eb.journal(Arc::new(StoreJournal::new(store.clone())));
     }
+    // Durable events → audit (tool calls, usage, browser actions) + usage analytics.
+    let journal: Arc<dyn genie_core::journal::Journal> = match &store {
+        Some(store) => Arc::new(StoreJournal::new(store.clone())),
+        None => Arc::new(genie_core::journal::MemoryJournal::new()),
+    };
+    eb = eb.journal(observe::EventTap::wrap(
+        journal,
+        services.audit.clone(),
+        services.telemetry.clone(),
+    ));
     // Artifacts, projects + retrieval, memory state, attachments, chat search
     // (D28, D31, D32, 06 §2.5).
     rb = projects::wire(

@@ -262,6 +262,7 @@ pub(crate) async fn locked_phase(
     let engine = EngineBuilder::new().build(&root);
     let services = Services {
         providers: Some(crate::providers::ProviderHub::locked(secrets.clone())),
+        secrets: Some(secrets.clone()),
         ..Default::default()
     };
     let state = Arc::new(DaemonState::with_services(

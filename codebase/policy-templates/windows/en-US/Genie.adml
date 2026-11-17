@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitionResources xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" revision="1.0" schemaVersion="1.0" xmlns="http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions">
+  <displayName>Genie</displayName>
+  <description>Genie managed policy</description>
+  <resources>
+    <stringTable>
+      <string id="SUPPORTED_Genie1">Genie 1.0 and later</string>
+      <string id="Genie">Genie</string>
+      <string id="Cat_Org">Organization</string>
+      <string id="Cat_Delivery">Policy delivery</string>
+      <string id="Cat_Providers">Providers and models</string>
+      <string id="Cat_Permissions">Permissions</string>
+      <string id="Cat_MCP">MCP servers</string>
+      <string id="Cat_Skills">Skills</string>
+      <string id="Cat_Capabilities">Capabilities</string>
+      <string id="Cat_Data">Memory and data</string>
+      <string id="Cat_Trust">Trust, hooks and agents</string>
+      <string id="Cat_Telemetry">Telemetry and audit</string>
+      <string id="Cat_Updates">Updates</string>
+      <string id="OrgName">Organization name</string>
+      <string id="OrgName_Explain">Shown as "Managed by &lt;org&gt;" next to locked settings and in "Blocked by &lt;org&gt; policy" messages.</string>
+      <string id="OrgInstructions">Organization instructions</string>
+      <string id="OrgInstructions_Explain">Text added to every session's instructions (managed GENIE.md).</string>
+      <string id="PolicyUrl">Signed remote policy URL</string>
+      <string id="PolicyUrl_Explain">HTTPS URL of an Ed25519-signed policy document, fetched at start and about hourly. The last good copy is kept when a fetch fails. Requires Remote policy public keys.</string>
+      <string id="PolicyKeys">Remote policy public keys</string>
+      <string id="PolicyKeys_Explain">Ed25519 public keys (hex or base64) that may sign the remote policy. Any one key may verify, to allow rotation.</string>
+      <string id="ProvidersAllowed">Allowed providers</string>
+      <string id="ProvidersAllowed_Explain">Provider ids users may use (for example azure-foundry). Others are hidden and refused.</string>
+      <string id="EndpointsAllowed">Allowed provider endpoints</string>
+      <string id="EndpointsAllowed_Explain">Hosts (contoso.openai.azure.com), wildcard hosts (*.services.ai.azure.com) or URL prefixes (https://gateway.example.com/ai) that provider requests may go to.</string>
+      <string id="ModelsAllowed">Allowed models</string>
+      <string id="ModelsAllowed_Explain">Model ids users may pick. A trailing * matches a prefix.</string>
+      <string id="ModelsBlocked">Blocked models</string>
+      <string id="ModelsBlocked_Explain">Model ids users may not pick. A trailing * matches a prefix.</string>
+      <string id="AuthMethods">Allowed sign-in methods</string>
+      <string id="AuthMethods_Explain">api_key, entra, adc. For example only entra disables API keys.</string>
+      <string id="CatalogUrl">Model catalog URL</string>
+      <string id="CatalogUrl_Explain">Internal mirror of the signed model catalog feed.</string>
+      <string id="PermissionsDeny">Denied tools and commands</string>
+      <string id="PermissionsDeny_Explain">Permission rules that are always denied, for example Bash(curl:*) or WebFetch(domain:example.com).</string>
+      <string id="PermissionsAsk">Tools and commands that always ask</string>
+      <string id="PermissionsAsk_Explain">Permission rules that always ask, even in bypass mode.</string>
+      <string id="DisableBypassMode">Disable bypass mode</string>
+      <string id="DisableBypassMode_Explain">Users can't switch sessions to bypass permissions.</string>
+      <string id="DefaultMode">Most permissive permission mode</string>
+      <string id="DefaultMode_Explain">The most permissive mode sessions may use.</string>
+      <string id="DefaultMode_plan">Plan</string>
+      <string id="DefaultMode_default">Default</string>
+      <string id="DefaultMode_accept_edits">Accept edits</string>
+      <string id="DefaultMode_bypass">Bypass</string>
+      <string id="McpAllowed">Allowed MCP servers (JSON)</string>
+      <string id="McpAllowed_Explain">JSON array of allowed servers: names, URLs, or package + checksum objects.</string>
+      <string id="McpDirectoryOnly">MCP servers from the directory only</string>
+      <string id="McpDirectoryOnly_Explain">Only servers from the connector directory can be added.</string>
+      <string id="McpDisableLocal">Disable local MCP servers</string>
+      <string id="McpDisableLocal_Explain">Local (stdio) MCP servers can't be started.</string>
+      <string id="McpSampling">MCP sampling</string>
+      <string id="McpSampling_Explain">Whether MCP servers may request model completions.</string>
+      <string id="McpSampling_off">Off</string>
+      <string id="McpSampling_ask">Ask</string>
+      <string id="SkillsAllowed">Allowed skills</string>
+      <string id="SkillsAllowed_Explain">Skill names users may enable.</string>
+      <string id="SkillsDirectoryOnly">Skills from the directory only</string>
+      <string id="SkillsDirectoryOnly_Explain">Only skills from the skills directory can be installed.</string>
+      <string id="SkillsDisableUserUpload">Disable skill uploads</string>
+      <string id="SkillsDisableUserUpload_Explain">Users can't upload .zip/.skill packages.</string>
+      <string id="WebSearchEnabled">Web search</string>
+      <string id="WebSearchEnabled_Explain">Disabled turns web search off.</string>
+      <string id="WebSearchAllowedDomains">Web search allowed domains</string>
+      <string id="WebSearchAllowedDomains_Explain">Only these domains appear in search results.</string>
+      <string id="WebSearchBlockedDomains">Web search blocked domains</string>
+      <string id="WebSearchBlockedDomains_Explain">These domains never appear in search results.</string>
+      <string id="WebFetchEnabled">Web fetch</string>
+      <string id="WebFetchEnabled_Explain">Disabled turns the web_fetch tool off.</string>
+      <string id="WebFetchDomains">Web fetch domains</string>
+      <string id="WebFetchDomains_Explain">Only these domains can be fetched.</string>
+      <string id="CodeExecutionEnabled">Provider code execution</string>
+      <string id="CodeExecutionEnabled_Explain">Disabled turns provider-native code execution off.</string>
+      <string id="ArtifactsEnabled">Artifacts</string>
+      <string id="ArtifactsEnabled_Explain">Disabled turns artifacts off.</string>
+      <string id="BrowserEnabled">Agent browser</string>
+      <string id="BrowserEnabled_Explain">Disabled turns the agent browser off.</string>
+      <string id="BrowserSiteAllowlist">Agent browser allowed sites</string>
+      <string id="BrowserSiteAllowlist_Explain">Only these sites can be opened by the agent browser.</string>
+      <string id="BrowserSiteBlocklist">Agent browser blocked sites</string>
+      <string id="BrowserSiteBlocklist_Explain">These sites are always blocked in the agent browser.</string>
+      <string id="BrowserProfile">Agent browser profile</string>
+      <string id="BrowserProfile_Explain">Ephemeral profiles keep no cookies between sessions.</string>
+      <string id="BrowserProfile_ephemeral">Ephemeral</string>
+      <string id="BrowserProfile_persistent">Persistent</string>
+      <string id="MemoryEnabled">Memory</string>
+      <string id="MemoryEnabled_Explain">Disabled turns Genie memory off.</string>
+      <string id="ChatSearchEnabled">Chat search</string>
+      <string id="ChatSearchEnabled_Explain">Disabled turns search across past chats off.</string>
+      <string id="RetentionMaxDays">Maximum retention (days)</string>
+      <string id="RetentionMaxDays_Explain">Conversations older than this are deleted.</string>
+      <string id="EncryptionRequired">Require encryption</string>
+      <string id="EncryptionRequired_Explain">The local database must be encrypted.</string>
+      <string id="ExportAllowed">Allow export</string>
+      <string id="ExportAllowed_Explain">Disabled blocks exporting chats and data.</string>
+      <string id="IncognitoAllowed">Allow incognito chats</string>
+      <string id="IncognitoAllowed_Explain">Disabled blocks incognito chats.</string>
+      <string id="TrustMode">Workspace trust</string>
+      <string id="TrustMode_Explain">Never: folders can't be trusted except under the allowed roots.</string>
+      <string id="TrustMode_never">Never</string>
+      <string id="TrustMode_prompt">Prompt</string>
+      <string id="TrustAllowedRoots">Trusted roots</string>
+      <string id="TrustAllowedRoots_Explain">Folders under these roots are trusted automatically.</string>
+      <string id="HooksEnabled">Hooks</string>
+      <string id="HooksEnabled_Explain">Disabled turns all hooks off.</string>
+      <string id="HooksManagedOnly">Managed hooks only</string>
+      <string id="HooksManagedOnly_Explain">Only hooks from policy run.</string>
+      <string id="SubagentsMaxDepth">Maximum subagent depth</string>
+      <string id="SubagentsMaxDepth_Explain">How deep subagents may delegate (1-3).</string>
+      <string id="TelemetryLevel">Telemetry level</string>
+      <string id="TelemetryLevel_Explain">The most telemetry Genie may send: off, crash reports only, or crash reports and usage analytics (still opt-in per user).</string>
+      <string id="TelemetryLevel_off">Off</string>
+      <string id="TelemetryLevel_crash_only">Crash reports only</string>
+      <string id="TelemetryLevel_usage">Crash reports and usage</string>
+      <string id="TelemetryEndpoint">Telemetry endpoint (DSN)</string>
+      <string id="TelemetryEndpoint_Explain">Sentry-compatible DSN for crash reports and usage analytics, or off.</string>
+      <string id="AuditOtlpEndpoint">Audit OTLP endpoint</string>
+      <string id="AuditOtlpEndpoint_Explain">OTLP/HTTP collector base URL; audit records are sent to &lt;endpoint&gt;/v1/logs. Headers come from the keychain.</string>
+      <string id="AuditJsonlDir">Audit log folder</string>
+      <string id="AuditJsonlDir_Explain">Folder for the local rotating JSONL audit log (default: the user's data folder).</string>
+      <string id="AuditIncludeContent">Include content in audit records</string>
+      <string id="AuditIncludeContent_Explain">Prompts, arguments and outputs are added to audit records. Users see a notice.</string>
+      <string id="UpdatesChannel">Update channel</string>
+      <string id="UpdatesChannel_Explain">The release channel.</string>
+      <string id="UpdatesChannel_stable">Stable</string>
+      <string id="UpdatesChannel_beta">Beta</string>
+      <string id="UpdatesAuto">Automatic updates</string>
+      <string id="UpdatesAuto_Explain">Install updates automatically.</string>
+      <string id="UpdatesMinVersion">Minimum version</string>
+      <string id="UpdatesMinVersion_Explain">Older versions refuse to start until updated.</string>
+    </stringTable>
+    <presentationTable>
+    <presentation id="OrgName"><textBox refId="OrgName_Text"><label>Organization name</label></textBox></presentation>
+    <presentation id="OrgInstructions"><textBox refId="OrgInstructions_Text"><label>Organization instructions</label></textBox></presentation>
+    <presentation id="PolicyUrl"><textBox refId="PolicyUrl_Text"><label>Signed remote policy URL</label></textBox></presentation>
+    <presentation id="PolicyKeys"><listBox refId="PolicyKeys_List">Remote policy public keys</listBox></presentation>
+    <presentation id="ProvidersAllowed"><listBox refId="ProvidersAllowed_List">Allowed providers</listBox></presentation>
+    <presentation id="EndpointsAllowed"><listBox refId="EndpointsAllowed_List">Allowed provider endpoints</listBox></presentation>
+    <presentation id="ModelsAllowed"><listBox refId="ModelsAllowed_List">Allowed models</listBox></presentation>
+    <presentation id="ModelsBlocked"><listBox refId="ModelsBlocked_List">Blocked models</listBox></presentation>
+    <presentation id="AuthMethods"><listBox refId="AuthMethods_List">Allowed sign-in methods</listBox></presentation>
+    <presentation id="CatalogUrl"><textBox refId="CatalogUrl_Text"><label>Model catalog URL</label></textBox></presentation>
+    <presentation id="PermissionsDeny"><listBox refId="PermissionsDeny_List">Denied tools and commands</listBox></presentation>
+    <presentation id="PermissionsAsk"><listBox refId="PermissionsAsk_List">Tools and commands that always ask</listBox></presentation>
+    <presentation id="DefaultMode"><dropdownList refId="DefaultMode_Enum">Most permissive permission mode</dropdownList></presentation>
+    <presentation id="McpAllowed"><textBox refId="McpAllowed_Text"><label>Allowed MCP servers (JSON)</label></textBox></presentation>
+    <presentation id="McpSampling"><dropdownList refId="McpSampling_Enum">MCP sampling</dropdownList></presentation>
+    <presentation id="SkillsAllowed"><listBox refId="SkillsAllowed_List">Allowed skills</listBox></presentation>
+    <presentation id="WebSearchAllowedDomains"><listBox refId="WebSearchAllowedDomains_List">Web search allowed domains</listBox></presentation>
+    <presentation id="WebSearchBlockedDomains"><listBox refId="WebSearchBlockedDomains_List">Web search blocked domains</listBox></presentation>
+    <presentation id="WebFetchDomains"><listBox refId="WebFetchDomains_List">Web fetch domains</listBox></presentation>
+    <presentation id="BrowserSiteAllowlist"><listBox refId="BrowserSiteAllowlist_List">Agent browser allowed sites</listBox></presentation>
+    <presentation id="BrowserSiteBlocklist"><listBox refId="BrowserSiteBlocklist_List">Agent browser blocked sites</listBox></presentation>
+    <presentation id="BrowserProfile"><dropdownList refId="BrowserProfile_Enum">Agent browser profile</dropdownList></presentation>
+    <presentation id="RetentionMaxDays"><decimalTextBox refId="RetentionMaxDays_Value">Maximum retention (days)</decimalTextBox></presentation>
+    <presentation id="TrustMode"><dropdownList refId="TrustMode_Enum">Workspace trust</dropdownList></presentation>
+    <presentation id="TrustAllowedRoots"><listBox refId="TrustAllowedRoots_List">Trusted roots</listBox></presentation>
+    <presentation id="SubagentsMaxDepth"><decimalTextBox refId="SubagentsMaxDepth_Value">Maximum subagent depth</decimalTextBox></presentation>
+    <presentation id="TelemetryLevel"><dropdownList refId="TelemetryLevel_Enum">Telemetry level</dropdownList></presentation>
+    <presentation id="TelemetryEndpoint"><textBox refId="TelemetryEndpoint_Text"><label>Telemetry endpoint (DSN)</label></textBox></presentation>
+    <presentation id="AuditOtlpEndpoint"><textBox refId="AuditOtlpEndpoint_Text"><label>Audit OTLP endpoint</label></textBox></presentation>
+    <presentation id="AuditJsonlDir"><textBox refId="AuditJsonlDir_Text"><label>Audit log folder</label></textBox></presentation>
+    <presentation id="UpdatesChannel"><dropdownList refId="UpdatesChannel_Enum">Update channel</dropdownList></presentation>
+    <presentation id="UpdatesMinVersion"><textBox refId="UpdatesMinVersion_Text"><label>Minimum version</label></textBox></presentation>
+    </presentationTable>
+  </resources>
+</policyDefinitionResources>

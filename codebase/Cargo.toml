@@ -60,6 +60,10 @@ portable-pty = "0.9"
 # VT screen state for terminal reattach checkpoints (KB ch.16): pure Rust (MIT) instead of
 # libghostty-vt, which needs Zig in CI.
 vt100 = "0.18"
+# Settings / policy hot reload (D23: OS watcher, 100 ms debounce).
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+# macOS managed preferences / configuration profiles (08 §5.1).
+plist = { version = "1", default-features = false }
 ratatui = "0.30"
 # Entra auth-code + PKCE and device code (03 §10.2); our own rustls reqwest client is passed in.
 oauth2 = { version = "5", default-features = false, features = ["reqwest"] }

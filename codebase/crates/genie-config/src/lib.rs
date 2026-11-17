@@ -14,14 +14,19 @@
 pub mod fsutil;
 pub mod import;
 pub mod layers;
+pub mod mdm;
+#[cfg(windows)]
+mod os_windows;
 pub mod policy;
 pub mod settings;
 pub mod trust;
+pub mod watch;
 
 pub use layers::{ConfigError, ConfigPaths, ConfigStore, LayerKind};
 pub use policy::{
     EffectivePolicy, FilePolicySource, PolicyFetcher, PolicyManager, PolicySource,
-    PolicySourceKind, SignedPolicy, StaticPolicySource,
+    PolicySourceKind, SignedPolicy, StaticPolicySource, endpoint_allowed, system_sources,
 };
 pub use settings::{ModeSetting, PermissionsSettings, Settings};
 pub use trust::{Definition, TrustError, TrustPolicy, TrustStore, definition_hash};
+pub use watch::PathWatcher;

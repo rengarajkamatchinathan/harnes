@@ -116,6 +116,10 @@ const SECRET_WORDS: &[&str] = &[
 
 fn secret_key(k: &str) -> bool {
     let k = k.to_ascii_lowercase();
+    // Token *counts* (`input_tokens`, `cache_read_tokens`) are usage, not credentials.
+    if k.ends_with("_tokens") {
+        return false;
+    }
     SECRET_WORDS.iter().any(|w| k.contains(w))
 }
 
@@ -388,6 +392,7 @@ mod tests {
             !r.attrs.contains_key("api_key"),
             "secrets never, even with content"
         );
+        assert!(secret_key("refresh_token") && secret_key("tokens") && !secret_key("input_tokens"));
     }
 
     #[test]

@@ -26,6 +26,7 @@ crates/
                    (piped stdio, env policy, head/tail/spill capture, deadlines, spawn hook) (06 §13.4);
                    PTY mode (feature `pty`: portable-pty, replay ring, vt100 checkpoint) (D55)
   genie-audit      tracing → rotating log files (10 × 10 MiB); org audit stream → rotating JSONL
+                   + OTLP queue; telemetry (crash/usage queue, Sentry envelopes); scrubber
   genie-testkit    in-memory transport
   genie-secrets    secret backends: OS keychain (`keyring`), `secrets.enc` (Argon2id +
                    XChaCha20-Poly1305), memory; credential model + store port + backend
@@ -56,6 +57,7 @@ crates/
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
                    `genie chat`, `genie import`, `hook-adapter`; also runs `genie daemon`
+policy-templates   Windows ADMX/ADML (GPO/Intune) and a macOS .mobileconfig sample (08 §5.1)
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
 xtask              `cargo xtask check` = check-deps (01 §2.1 rules 1–3) + check-spawn (rule 4)
                    + schema drift/compat; `cargo xtask schema [--release]` regenerates;
@@ -111,7 +113,7 @@ overrides it at run time for development. `GENIE_LOG` sets the log filter.
 | 5 | state machine, steer/queue inbox, interrupt, resume, asks/paused, eviction (15 min) | `genie-core::session`, `genie-core::engine` |
 | 6 | cancellation tree | `genie-core::task::TaskScope` |
 | 7 | ToolError / TurnError / Defect / RPC kinds, stable codes, excerpt scrubbing | `genie-core::error`, `genie-protocol::error` |
-| 8 | rotating logs, `genie doctor` (daemon, git, rg) | `genie-audit`, `apps/cli` |
+| 8 | rotating logs, `genie doctor` = daemon `doctor.run` (all 01 §8 checks, see 08 below), crash reports + usage analytics, audit stream | `genie-audit`, `genie-daemon::ops`, `apps/cli` |
 
 ### Spec 02 (protocol)
 
@@ -183,12 +185,28 @@ ask with no client → paused + notification + answered by another client, promp
 | 08 §4 / 06 §14 | `trust.json` `{canonical_path, identity, decision, decided_at, approvals}`; identity match, subfolder inheritance, deeper decision wins, once in memory, revoke; home, `/`, drive roots, system dirs refused; `trust.mode: never`, `trust.allowedRoots`; headless `--trust`; definition hash (canonical JSON SHA-256), pending list with line diff, approve only with the current hash, prune removed entries, approvals reset on re-trust with a new identity | `genie-config::trust` |
 | 08 §5.1 | file source (refuses non-root-owned or group/world-writable on Unix), MDM as a `PolicySource` port, signed remote URL (Ed25519, keys + URL only from file/MDM), last good copy per source + Problems, remote cache re-verified on load; merge: allow lists ∩, deny lists ∪, disabling booleans, ordered levels, min numbers, scalars remote > MDM > file; per-key source | `genie-config::policy` |
 | 08 §5.2–5.3 | key table merge rules; `org.name`, `disableBypassMode`, `defaultMode` floor, `audit.includeContent` notice text, "Blocked by <org> policy (rule)", "Managed by <org>" lock errors; `policy.effective` result | `policy::EffectivePolicy`, `Verdict::blocked_message`, `ConfigError::Locked` |
-| 08 §6 | record `{audit_schema: 1, ts, install_id, user, org, session_id?, event, attrs}`, event names, content only with `includeContent`, secret-named attrs always dropped, rotating JSONL (0600 files, 0700 dir, size-capped, N files), sink port, failures logged never raised | `genie-audit::audit` |
+| 08 §6 | record `{audit_schema: 1, ts, install_id, user, org, session_id?, event, attrs}`, event names, content only with `includeContent`, secret-named attrs always dropped (token *counts* `*_tokens` kept), rotating JSONL (0600 files, 0700 dir, size-capped, N files), sink port, failures logged never raised | `genie-audit::audit` |
+| 08 §5.1 MDM | macOS managed preferences (`/Library/Managed Preferences[/<user>]/com.synergech.genie.plist`, XML or binary, root-owned check; computer level wins) and unsigned `.mobileconfig` parsing (payload of type `com.synergech.genie` or Custom Settings `mcx_preference_settings`); Windows `HKLM\Software\Policies\Genie` (64-bit view): values = dotted keys, subkeys = key prefixes, numbered values (ADMX `<list>`) = arrays, DWORD/QWORD → bool for boolean keys else number, MULTI_SZ → array, JSON in `REG_SZ` parsed, `;`-separated lists; `system_sources()` = file + this OS's MDM | `genie-config::mdm`, `genie-config::os_windows` (Win32 FFI) |
+| 08 §5.1 ACL | Windows `policy.json`: owner must be SYSTEM / Administrators / TrustedInstaller and no other principal may hold write, append, delete, `WRITE_DAC`, `WRITE_OWNER`, `GENERIC_WRITE/ALL` (inherit-only and deny ACEs ignored, NULL DACL refused) | `mdm::acl_admin_only`, `os_windows::admin_only` |
+| 08 §5.1 templates | `policy-templates/windows/Genie.admx` + `en-US/Genie.adml` (52 machine policies in 11 categories), `policy-templates/macos/com.synergech.genie.mobileconfig` sample; a test checks every ADMX value maps back through the registry reader to a known key (`policy::KNOWN_KEYS`) and every string/presentation is defined | `policy-templates/` |
+| 08 §5.1 remote | `PolicyManager::{remote_url, apply_remote}` (fetch without holding the lock); `HttpPolicyFetcher` implements the `PolicyFetcher` port (https, or http to loopback; ≤ 1 MiB; `{body, signature}` envelope or detached `<url>.sig`); fetched at start, every hour and when `policyUrl` changes | `genie-daemon::sync` |
+| 08 §5.2 `endpoints.allowed` | patterns: host, `*.host` (apex too), URL prefix (scheme + host + port + path boundary); user info never matches; provider endpoint = `base_url` or the preset default (Vertex host from location); enforced on resolution, credential add, sign-in, status (`disabled`) and catalog (provider hidden) | `genie_config::endpoint_allowed`, `genie-daemon::providers::endpoint_check` |
+| D23 hot reload | OS watcher (`notify`: FSEvents / inotify / ReadDirectoryChangesW) on the deepest existing directory of every settings file + the policy file / managed preferences, 100 ms debounce, then settings + local policy + telemetry consent re-read (hash suppressed) and watches re-anchored; 30 s fallback re-read (registry, new project stores); 2 s poll only when no watcher can be created | `genie-config::watch`, `genie-daemon::sync` |
+| 08 §6 OTLP | `audit.otlp.endpoint` → bounded queue (10 000, oldest dropped and counted) → OTLP/HTTP JSON `ExportLogsServiceRequest` to `<endpoint>/v1/logs` every 5 s, batches of 500, failed batch requeued; headers from keychain account `audit.otlp.headers` (JSON object) | `genie-audit::otlp`, `genie-daemon::observe::HttpOtlp` |
+| 08 §7 telemetry | consent = `telemetry.crashReports` (default on) / `telemetry.usage` (default off) capped by policy `telemetry.level`; usage events are an enum with number/bool/static-enum props only (no free text); crash reports from a chained panic hook: scrubbed message (strict: no home paths, secrets, e-mails), module-path location, backtrace function names; local queue `<data>/telemetry/queue.jsonl` (0600, ≤ 1000, consent withdrawal drops queued records); random rotatable install id; Sentry envelope exporter port (SA-32) to policy `telemetry.endpoint` / `GENIE_TELEMETRY_DSN` (none = never leaves the device) | `genie-audit::{telemetry, scrub}`, `genie-daemon::observe` |
+| 02 §6.1 / 01 §8 / D34 | `doctor.run`: daemon + versions (client skew), keychain backend / locked, DB open, providers (no network), catalog age, Chrome/Edge (`find_installed`, min version), ripgrep, git, WebKitGTK + DMABUF (Linux), disk space, policy problems / org, settings problems, audit export, telemetry; works in the locked phase; `genie doctor` prints the daemon's checks (local git/rg fallback). `diagnostics.collect`: versions, OS, clients, providers (status + endpoint host), catalog, policy keys with sources (no values), settings problems, MCP states, doctor, optional 300-line log tail, all scrubbed | `genie-daemon::ops`, `genie-audit::sys::disk_free`, `apps/cli` |
 
 Tests: `genie-permissions/tests/eval_table.rs` (evaluation order, shell cases, modes, policy floor,
 taint, save suggestions, always + release, Windows paths), `genie-config/tests/{layers,policy,trust}.rs`
 (merge/sources, trust gating, diagnostics/last good, policy locks, set/always, merge table, signed
-remote + tamper + cache, trust decision table, approvals), unit tests in each module.
+remote + tamper + cache, trust decision table, approvals, `endpoints.allowed` table, ADMX ↔ registry
+reader), `genie-config` unit tests (`mdm`: XML/binary plist, mobileconfig, source order, fake
+registry, ACL rule; `watch`: anchoring, real create/edit events), `genie-audit` unit tests (OTLP
+encoding + bounded/retried queue, telemetry consent matrix, queue/flush/scrub, DSN, scrubber, disk
+free), `genie-daemon` `observe` unit tests (tool/usage/browser audit from journal events) and
+`tests/policy_audit.rs` (loopback HTTP: signed remote policy applied + cached, OTLP export with
+keychain headers, `doctor.run`, `diagnostics.collect`). The Windows code compile-checks with
+`cargo clippy -p genie-config -p genie-audit --all-targets --target x86_64-pc-windows-msvc`.
 
 ### Spec 07 (CLI)
 
@@ -407,10 +425,10 @@ The subsystems are wired into the turn loop (`genie-core::runtime`) and the daem
 
 | What | Where |
 |---|---|
-| Settings/policy/trust hub: one `ConfigStore` per project root (+ user-only for Chat), shared `EffectivePolicy` and `TrustStore`, `HubEvent`s; managed policy from `FilePolicySource::system()` + remote cache, re-read every 60 s; settings files polled every 2 s (content-hash suppressed) | `genie-core::config::ConfigHub`, `genie-daemon::services::Services::start` |
+| Settings/policy/trust hub: one `ConfigStore` per project root (+ user-only for Chat), shared `EffectivePolicy` and `TrustStore`, `HubEvent`s; managed policy from `system_sources()` (file + MDM) + signed remote URL (hourly) + remote cache; settings and policy files watched (100 ms debounce, 30 s fallback; content-hash suppressed) | `genie-core::config::ConfigHub`, `genie-daemon::{services, sync}` |
 | Permissions in the turn loop: rules folded from every loaded layer + policy `permissions.deny/ask` + session-only CLI layer + remembered "always"; `ModePolicy` from `disableBypassMode` / `defaultMode` floor; tool call → `Action` (`shell` via `shell::authz_from_request`, `web_fetch` via `web::fetch_authz` with `pasted`/`seen`, `mcp__*`, `browser_*` read vs act, `skill`→`Skill(name)`); deny → `Blocked` (`tool.ended.error.code = policy_blocked` + "Blocked by <org> policy (rule)" for policy); ask → durable ask with save suggestions; "always" → `Evaluator::remember` + `ConfigStore::add_permission_rule` in the chosen scope + `permission.resolved.saved_rule` + release of the session's other pending asks (`by: rule`, 02 §7 step 6) | `runtime::permissions::PermissionAuthorizer`, `runtime::bridge::CallGate`, `session::resolve_ask` |
 | Taint (SA-29): per-turn cell set by untrusted results (MCP unless trusted, `External` tools, `web::TaintPort`, browser host) → evaluator `Taint` | `runtime::host::TurnTaints`, `AgentRuntime::taint_source` |
-| Audit (08 §6): `permission.asked`, `permission.decided`, `policy.blocked`, `settings.changed`, `trust.changed`, `mcp.connected`, `skill.installed` (sha256), `browser.site_approved`; local JSONL in `<data>/audit/` (or `audit.jsonl.dir`) | `PermissionAuthorizer`, `services`, `genie-daemon::build_auditor` |
+| Audit (08 §6): every 08 §6 event — `permission.asked`, `permission.decided`, `policy.blocked`, `settings.changed`, `trust.changed`, `mcp.connected`, `mcp.auth`, `skill.installed` (sha256), `browser.site_approved`, `auth.signed_in`, `credential.changed`, `hook.ran`, plus `tool.called` (tool, resource, outcome, duration, error code; no arguments), `usage.request` (model, route, token counts, cost per request) and `browser.action` derived from durable session events by a journal decorator; local JSONL in `<data>/audit/` (or `audit.jsonl.dir`) and/or OTLP | `PermissionAuthorizer`, `services`, `genie-daemon::{build_auditor, observe::EventTap}` |
 | `config.get/set/schema/diagnostics`, `policy.effective`, `trust.get/set/pending_definitions/approve_definition` (paths canonicalised); `config.changed` / `policy.changed` on the workspace feed | `genie-daemon::services` |
 | MCP: one manager for user + managed servers, one per project root for `.mcp.json` / project-settings servers (trust **and** D43 hash approval; unapproved ones listed as `disabled`) and local servers; reconcile on settings/trust/policy events; policy `mcp.allowed`, `mcp.disableLocal`, `mcp.sampling: off`, `mcp.trusted`; tools exposed per turn as `ToolProvider` tools (2 s grace), authorised through the gate, results tainting; elicitation/sampling → asks of the calling turn (sampling then runs the chat model); `mcp.list/add/remove/set_enabled/logs/tools/resources/prompts/resource.read/auth.start`; `mcp.status` on the feed | `runtime::mcp::McpHub`, `runtime::active::ActiveTurns` |
 | Skills: catalog per workspace root (project roots after trust), policy keys, `skills-state.json`, timer refresh, roots/policy reset on trust/policy change; `<available_skills>` + `feature.skills`; `skill` / `skill_read` tools (`Skill(name)` permission first); loaded skills re-injected after compaction; `InputPart::Skill` rendered; `/command args` expanded (file refs → `file_ref` parts); `skill.list/set_enabled/upload`, `directory.list/install` (skills) | `runtime::skills`, `services` |
@@ -628,8 +646,6 @@ then remaps ids, blobs, sanitized input, `session.list`, `import.scan/preview/ap
 
 ### Engine wiring gaps and deviations
 
-- **Hot reload is a 2 s poll** of the settings files (and 60 s for managed policy), not the
-  debounced (100 ms) OS watcher; the remote-policy HTTP fetcher is still a port.
 - **Shared MCP servers** are shared per manager: user + managed servers once per daemon,
   project/local servers once per project root (a project server overrides a user server of the
   same name for that project). `mcp.trusted` (array of server names, policy) is our assumption
@@ -651,14 +667,27 @@ then remaps ids, blobs, sanitized input, `session.list`, `import.scan/preview/ap
   sites are saved as `Browser(site:…)` permission rules, not as `browser.sites` states;
   `attachment_path` is not implemented; `browser.popout` is not routed.
 - **`add_dirs`** is stored and fed to the evaluator; worktrees are created (see "Code mode").
-- **Audit** covers the events listed in the coverage table plus `hook.ran`; tool calls,
-  usage and sign-ins are not recorded yet.
 
 ### Spec 06 §5 / 08 §3–6 gaps and deviations
 
-- **OS sources are ports only**: macOS configuration-profile and Windows registry readers, the
-  ADMX template, the Windows ACL check on `policy.json` (Unix checks root owner + no g/o write),
-  the hourly remote refresh loop and its HTTP fetcher, and the OTLP audit exporter.
+- **Managed policy deviations:** Windows reads `HKLM` only (not `HKCU\Software\Policies`);
+  macOS reads managed preferences (signed profiles are installed there by macOS), the
+  `.mobileconfig` parser handles unsigned XML only; registry changes are picked up by the 30 s
+  fallback re-read, not a registry watch; new project settings files are watched from the next
+  re-read (≤ 30 s). The audit sinks are fixed at daemon start (an `audit.*` policy change applies
+  after a restart). `org.instructions` and `telemetry.endpoint` are our key names (the spec names
+  neither).
+- **Win32 FFI outside the 08 §9 list:** `genie-config::os_windows` (registry + `policy.json` ACL)
+  and `genie-audit::sys` (`statvfs` / `GetDiskFreeSpaceExW`) contain `unsafe` blocks with
+  `// SAFETY:` notes, as `genie-client`/`genie-daemon` already do; they compile-check for
+  `x86_64-pc-windows-msvc` on macOS but have not run on Windows yet.
+- **Telemetry:** no default endpoint (Synergech's self-hosted Sentry backend is not set up;
+  set policy `telemetry.endpoint` or `GENIE_TELEMETRY_DSN`); native minidumps, the webview JS
+  SDK, first-run consent UI and an install-id rotation method are not built (the engine
+  function exists); crash reports are captured from Rust panics only. Usage events today:
+  session created, turn completed, artifact created, MCP server added, browser used, doctor run.
+- **New dependencies:** `notify` 8 (CC0-1.0: `deny.toml` gets a crate-scoped exception that
+  needs licence sign-off), `plist` 1 (MIT); `regex`, `getrandom` in `genie-audit`.
 - **Assumptions** (spec ambiguous): `defaultMode` floor = most permissive mode allowed; policy
   `permissions.ask` still asks in bypass; plan mode blocks MCP unless an allow rule matches (no
   ask); reads outside the workspace + `additionalDirectories` ask; `Read(...)` and `Edit(...)`
@@ -795,7 +824,7 @@ then remaps ids, blobs, sanitized input, `session.list`, `import.scan/preview/ap
 - **Not implemented:** the pasted-redirect fallback for non-Entra OAuth, Azure deployment
   discovery via the management API (manual `deployments` only), Ollama `/api/show` context
   lengths, the catalog feed's default URL and pinned key (D40; only policy `catalog.url` /
-  `GENIE_CATALOG_URL`), `endpoints.allowed` policy, per-request usage audit. Budget months
+  `GENIE_CATALOG_URL`). Budget months
   are UTC like `usage_daily` days. `provider.test` for Vertex only checks that a token can be
   obtained.
 - **Settings keys added:** `models` (overrides) and `secrets` are now known top-level settings

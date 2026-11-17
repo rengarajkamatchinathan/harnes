@@ -1,10 +1,11 @@
 //! Managed policy (08 §5, D38): delivery sources, signature check, merge, effective view.
 //!
 //! - **Sources** are ports ([`PolicySource`]): the system file ([`FilePolicySource`], refuses
-//!   a user-writable file), MDM (macOS profile / Windows `HKLM\Software\Policies\Genie` —
-//!   OS readers implement the trait; [`StaticPolicySource`] serves tests and adapters) and
-//!   the signed remote URL ([`PolicyFetcher`]), whose URL and Ed25519 keys may only come
-//!   from the file or MDM.
+//!   a user-writable file: Unix owner/mode, Windows owner + DACL), MDM
+//!   ([`crate::mdm::MacProfileSource`], [`crate::mdm::RegistryPolicySource`];
+//!   [`StaticPolicySource`] serves tests and adapters) and the signed remote URL
+//!   ([`PolicyFetcher`]), whose URL and Ed25519 keys may only come from the file or MDM.
+//!   [`system_sources`] lists this OS's file + MDM sources.
 //! - **Merge** ([`merge`]): most-restrictive-wins for allow/deny lists, disabling booleans
 //!   and ordered levels; other scalars by remote > MDM > file.
 //! - **Last good copy**: a source that fails after a valid load keeps its previous values
@@ -84,8 +85,7 @@ pub fn system_policy_path() -> PathBuf {
 #[derive(Debug, Clone)]
 pub struct FilePolicySource {
     pub path: PathBuf,
-    /// Enforce the owner/mode check (off only in tests). On Windows the ACL check is
-    /// not implemented yet (README gaps); the ProgramData default ACL applies.
+    /// Enforce the owner/mode (Unix) or owner/DACL (Windows) check (off only in tests).
     pub require_admin: bool,
 }
 
@@ -98,7 +98,9 @@ impl FilePolicySource {
     }
 }
 
-/// Unix: owned by root and not group/world-writable.
+/// Unix: owned by root and not group/world-writable. Windows: owned by SYSTEM /
+/// Administrators / TrustedInstaller and no other principal has write, delete or ACL
+/// rights ([`crate::mdm::acl_admin_only`]).
 pub fn admin_only(path: &Path) -> std::io::Result<bool> {
     #[cfg(unix)]
     {
@@ -106,10 +108,124 @@ pub fn admin_only(path: &Path) -> std::io::Result<bool> {
         let m = std::fs::metadata(path)?;
         Ok(m.uid() == 0 && m.mode() & 0o022 == 0)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        std::fs::metadata(path).map(|_| true)
+        crate::os_windows::admin_only(path)
     }
+    #[cfg(not(any(unix, windows)))]
+    {
+        std::fs::metadata(path).map(|_| false)
+    }
+}
+
+/// This OS's local sources (08 §5.1): the system file plus MDM (macOS managed preferences,
+/// Windows `HKLM\Software\Policies\Genie`; Linux has the file only).
+pub fn system_sources() -> Vec<Box<dyn PolicySource>> {
+    #[allow(unused_mut)]
+    let mut v: Vec<Box<dyn PolicySource>> = vec![Box::new(FilePolicySource::system())];
+    #[cfg(target_os = "macos")]
+    v.push(Box::new(crate::mdm::MacProfileSource::system()));
+    #[cfg(windows)]
+    v.push(Box::new(crate::mdm::RegistryPolicySource::system()));
+    v
+}
+
+/// Files whose change should trigger a local policy re-read (the watcher).
+pub fn system_policy_paths() -> Vec<PathBuf> {
+    #[allow(unused_mut)]
+    let mut v = vec![system_policy_path()];
+    #[cfg(target_os = "macos")]
+    v.extend(crate::mdm::MacProfileSource::system().paths);
+    v
+}
+
+/// `endpoints.allowed` (08 §5.2): whether a provider endpoint URL is allowed by one of the
+/// patterns. A pattern is a host (`contoso.openai.azure.com`), a wildcard host
+/// (`*.openai.azure.com`, which also matches the apex), or a URL prefix
+/// (`https://gateway.contoso.com/ai`: same scheme, host, port, and a path under it).
+/// Hosts compare case-insensitively.
+pub fn endpoint_allowed(url: &str, patterns: &[String]) -> bool {
+    let Some(target) = split_url(url) else {
+        return false;
+    };
+    patterns.iter().any(|p| {
+        let p = p.trim();
+        if p.contains("://") {
+            let Some(pat) = split_url(p) else {
+                return false;
+            };
+            let path = pat.path.trim_end_matches('/');
+            pat.scheme == target.scheme
+                && pat.host == target.host
+                && pat.port == target.port
+                && (path.is_empty()
+                    || target.path == path
+                    || target.path.starts_with(&format!("{path}/")))
+        } else {
+            let p = p.trim_end_matches('/').to_ascii_lowercase();
+            let (host, port) = match p.rsplit_once(':') {
+                Some((h, port)) if port.chars().all(|c| c.is_ascii_digit()) => {
+                    (h.to_string(), Some(port.to_string()))
+                }
+                _ => (p.clone(), None),
+            };
+            if port.is_some() && port != target.port {
+                return false;
+            }
+            match host.strip_prefix("*.") {
+                Some(apex) => target.host == apex || target.host.ends_with(&format!(".{apex}")),
+                None => target.host == host,
+            }
+        }
+    })
+}
+
+struct UrlParts {
+    scheme: String,
+    host: String,
+    port: Option<String>,
+    path: String,
+}
+
+fn split_url(url: &str) -> Option<UrlParts> {
+    let (scheme, rest) = url.trim().split_once("://")?;
+    let (authority, path) = match rest.find(['/', '?', '#']) {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    // Credentials in the URL are never part of the match.
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    let (host, port) = if authority.starts_with('[') {
+        match authority.split_once(']') {
+            Some((h, rest)) => (
+                &authority[..=h.len()],
+                rest.strip_prefix(':').map(str::to_string),
+            ),
+            None => return None,
+        }
+    } else {
+        match authority.rsplit_once(':') {
+            Some((h, p)) => (h, Some(p.to_string())),
+            None => (authority, None),
+        }
+    };
+    let scheme = scheme.to_ascii_lowercase();
+    let default_port = match scheme.as_str() {
+        "https" => Some("443"),
+        "http" => Some("80"),
+        _ => None,
+    };
+    let port = port.filter(|p| Some(p.as_str()) != default_port);
+    if host.is_empty() {
+        return None;
+    }
+    Some(UrlParts {
+        scheme,
+        host: host.to_ascii_lowercase(),
+        port,
+        path: path.trim_end_matches('/').to_string(),
+    })
 }
 
 impl PolicySource for FilePolicySource {
@@ -226,6 +342,67 @@ pub fn verify(keys: &[VerifyingKey], p: &SignedPolicy) -> Result<PolicyValues, P
     v.remove(KEY_POLICY_KEYS);
     Ok(v)
 }
+
+/// The policy keys of 08 §5.2 plus the delivery keys and the audit/telemetry details
+/// (`audit.jsonl.dir`, `telemetry.endpoint`, `org.instructions`) and `hooks.managed`,
+/// `mcp.trusted`. The ADMX template may only write these (tested).
+pub const KNOWN_KEYS: &[&str] = &[
+    KEY_POLICY_URL,
+    KEY_POLICY_KEYS,
+    "providers.allowed",
+    "endpoints.allowed",
+    "models.allowed",
+    "models.blocked",
+    "auth.methods",
+    "catalog.url",
+    "permissions.deny",
+    "permissions.ask",
+    "disableBypassMode",
+    "defaultMode",
+    "mcp.allowed",
+    "mcp.directoryOnly",
+    "mcp.disableLocal",
+    "mcp.sampling",
+    "mcp.trusted",
+    "skills.allowed",
+    "skills.directoryOnly",
+    "skills.disableUserUpload",
+    "skills.scriptsAllowed",
+    "webSearch.enabled",
+    "webSearch.allowedDomains",
+    "webSearch.blockedDomains",
+    "webFetch.enabled",
+    "webFetch.domains",
+    "codeExecution.enabled",
+    "artifacts.enabled",
+    "browser.enabled",
+    "browser.siteAllowlist",
+    "browser.siteBlocklist",
+    "browser.profile",
+    "projectRetrieval.embeddingsProvider",
+    "memory.enabled",
+    "chatSearch.enabled",
+    "retention.maxDays",
+    "encryption.required",
+    "export.allowed",
+    "incognito.allowed",
+    "trust.mode",
+    "trust.allowedRoots",
+    "hooks.enabled",
+    "hooks.managedOnly",
+    "hooks.managed",
+    "subagents.maxDepth",
+    "telemetry.level",
+    "telemetry.endpoint",
+    "audit.otlp.endpoint",
+    "audit.jsonl.dir",
+    "audit.includeContent",
+    "updates.channel",
+    "updates.auto",
+    "updates.minVersion",
+    "org.name",
+    "org.instructions",
+];
 
 /// How a key combines across sources (08 §5.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -615,13 +792,30 @@ impl PolicyManager {
     }
 
     /// Fetch the remote policy (at start and ~hourly). On failure the last good copy stays.
+    /// Callers that must not hold a lock during the fetch use [`Self::remote_url`] +
+    /// [`Self::apply_remote`] instead.
     pub fn refresh_remote(&mut self) {
-        let (url, keys) = self.delivery();
-        let (Some(url), Some(fetcher)) = (url, self.fetcher.clone()) else {
+        let (Some(url), Some(fetcher)) = (self.remote_url(), self.fetcher.clone()) else {
             return;
         };
-        let result = fetcher
-            .fetch(&url)
+        let r = fetcher.fetch(&url);
+        self.apply_remote(r);
+    }
+
+    /// The `policyUrl` from the file / MDM sources, if any.
+    pub fn remote_url(&self) -> Option<String> {
+        self.delivery().0
+    }
+
+    /// The fetcher given with [`Self::with_remote`].
+    pub fn fetcher(&self) -> Option<Arc<dyn PolicyFetcher>> {
+        self.fetcher.clone()
+    }
+
+    /// Verify and install a fetch result (or keep the last good copy and raise a Problem).
+    pub fn apply_remote(&mut self, fetched: Result<SignedPolicy, String>) {
+        let (_, keys) = self.delivery();
+        let result = fetched
             .map_err(PolicyError::Fetch)
             .and_then(|sp| verify(&keys, &sp).map(|v| (sp, v)));
         match result {

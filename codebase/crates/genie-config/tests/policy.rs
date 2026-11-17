@@ -301,3 +301,141 @@ fn user_writable_policy_file_is_refused() {
     };
     assert!(matches!(src.load(), Err(PolicyError::UserWritable(_))));
 }
+
+#[test]
+fn endpoints_allowed_patterns() {
+    let p = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let cases: &[(&str, &[&str], bool)] = &[
+        (
+            "https://contoso.openai.azure.com/openai",
+            &["contoso.openai.azure.com"],
+            true,
+        ),
+        (
+            "https://CONTOSO.openai.azure.com",
+            &["contoso.openai.azure.com"],
+            true,
+        ),
+        (
+            "https://evil.com/contoso.openai.azure.com",
+            &["contoso.openai.azure.com"],
+            false,
+        ),
+        (
+            "https://a.services.ai.azure.com",
+            &["*.services.ai.azure.com"],
+            true,
+        ),
+        (
+            "https://services.ai.azure.com",
+            &["*.services.ai.azure.com"],
+            true,
+        ),
+        (
+            "https://xservices.ai.azure.com",
+            &["*.services.ai.azure.com"],
+            false,
+        ),
+        (
+            "https://gw.example.com/ai/v1",
+            &["https://gw.example.com/ai"],
+            true,
+        ),
+        (
+            "https://gw.example.com/ai",
+            &["https://gw.example.com/ai/"],
+            true,
+        ),
+        (
+            "https://gw.example.com/aix",
+            &["https://gw.example.com/ai"],
+            false,
+        ),
+        (
+            "http://gw.example.com/ai",
+            &["https://gw.example.com/ai"],
+            false,
+        ),
+        (
+            "https://gw.example.com:8443/ai",
+            &["https://gw.example.com/ai"],
+            false,
+        ),
+        (
+            "https://gw.example.com:443/ai",
+            &["https://gw.example.com/ai"],
+            true,
+        ),
+        ("http://127.0.0.1:11434", &["127.0.0.1:11434"], true),
+        ("http://127.0.0.1:11435", &["127.0.0.1:11434"], false),
+        ("https://user:pw@evil.com", &["evil.com"], true),
+        ("https://allowed.com@evil.com", &["allowed.com"], false),
+        ("http://[::1]:8080/x", &["http://[::1]:8080"], true),
+        ("not a url", &["*"], false),
+        ("https://x.com", &[], false),
+    ];
+    for (url, pats, want) in cases {
+        assert_eq!(endpoint_allowed(url, &p(pats)), *want, "{url} vs {pats:?}");
+    }
+}
+
+/// Every key the shipped ADMX template writes is a known policy key, and the registry
+/// reader turns what the template writes back into that key.
+#[test]
+fn admx_template_writes_known_keys() {
+    use genie_config::mdm::*;
+    let admx = include_str!("../../../policy-templates/windows/Genie.admx");
+    let adml = include_str!("../../../policy-templates/windows/en-US/Genie.adml");
+    let attr = |line: &str, name: &str| -> Option<String> {
+        let start = line.find(&format!("{name}=\""))? + name.len() + 2;
+        let end = line[start..].find('"')? + start;
+        Some(line[start..end].to_string())
+    };
+    let mut reg = MemoryRegistry::default();
+    let mut keys = Vec::new();
+    for line in admx.lines() {
+        let t = line.trim();
+        if t.starts_with("<list ") {
+            let key = attr(t, "key").unwrap();
+            let k = key
+                .strip_prefix(&format!("{WINDOWS_POLICY_KEY}\\"))
+                .expect("list under the Genie key")
+                .to_string();
+            reg.set(&key, "1", RegValue::Sz("a".into()))
+                .set(&key, "2", RegValue::Sz("b".into()));
+            keys.push((k, json!(["a", "b"])));
+        } else if let Some(v) = attr(t, "valueName") {
+            let value = if t.starts_with("<policy ") {
+                reg.set(WINDOWS_POLICY_KEY, &v, RegValue::Dword(1));
+                json!(true)
+            } else if t.starts_with("<decimal ") {
+                reg.set(WINDOWS_POLICY_KEY, &v, RegValue::Dword(2));
+                json!(2)
+            } else {
+                reg.set(WINDOWS_POLICY_KEY, &v, RegValue::Sz("x".into()));
+                json!("x")
+            };
+            keys.push((v, value));
+        }
+    }
+    assert!(keys.len() > 40, "parsed {} policies", keys.len());
+    let read = registry_to_policy(&reg).unwrap().unwrap();
+    for (k, want) in &keys {
+        assert!(KNOWN_KEYS.contains(&k.as_str()), "unknown policy key {k}");
+        if k == "mcp.allowed" {
+            continue; // JSON text: shape checked in the mdm unit tests
+        }
+        assert_eq!(read.get(k), Some(want), "{k}");
+    }
+    // Every $(string.X) / $(presentation.X) reference has a definition in the ADML.
+    for cap in admx.split("$(").skip(1) {
+        let r = &cap[..cap.find(')').unwrap()];
+        let (kind, id) = r.split_once('.').unwrap();
+        let needle = match kind {
+            "string" => format!("<string id=\"{id}\">"),
+            "presentation" => format!("<presentation id=\"{id}\">"),
+            _ => panic!("unexpected reference {r}"),
+        };
+        assert!(adml.contains(&needle), "ADML misses {r}");
+    }
+}

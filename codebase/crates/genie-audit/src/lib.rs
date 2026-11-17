@@ -3,11 +3,17 @@
 //! - Logs: `tracing` to rotating files `<data dir>/logs/<name>.log` (10 × 10 MiB). Spans
 //!   carry ids, never prompt content.
 //! - [`audit`]: the org audit stream (08 §6) — versioned records, content exclusion, the
-//!   local rotating JSONL sink. The OTLP exporter, crash reports and analytics are later
-//!   work and stay separate from logs.
+//!   local rotating JSONL sink; [`otlp`]: the OTLP/HTTP JSON exporter queue.
+//! - [`telemetry`]: crash reports and usage analytics (08 §7, D39) with a local queue and an
+//!   exporter port; [`scrub`]: on-device scrubbing (crash reports, diagnostics, logs).
+//!   All of these stay separate from logs.
 
 pub mod audit;
+pub mod otlp;
 pub mod rotating;
+pub mod scrub;
+pub mod sys;
+pub mod telemetry;
 
 use std::io;
 use std::path::Path;
@@ -16,7 +22,10 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 pub use audit::{Attrs, AuditContext, AuditEvent, AuditRecord, AuditSink, Auditor, JsonlSink};
+pub use otlp::{OtlpSink, OtlpTransport};
 pub use rotating::RotatingLog;
+pub use scrub::Scrubber;
+pub use telemetry::{Telemetry, TelemetryConsent, UsageEvent, UsageName, UsageProp};
 
 /// Number of files kept (current + rotated).
 pub const LOG_FILES: usize = 10;

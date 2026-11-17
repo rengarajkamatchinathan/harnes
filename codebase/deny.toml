@@ -54,6 +54,11 @@ allow = ["blessing", "WTFPL"]
 crate = "webpki-roots"
 allow = ["CDLA-Permissive-2.0"]
 
+[[licenses.exceptions]]
+# Settings/policy file watcher (D23, 08 §5); CC0-1.0 is a public-domain dedication.
+crate = "notify"
+allow = ["CC0-1.0"]
+
 # Our own crates are `publish = false` with LicenseRef-Synergech-Proprietary.
 [licenses.private]
 ignore = true

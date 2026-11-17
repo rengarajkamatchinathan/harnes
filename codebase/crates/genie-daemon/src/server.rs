@@ -237,7 +237,12 @@ impl DaemonState {
         }
     }
 
-    fn status(&self) -> DaemonStatus {
+    /// The daemon's configuration (endpoint, versions).
+    pub(crate) fn config(&self) -> &DaemonConfig {
+        &self.cfg
+    }
+
+    pub(crate) fn status(&self) -> DaemonStatus {
         let mut clients: Vec<ConnectedClient> = self
             .clients
             .lock()

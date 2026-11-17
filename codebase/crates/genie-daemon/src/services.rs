@@ -4,7 +4,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use genie_audit::{Attrs, AuditEvent, Auditor};
 use genie_config::{ConfigError, PolicyManager, TrustError};
@@ -55,6 +54,15 @@ pub struct Services {
     pub code: Option<Arc<crate::code::CodeServices>>,
     /// Secrets unlock, providers, credentials, models, catalog, usage (02 §6.1, §6.5).
     pub providers: Option<Arc<crate::providers::ProviderHub>>,
+    /// Telemetry (08 §7): consent from settings + policy, local queue, export loop.
+    pub telemetry: Option<Arc<genie_audit::Telemetry>>,
+    /// OTLP audit export queue and its transport (08 §6).
+    pub otlp: Option<(
+        Arc<genie_audit::OtlpSink>,
+        Arc<dyn genie_audit::OtlpTransport>,
+    )>,
+    /// The secrets backend (doctor: backend kind, lock state).
+    pub secrets: Option<Arc<crate::secrets::Secrets>>,
 }
 
 pub(crate) enum Handled {
@@ -124,7 +132,7 @@ impl Services {
         }
     }
 
-    fn policy_problems(&self) -> Vec<genie_protocol::common::Diagnostic> {
+    pub(crate) fn policy_problems(&self) -> Vec<genie_protocol::common::Diagnostic> {
         self.policy
             .as_ref()
             .map(|p| p.lock().unwrap_or_else(|e| e.into_inner()).problems())
@@ -160,6 +168,9 @@ impl Services {
         // export.all, session.import, import.*, agents.list (04 §9, 07 §5, 06 §11).
         if let Some(res) = crate::transfer::dispatch(self, state, r) {
             return Handled::Now(res);
+        }
+        if let Some(h) = crate::ops::dispatch(self, state, conn, r) {
+            return h;
         }
         let name = r.method.as_str();
         let hub = || self.hub.clone().ok_or_else(|| not_implemented(name));
@@ -252,6 +263,11 @@ impl Services {
                 mcp()?
                     .add(p.scope, &p.name, p.config, cwd.as_deref())
                     .map_err(RpcError::invalid_params)?;
+                if let Some(t) = &self.telemetry {
+                    t.usage(genie_audit::UsageEvent::new(
+                        genie_audit::UsageName::McpServerAdded,
+                    ));
+                }
                 to_result(&Empty {})
             }),
             n if n == m::McpRemove::NAME => params::<m::McpRemove>(r).and_then(|p| {
@@ -535,6 +551,7 @@ impl Services {
     fn mcp_async(self: &Arc<Self>, h: Arc<McpHub>, conn: &Arc<Conn>, r: &Request) -> Handled {
         let r = r.clone();
         let c = conn.clone();
+        let me = self.clone();
         conn.scope()
             .child("mcp-call")
             .spawn_cancellable(async move {
@@ -555,6 +572,12 @@ impl Services {
                     };
                     if name == m::McpAuthStart::NAME {
                         let auth_url = s.authorize().await.map_err(st)?;
+                        me.audit(
+                            AuditEvent::McpAuth,
+                            Attrs::new()
+                                .with("server", p.name.clone())
+                                .with("step", "authorize"),
+                        );
                         return to_result(&AuthUrlResult { auth_url });
                     }
                     let items = if name == m::McpPrompts::NAME {
@@ -576,8 +599,7 @@ impl Services {
     }
 
     /// Background work: hub events → MCP reconcile + `config.changed`/`policy.changed`;
-    /// MCP status → `mcp.status`; settings files polled (content-hash suppressed) and
-    /// managed policy re-read.
+    /// MCP status → `mcp.status`; settings/policy watcher and export loops (`crate::sync`).
     /// `InitializeResult.locked` (02 §2).
     pub(crate) fn locked_info(&self) -> Option<genie_protocol::handshake::LockedInfo> {
         self.providers.as_ref().and_then(|p| p.locked_info())
@@ -623,32 +645,9 @@ impl Services {
                     }
                 }
             });
-            // Settings hot reload (D23): poll; `refresh` reports only real changes.
-            let h = hub.clone();
-            let me = self.clone();
-            scope.spawn_cancellable(async move {
-                let mut tick = 0u64;
-                loop {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    h.refresh();
-                    tick += 1;
-                    if tick.is_multiple_of(5)
-                        && let Some(sk) = &me.skills
-                    {
-                        sk.refresh();
-                    }
-                    if tick.is_multiple_of(30)
-                        && let Some(pm) = &me.policy
-                    {
-                        let eff = {
-                            let mut g = pm.lock().unwrap_or_else(|e| e.into_inner());
-                            g.refresh_local();
-                            g.effective()
-                        };
-                        h.set_policy(eff);
-                    }
-                }
-            });
+            // Settings/policy hot reload (debounced watcher), remote policy, OTLP and
+            // telemetry export (D23, 08 §5–7).
+            crate::sync::start(self, &scope, hub.clone());
         }
         if let Some(mcp) = &self.mcp {
             let mut rx = mcp.subscribe_status();
