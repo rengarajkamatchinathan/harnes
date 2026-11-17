@@ -1,0 +1,16 @@
+{
+  "channel": "dev",
+  "app_name": "Genie Dev",
+  "bundle_id": "com.synergech.genie.dev",
+  "data_dir_suffix": "-dev",
+  "db_name": "genie-dev.db",
+  "endpoint_suffix": "-dev",
+  "update_feed": "updates/dev/{target}.json",
+  "rollout": { "stages": [100], "soak_hours": 0 },
+  "signing": "unsigned nightly (09 §5.2); feed signed with the dev key",
+  "internal_only": true,
+  "windows": { "upgrade_code": "dde567ee-3554-4f35-be57-15e465fad6b7", "msix_identity": "Synergech.GenieDev" },
+  "macos": { "cask": null },
+  "linux": { "package": "genie-dev", "apt_suite": null, "yum_repo": null },
+  "winget": { "id": null }
+}

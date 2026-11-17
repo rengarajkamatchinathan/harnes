@@ -1,0 +1,15 @@
+{
+  "channel": "beta",
+  "app_name": "Genie Beta",
+  "bundle_id": "com.synergech.genie.beta",
+  "data_dir_suffix": "-beta",
+  "db_name": "genie-beta.db",
+  "endpoint_suffix": "-beta",
+  "update_feed": "updates/beta/{target}.json",
+  "rollout": { "stages": [100], "soak_hours": 0 },
+  "signing": "release",
+  "windows": { "upgrade_code": "3f456674-ccc0-4289-b3dd-8b80e0591f1f", "msix_identity": "Synergech.GenieBeta" },
+  "macos": { "cask": "genie@beta" },
+  "linux": { "package": "genie-beta", "apt_suite": "beta", "yum_repo": "genie-beta" },
+  "winget": { "id": "Synergech.Genie.Beta" }
+}
