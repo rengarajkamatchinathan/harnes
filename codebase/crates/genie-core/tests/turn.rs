@@ -202,7 +202,7 @@ fn harness(
         tools,
         window,
         Arc::new(Settings),
-        |b, _| b,
+        |b, _, _| b,
     )
 }
 
@@ -212,7 +212,7 @@ fn harness_with(
     tools: Vec<Arc<dyn Tool>>,
     window: Option<u64>,
     settings: Arc<dyn SettingsSource>,
-    extra: impl FnOnce(RuntimeBuilder, &TaskScope) -> RuntimeBuilder,
+    extra: impl FnOnce(RuntimeBuilder, &TaskScope, Arc<MemoryConversation>) -> RuntimeBuilder,
 ) -> H {
     let (resolver, t) = resolver(responses, window);
     let mut cfg = RuntimeConfig {
@@ -231,7 +231,7 @@ fn harness_with(
         .conversation(conv.clone())
         .chat_tools(reg.clone())
         .code_tools(reg);
-    let runner = extra(b, &root).build();
+    let runner = extra(b, &root, conv.clone()).build();
     let engine = EngineBuilder::new()
         .turn_runner(Arc::new(runner))
         .build(&root);
@@ -1201,7 +1201,7 @@ mod wiring {
             vec![Arc::new(Note)],
             None,
             settings.clone(),
-            |b, _| {
+            |b, _, _| {
                 b.authorizer(Arc::new(PermissionAuthorizer::new(
                     h.clone(),
                     settings.clone(),
@@ -1247,7 +1247,7 @@ mod wiring {
             vec![Arc::new(Note)],
             None,
             settings.clone(),
-            |b, _| {
+            |b, _, _| {
                 b.authorizer(Arc::new(PermissionAuthorizer::new(
                     h.clone(),
                     settings.clone(),
@@ -1371,7 +1371,7 @@ mod wiring {
             vec![],
             None,
             settings.clone(),
-            |b, root| {
+            |b, root, _| {
                 let mcp = McpHub::new(
                     h.clone(),
                     root.child("mcp"),
@@ -1457,7 +1457,7 @@ mod wiring {
             vec![],
             None,
             settings.clone(),
-            |b, _| {
+            |b, _, _| {
                 b.skills(skills.clone())
                     .authorizer(Arc::new(PermissionAuthorizer::new(
                         h.clone(),
@@ -1487,6 +1487,7 @@ mod wiring {
         let ev = genie_core::runtime::permissions::action_for(
             &genie_core::runtime::AuthzRequest {
                 session_id: "x".into(),
+                turn_id: "t".into(),
                 tool: "skill".into(),
                 kind: ToolKind::ReadOnly,
                 resource: Some("greet".into()),
@@ -1502,6 +1503,7 @@ mod wiring {
         use genie_core::runtime::ToolAuthorizer;
         let dec = authz.authorize(&genie_core::runtime::AuthzRequest {
             session_id: "x".into(),
+            turn_id: "t".into(),
             tool: "skill".into(),
             kind: ToolKind::ReadOnly,
             resource: Some("greet".into()),
@@ -1514,5 +1516,186 @@ mod wiring {
             matches!(dec, genie_core::runtime::AuthzDecision::Deny { .. }),
             "{dec:?}"
         );
+    }
+
+    async fn settle_answering(t: &mut H) -> (Vec<SessionEvent>, usize) {
+        let mut all = vec![];
+        let mut asks = 0;
+        loop {
+            let ev = t
+                .until(|e| {
+                    matches!(
+                        e,
+                        SessionEvent::PermissionAsked(_) | SessionEvent::TurnSettled(_)
+                    )
+                })
+                .await;
+            let last = ev.last().cloned().unwrap();
+            all.extend(ev);
+            match last {
+                SessionEvent::PermissionAsked(a) => {
+                    asks += 1;
+                    t.s.answer_ask(
+                        &a.ask.id,
+                        serde_json::to_value(AskAnswer::decision(Decision::Once)).unwrap(),
+                    )
+                    .unwrap();
+                }
+                _ => return (all, asks),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn shell_runs_through_the_real_authorizer() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = d.path().join("proj");
+        std::fs::create_dir_all(&ws).unwrap();
+        let h = hub(d.path());
+        h.trust_set(
+            &ws.display().to_string(),
+            genie_protocol::api::config::TrustDecision::Trust,
+        )
+        .unwrap();
+        std::fs::create_dir_all(ws.join(".genie")).unwrap();
+        std::fs::write(
+            ws.join(".genie/settings.json"),
+            r#"{"permissions": {"deny": ["Bash(rm:*)"]}}"#,
+        )
+        .unwrap();
+        h.refresh();
+        let settings = code_settings(&ws);
+        let mut t = harness_with(
+            vec![
+                reply(
+                    &[tool_block(
+                        0,
+                        "toolu_a",
+                        "shell",
+                        json!({"command": "echo hi-from-shell"}),
+                    )],
+                    "tool_use",
+                ),
+                reply(
+                    &[tool_block(
+                        0,
+                        "toolu_b",
+                        "shell",
+                        json!({"command": "rm -rf build"}),
+                    )],
+                    "tool_use",
+                ),
+                text(&["done"]),
+            ],
+            |_| {},
+            vec![],
+            None,
+            settings.clone(),
+            |b, root, _| {
+                let sh =
+                    genie_tools::shell::ShellRuntime::new(genie_tools::shell::ShellConfig::new(
+                        Arc::new(genie_tools::shell::FixedDir(ws.clone())),
+                        root.tracker(),
+                        root.token().clone(),
+                    ));
+                b.shell(Arc::new(sh))
+                    .authorizer(Arc::new(PermissionAuthorizer::new(
+                        h.clone(),
+                        settings.clone(),
+                    )))
+            },
+        );
+        let _attached = t.s.attach();
+        t.s.prompt("run it", Delivery::Steer).unwrap();
+        let (ev, asks) = settle_answering(&mut t).await;
+        // `echo` is read-only (no ask); `rm` is denied by the project rule.
+        assert_eq!(asks, 0);
+        let e = ended(&ev);
+        assert_eq!(e[0].outcome, ToolOutcome::Ok);
+        assert_eq!(e[1].outcome, ToolOutcome::Blocked);
+        let bodies = t.bodies();
+        let res = bodies[1]["messages"].as_array().unwrap()[2]["content"][0]["content"].to_string();
+        assert!(res.contains("hi-from-shell"), "{res}");
+    }
+
+    async fn page_server() -> std::net::SocketAddr {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = tokio::io::AsyncReadExt::read(&mut s, &mut buf).await;
+                    let body = "<html><body><h1>Hello web</h1><p>PAGE-MARKER</p></body></html>";
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = s.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        addr
+    }
+
+    fn web_harness(d: &std::path::Path, url: &str) -> H {
+        let h = hub(d);
+        let settings: Arc<dyn SettingsSource> = Arc::new(Settings);
+        let fetch = genie_tools::web::FetchConfig {
+            ssrf: genie_tools::web::SsrfPolicy {
+                allow_private: false,
+                allow: vec!["127.0.0.1".parse().unwrap()],
+            },
+            ..genie_tools::web::FetchConfig::default()
+        };
+        harness_with(
+            vec![
+                reply(
+                    &[tool_block(0, "toolu_a", "web_fetch", json!({"url": url}))],
+                    "tool_use",
+                ),
+                text(&["done"]),
+            ],
+            |_| {},
+            vec![],
+            None,
+            settings.clone(),
+            move |b, _, conv| {
+                b.web(genie_tools::web::WebConfig {
+                    fetch,
+                    ..Default::default()
+                })
+                .authorizer(Arc::new(
+                    PermissionAuthorizer::new(h.clone(), settings.clone()).with_conversation(conv),
+                ))
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn web_fetch_asks_for_a_new_domain_and_skips_the_ask_for_a_pasted_url() {
+        let addr = page_server().await;
+        let url = format!("http://{addr}/");
+        // Not pasted: the fetch asks first.
+        let d = tempfile::tempdir().unwrap();
+        let mut t = web_harness(d.path(), &url);
+        let _a = t.s.attach();
+        t.s.prompt("read the page", Delivery::Steer).unwrap();
+        let (ev, asks) = settle_answering(&mut t).await;
+        assert_eq!(asks, 1);
+        assert_eq!(ended(&ev)[0].outcome, ToolOutcome::Ok);
+        let res =
+            t.bodies()[1]["messages"].as_array().unwrap()[2]["content"][0]["content"].to_string();
+        assert!(res.contains("PAGE-MARKER"), "{res}");
+        assert!(res.contains("untrusted_web_content"), "{res}");
+        // Pasted by the user: allowed without an ask (D35).
+        let d = tempfile::tempdir().unwrap();
+        let mut t = web_harness(d.path(), &url);
+        let _a = t.s.attach();
+        t.s.prompt(format!("summarise {url}"), Delivery::Steer)
+            .unwrap();
+        let (ev, asks) = settle_answering(&mut t).await;
+        assert_eq!(asks, 0);
+        assert_eq!(ended(&ev)[0].outcome, ToolOutcome::Ok);
     }
 }

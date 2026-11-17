@@ -1042,6 +1042,7 @@ dependencies = [
  "genie-skills",
  "genie-store",
  "genie-testkit",
+ "genie-tools",
  "getrandom 0.3.4",
  "hex",
  "libc",

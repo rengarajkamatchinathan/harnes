@@ -25,6 +25,7 @@ pub mod active;
 pub mod bridge;
 pub mod context;
 pub mod conversation;
+pub mod host;
 pub mod mcp;
 pub mod models;
 pub mod permissions;
@@ -108,6 +109,12 @@ pub struct AgentRuntime {
     pub turns: Arc<ActiveTurns>,
     /// Skills and slash commands (06 §9).
     pub skills: Option<Arc<skills::SkillsHub>>,
+    /// Per-turn taint cells; the web tools' [`genie_tools::web::TaintPort`].
+    pub taints: Arc<host::TurnTaints>,
+    /// The shell tool's runtime (Code): cwd per session, background jobs.
+    pub shell: Option<Arc<genie_tools::shell::ShellRuntime>>,
+    /// Provider-native web search policy (06 §8); `None`: never declared.
+    pub web_search: Option<genie_tools::web::SearchPolicy>,
 }
 
 impl AgentRuntime {
@@ -202,6 +209,9 @@ impl RuntimeBuilder {
                 tool_providers: Vec::new(),
                 turns: Arc::new(ActiveTurns::new()),
                 skills: None,
+                taints: Arc::new(host::TurnTaints::default()),
+                shell: None,
+                web_search: None,
             },
         }
     }
@@ -266,6 +276,30 @@ impl RuntimeBuilder {
     /// tools for Chat and Code, skill parts and user commands in prompts.
     pub fn skills(mut self, hub: Arc<skills::SkillsHub>) -> Self {
         self.rt.skills = Some(hub);
+        self
+    }
+
+    /// The `shell` tool (Code registry only, 06 §13).
+    pub fn shell(mut self, shell: Arc<genie_tools::shell::ShellRuntime>) -> Self {
+        for t in shell.tools() {
+            self.rt.code_tools.register(t);
+        }
+        self.rt.shell = Some(shell);
+        self
+    }
+
+    /// `web_fetch` (and a local `web_search` when `cfg.search` is set) for Chat and Code
+    /// (06 §8). Results taint the turn through [`AgentRuntime::taints`].
+    pub fn web(self, mut cfg: genie_tools::web::WebConfig) -> Self {
+        if cfg.taint.is_none() {
+            cfg.taint = Some(self.rt.taints.clone());
+        }
+        self.tools(genie_tools::web::tools(cfg))
+    }
+
+    /// Declare provider-native web search when the model supports it (06 §8).
+    pub fn web_search(mut self, policy: Option<genie_tools::web::SearchPolicy>) -> Self {
+        self.rt.web_search = policy;
         self
     }
 

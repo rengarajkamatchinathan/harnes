@@ -103,6 +103,7 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
     let registry = rt.registry_for(&sid, &settings);
     let turns = rt.turns.clone();
     let _active = turns.enter(&turn);
+    let taint_cell = rt.taints.enter(&sid, &turn.turn_id);
     let mut r = Run {
         leaf: path.last().map(|m| m.id().to_string()),
         rt,
@@ -113,9 +114,10 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
         meta,
         env,
         registry,
-        taint: Arc::new(Mutex::new(None)),
+        taint: taint_cell,
     };
     let res = r.go().await;
+    r.rt.taints.leave(&r.sid, &r.turn.turn_id);
     if let Err(e) = r.save_meta() {
         tracing::error!(incident_id = %e.incident_id, "saving runtime meta failed");
     }
@@ -498,6 +500,38 @@ impl Run {
             ToolChoice::Auto
         };
         req.effort = self.settings.effort.as_deref().and_then(parse_effort);
+        if let Some(policy) = &self.rt.web_search
+            && !final_step
+        {
+            use genie_providers::model::ProtocolKind as P;
+            use genie_tools::web::search::NativeSearchInput;
+            use genie_tools::web::{NativeSearch, SearchProtocol, native_search};
+            let protocol = match self.model.route.protocol.kind() {
+                P::AnthropicMessages => SearchProtocol::AnthropicMessages,
+                P::OpenaiResponses => SearchProtocol::OpenAiResponses,
+                P::Gemini => SearchProtocol::Gemini,
+                _ => SearchProtocol::Other,
+            };
+            if let NativeSearch::Declare {
+                allowed_domains,
+                blocked_domains,
+                max_uses,
+            } = native_search(&NativeSearchInput {
+                protocol,
+                model_supports: self.model.route.model.web_search_native,
+                global_toggle: true,
+                chat_toggle: true,
+                policy,
+                max_uses: genie_tools::web::search::DEFAULT_MAX_USES,
+            }) && !req.tools.iter().any(|t| t.name == "web_search")
+            {
+                req.server_tools.web_search = Some(genie_providers::model::WebSearchConfig {
+                    allowed_domains,
+                    blocked_domains,
+                    max_uses,
+                });
+            }
+        }
         req.baseline_long_ttl = baseline.has_project_knowledge();
         req.prompt_cache_key = Some(self.sid.clone());
         req.wire_records = self.rt.conversation.wire_records(&self.sid);

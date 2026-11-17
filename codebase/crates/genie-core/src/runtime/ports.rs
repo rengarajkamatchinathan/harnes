@@ -126,6 +126,7 @@ impl ModelResolver for NoModels {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthzRequest {
     pub session_id: String,
+    pub turn_id: String,
     pub tool: String,
     pub kind: ToolKind,
     pub resource: Option<String>,

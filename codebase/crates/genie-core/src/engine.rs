@@ -18,7 +18,13 @@ use genie_protocol::session::{LiveStatus, TurnFinish};
 /// Actor eviction after this long with no subscribers and no turn (01 §5.5, SA-05).
 pub const ACTOR_IDLE_TTL: Duration = Duration::from_secs(15 * 60);
 
+/// Called when a session actor ends: `evicted` = idle eviction (state stays in the
+/// store), else `session.delete` / shutdown. Subsystems drop per-session state here
+/// (e.g. the shell's background jobs).
+pub type OnSessionEnd = Arc<dyn Fn(&str, bool) + Send + Sync>;
+
 pub struct EngineBuilder {
+    on_end: Option<OnSessionEnd>,
     runner: Arc<dyn TurnRunner>,
     journal: Arc<dyn Journal>,
     notifier: Arc<dyn Notifier>,
@@ -29,6 +35,7 @@ pub struct EngineBuilder {
 impl Default for EngineBuilder {
     fn default() -> Self {
         EngineBuilder {
+            on_end: None,
             runner: Arc::new(UnconfiguredRunner),
             journal: Arc::new(MemoryJournal::new()),
             notifier: Arc::new(LogNotifier),
@@ -51,6 +58,11 @@ impl EngineBuilder {
     /// The store. `genie-store` provides the SQLCipher implementation (spec 04).
     pub fn journal(mut self, j: Arc<dyn Journal>) -> Self {
         self.journal = j;
+        self
+    }
+
+    pub fn on_session_end(mut self, f: OnSessionEnd) -> Self {
+        self.on_end = Some(f);
         self
     }
 
@@ -81,6 +93,7 @@ impl EngineBuilder {
             background_jobs: Arc::new(AtomicUsize::new(0)),
             terminals: Arc::new(AtomicUsize::new(0)),
             actor_idle_ttl: self.actor_idle_ttl,
+            on_end: self.on_end,
         });
         let engine = Engine { inner };
         let e = engine.clone();
@@ -111,6 +124,7 @@ struct Inner {
     background_jobs: Arc<AtomicUsize>,
     terminals: Arc<AtomicUsize>,
     actor_idle_ttl: Duration,
+    on_end: Option<OnSessionEnd>,
 }
 
 #[derive(Clone)]
@@ -174,6 +188,9 @@ impl Engine {
     pub fn close_session(&self, id: &str) {
         if let Some(h) = self.sessions().remove(id) {
             h.close();
+        }
+        if let Some(f) = &self.inner.on_end {
+            f(id, false);
         }
     }
 
@@ -264,6 +281,12 @@ impl Engine {
         for id in &ids {
             if let Some(h) = map.remove(id) {
                 h.close();
+            }
+        }
+        drop(map);
+        if let Some(f) = &self.inner.on_end {
+            for id in &ids {
+                f(id, true);
             }
         }
         ids.len()

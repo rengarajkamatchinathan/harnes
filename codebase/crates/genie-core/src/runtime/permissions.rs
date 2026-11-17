@@ -32,12 +32,15 @@ use genie_tools::ToolKind;
 
 use crate::config::{ConfigHub, project_root};
 use crate::error::BlockSource;
+use crate::runtime::conversation::ConversationStore;
 use crate::runtime::ports::{
     AuthzDecision, AuthzRequest, SessionSettings, SettingsSource, ToolAuthorizer, saved_rule,
 };
 
 #[derive(Default)]
 struct SessState {
+    /// Domains fetched in a turn: `(turn_id, domains)` (`seen`, 06 §5.5).
+    fetched: (String, std::collections::HashSet<String>),
     /// "Always" rules remembered for this session (and as a fallback when persisting
     /// failed), with their origin.
     remembered: Vec<(Origin, Rule)>,
@@ -52,6 +55,8 @@ pub struct PermissionAuthorizer {
     audit: Option<Arc<Auditor>>,
     home: Option<String>,
     sessions: Mutex<HashMap<String, SessState>>,
+    /// The message tree, to tell whether a fetched URL was pasted by the user (D35).
+    conversation: Option<Arc<dyn ConversationStore>>,
 }
 
 impl PermissionAuthorizer {
@@ -64,7 +69,34 @@ impl PermissionAuthorizer {
                 .or_else(|_| std::env::var("USERPROFILE"))
                 .ok(),
             sessions: Mutex::new(HashMap::new()),
+            conversation: None,
         }
+    }
+
+    /// Lets `web_fetch` of a URL the user pasted in this chat run without asking (D35).
+    pub fn with_conversation(mut self, c: Arc<dyn ConversationStore>) -> Self {
+        self.conversation = Some(c);
+        self
+    }
+
+    /// Whether `url` (or its host) appears in a user message of the session.
+    fn pasted(&self, session: &str, url: Option<&str>, domain: &str) -> bool {
+        let Some(c) = &self.conversation else {
+            return false;
+        };
+        let Ok(path) = c.path(session) else {
+            return false;
+        };
+        path.iter()
+            .filter(|m| m.message.role == genie_providers::model::Role::User)
+            .flat_map(|m| m.message.parts.iter())
+            .any(|p| match p {
+                genie_providers::model::Part::Text(t) => match url {
+                    Some(u) => t.text.contains(u),
+                    None => t.text.contains(&format!("://{domain}")),
+                },
+                _ => false,
+            })
     }
 
     pub fn with_audit(mut self, audit: Arc<Auditor>) -> Self {
@@ -169,8 +201,28 @@ impl PermissionAuthorizer {
         })
     }
 
-    fn request(req: &AuthzRequest, s: &SessionSettings) -> Request {
-        let action = action_for(req, s.workspace.as_deref());
+    fn request(&self, req: &AuthzRequest, s: &SessionSettings) -> Request {
+        let mut action = action_for(req, s.workspace.as_deref());
+        if let Action::WebFetch {
+            domain,
+            pasted,
+            seen,
+        } = &mut action
+        {
+            let url = match &req.preview {
+                Some(Preview::Url { url }) => Some(url.as_str()),
+                _ => None,
+            };
+            *pasted = self.pasted(&req.session_id, url, domain);
+            *seen = self
+                .sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&req.session_id)
+                .is_some_and(|st| {
+                    st.fetched.0 == req.turn_id && st.fetched.1.contains(domain.as_str())
+                });
+        }
         let r = Request::new(action);
         match &req.taint {
             Some(src) => r.tainted(Taint {
@@ -178,6 +230,19 @@ impl PermissionAuthorizer {
                 read_origins: Vec::new(),
             }),
             None => r,
+        }
+    }
+}
+
+impl PermissionAuthorizer {
+    fn note_fetch(&self, req: &AuthzRequest, r: &Request) {
+        if let Action::WebFetch { domain, .. } = &r.action {
+            let mut g = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            let st = g.entry(req.session_id.clone()).or_default();
+            if st.fetched.0 != req.turn_id {
+                st.fetched = (req.turn_id.clone(), Default::default());
+            }
+            st.fetched.1.insert(domain.clone());
         }
     }
 }
@@ -199,76 +264,6 @@ fn resolve_dir(d: &str, workspace: Option<&Path>, home: Option<&str>) -> String 
         (false, Some(w)) => w.join(p).display().to_string(),
         _ => d.to_string(),
     }
-}
-
-/// Split a shell command into its sub-commands at `&&`, `||`, `;`, `|` and newlines,
-/// outside quotes. Command substitution (`$(…)`, backticks) or unbalanced quotes make it
-/// unparseable (`None` → the evaluator asks, 06 §13.3). The full scanner lives with the
-/// shell tool; this is the engine-side fallback.
-pub fn split_shell(cmd: &str) -> Option<Vec<String>> {
-    let mut parts = Vec::new();
-    let mut cur = String::new();
-    let mut quote: Option<char> = None;
-    let mut chars = cmd.chars().peekable();
-    while let Some(c) = chars.next() {
-        match quote {
-            Some('\'') => {
-                cur.push(c);
-                if c == '\'' {
-                    quote = None;
-                }
-            }
-            Some(q) => {
-                if c == '`' || (c == '$' && chars.peek() == Some(&'(')) {
-                    return None;
-                }
-                cur.push(c);
-                if c == '\\' {
-                    if let Some(n) = chars.next() {
-                        cur.push(n);
-                    }
-                } else if c == q {
-                    quote = None;
-                }
-            }
-            None => match c {
-                '\'' | '"' => {
-                    quote = Some(c);
-                    cur.push(c);
-                }
-                '`' => return None,
-                '$' if chars.peek() == Some(&'(') => return None,
-                '\\' => {
-                    cur.push(c);
-                    if let Some(n) = chars.next() {
-                        cur.push(n);
-                    }
-                }
-                ';' | '\n' => parts.push(std::mem::take(&mut cur)),
-                '&' if chars.peek() == Some(&'&') => {
-                    chars.next();
-                    parts.push(std::mem::take(&mut cur));
-                }
-                '|' => {
-                    if chars.peek() == Some(&'|') {
-                        chars.next();
-                    }
-                    parts.push(std::mem::take(&mut cur));
-                }
-                _ => cur.push(c),
-            },
-        }
-    }
-    if quote.is_some() {
-        return None;
-    }
-    parts.push(cur);
-    let parts: Vec<String> = parts
-        .into_iter()
-        .map(|p| p.trim().to_string())
-        .filter(|p| !p.is_empty())
-        .collect();
-    (!parts.is_empty()).then_some(parts)
 }
 
 /// Host of a URL or a bare domain.
@@ -302,18 +297,32 @@ pub fn action_for(req: &AuthzRequest, workspace: Option<&Path>) -> Action {
     };
     match name {
         "shell" | "bash" | "powershell" => {
+            use genie_tools::shell::{Dialect, authz_from_request, scan};
+            let map = |d: Dialect| match d {
+                Dialect::Posix => ShellDialect::Posix,
+                Dialect::PowerShell => ShellDialect::PowerShell,
+            };
+            // The shell tool sends `Bash(<cmd>)` / `PowerShell(<cmd>)` + a Command preview.
+            if let Some(a) = authz_from_request(resource.as_deref(), req.preview.as_ref()) {
+                return Action::Shell {
+                    dialect: map(a.dialect),
+                    command: a.command,
+                    parts: a.parts,
+                    cwd: a.cwd.map(abs),
+                };
+            }
             let (command, cwd) = match &req.preview {
                 Some(Preview::Command { command, cwd }) => (command.clone(), cwd.clone()),
                 _ => (resource.unwrap_or_default(), None),
             };
             let dialect = if name == "powershell" {
-                ShellDialect::PowerShell
+                Dialect::PowerShell
             } else {
-                ShellDialect::Posix
+                Dialect::Posix
             };
             Action::Shell {
-                parts: split_shell(&command),
-                dialect,
+                parts: scan(dialect, &command).ok(),
+                dialect: map(dialect),
                 command,
                 cwd: cwd.map(abs),
             }
@@ -330,12 +339,17 @@ pub fn action_for(req: &AuthzRequest, workspace: Option<&Path>) -> Action {
                 .unwrap_or_default()),
         },
         "web_fetch" | "fetch" => {
-            let src = match &req.preview {
-                Some(Preview::Url { url }) => url.clone(),
-                _ => resource.unwrap_or_default(),
-            };
+            let domain =
+                match genie_tools::web::fetch_authz(resource.as_deref(), req.preview.as_ref()) {
+                    Some(a) => a.domain,
+                    None => match &req.preview {
+                        Some(Preview::Url { url }) => host_of(url),
+                        _ => String::new(),
+                    },
+                };
+            // `pasted` / `seen` are filled in by the authorizer.
             Action::WebFetch {
-                domain: host_of(&src),
+                domain: host_of(&domain),
                 pasted: false,
                 seen: false,
             }
@@ -412,7 +426,7 @@ impl ToolAuthorizer for PermissionAuthorizer {
             };
         };
         let ev = self.evaluator(&req.session_id, &s, req.mode);
-        let r = Self::request(req, &s);
+        let r = self.request(req, &s);
         let verdict = ev.evaluate(&r);
         let mut attrs = Attrs::new().with("tool", req.tool.clone());
         if let Some(res) = &req.resource {
@@ -423,6 +437,7 @@ impl ToolAuthorizer for PermissionAuthorizer {
         }
         match verdict {
             Verdict::Allow { by } => {
+                self.note_fetch(req, &r);
                 if matches!(by, AllowedBy::Rule { .. } | AllowedBy::Bypass) {
                     self.record(
                         &req.session_id,
@@ -489,7 +504,7 @@ impl ToolAuthorizer for PermissionAuthorizer {
         let Some(s) = self.settings.settings(&req.session_id) else {
             return;
         };
-        let r = Self::request(req, &s);
+        let r = self.request(req, &s);
         self.sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -510,6 +525,12 @@ impl ToolAuthorizer for PermissionAuthorizer {
     }
 
     fn answered(&self, req: &AuthzRequest, ask_id: &str, answer: &AskAnswer) -> Vec<String> {
+        if matches!(answer.decision, Decision::Once | Decision::Always)
+            && let Some(s) = self.settings.settings(&req.session_id)
+        {
+            let r = self.request(req, &s);
+            self.note_fetch(req, &r);
+        }
         let pending = self
             .sessions
             .lock()
@@ -594,22 +615,6 @@ impl ToolAuthorizer for PermissionAuthorizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn shell_split() {
-        assert_eq!(
-            split_shell("git status && ls -la | wc -l; echo 'a;b'"),
-            Some(vec![
-                "git status".into(),
-                "ls -la".into(),
-                "wc -l".into(),
-                "echo 'a;b'".into()
-            ])
-        );
-        assert_eq!(split_shell("echo $(rm -rf /)"), None);
-        assert_eq!(split_shell("echo \"unclosed"), None);
-        assert_eq!(split_shell("echo '$(x)'"), Some(vec!["echo '$(x)'".into()]));
-    }
 
     #[test]
     fn hosts() {

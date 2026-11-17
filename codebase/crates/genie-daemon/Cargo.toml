@@ -18,6 +18,7 @@ genie-config.workspace = true
 genie-permissions.workspace = true
 genie-mcp.workspace = true
 genie-skills.workspace = true
+genie-tools.workspace = true
 async-trait.workspace = true
 getrandom.workspace = true
 hex.workspace = true

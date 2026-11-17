@@ -121,6 +121,7 @@ impl PermissionGate for CallGate {
     async fn assert(&self, req: PermissionRequest) -> Result<(), TError> {
         let areq = AuthzRequest {
             session_id: self.turn.session_id.clone(),
+            turn_id: self.turn.turn_id.clone(),
             tool: self.tool.clone(),
             kind: self.kind,
             resource: req.resource.clone(),

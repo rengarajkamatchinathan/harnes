@@ -238,8 +238,43 @@ fn build_engine(
         rb = rb.store(store.clone());
         eb = eb.journal(Arc::new(StoreJournal::new(store.clone())));
     }
+    // Shell (Code, 06 §13) with background jobs bound to the engine below; web tools
+    // (Chat + Code, 06 §8) tainting the turn.
+    let jobs = genie_core::runtime::host::EngineJobs::new(store.clone());
+    let shell_scope = root.child("shell");
+    let shell = Arc::new(genie_tools::shell::ShellRuntime::new(
+        genie_tools::shell::ShellConfig::new(
+            Arc::new(genie_core::runtime::host::SettingsDirs(registry.clone())),
+            shell_scope.tracker(),
+            shell_scope.token().clone(),
+        )
+        .with_jobs(jobs.clone()),
+    ));
+    rb = rb
+        .shell(shell.clone())
+        .web(genie_tools::web::WebConfig::default());
+    {
+        let sh = shell.clone();
+        eb = eb.on_session_end(Arc::new(move |id: &str, evicted: bool| {
+            // An evicted actor keeps its running jobs; they report back when done.
+            if !evicted || sh.running_jobs(id).is_empty() {
+                sh.end_session(id);
+            }
+        }));
+    }
     if let Some(hub) = &hub {
+        let p = hub.policy();
+        rb = rb.web_search(Some(genie_tools::web::SearchPolicy {
+            enabled: p.bool("webSearch.enabled") != Some(false),
+            allowed_domains: p.strings("webSearch.allowedDomains"),
+            blocked_domains: p.strings("webSearch.blockedDomains"),
+        }));
         let mut authz = PermissionAuthorizer::new(hub.clone(), registry.clone());
+        if let Some(store) = &store {
+            authz = authz.with_conversation(Arc::new(genie_core::runtime::StoreConversation::new(
+                store.clone(),
+            )));
+        }
         if let Some(a) = &services.audit {
             authz = authz.with_audit(a.clone());
         }
@@ -275,11 +310,9 @@ fn build_engine(
     let runner = rb.build();
     let conversation = runner.conversation();
     services.runtime = Some(runner.runtime().clone());
-    (
-        eb.turn_runner(Arc::new(runner)).build(root),
-        Some(conversation),
-        services,
-    )
+    let engine = eb.turn_runner(Arc::new(runner)).build(root);
+    jobs.bind(engine.clone());
+    (engine, Some(conversation), services)
 }
 
 /// Run the daemon until idle exit, restart, lease end or signal.
