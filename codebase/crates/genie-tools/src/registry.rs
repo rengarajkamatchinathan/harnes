@@ -62,6 +62,11 @@ impl ToolRegistry {
         self.tools.is_empty()
     }
 
+    /// Keep only the tools whose name passes `keep` (agent tool lists, 06 §11).
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        self.tools.retain(|name, _| keep(name));
+    }
+
     /// Tools available in `env`, sorted by name (stable bytes → stable cache prefix).
     pub fn available(&self, env: &ToolEnv) -> Vec<Arc<dyn Tool>> {
         self.tools

@@ -1368,6 +1368,7 @@ dependencies = [
  "genie-config",
  "genie-mcp",
  "genie-permissions",
+ "genie-process",
  "genie-protocol",
  "genie-providers",
  "genie-secrets",

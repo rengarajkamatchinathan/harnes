@@ -174,6 +174,11 @@ impl DaemonState {
         &self.engine
     }
 
+    /// The agent runtime, when the daemon was built with services.
+    pub(crate) fn runtime(&self) -> Option<&Arc<genie_core::runtime::AgentRuntime>> {
+        self.services.as_ref().and_then(|s| s.runtime.as_ref())
+    }
+
     pub fn request_shutdown(&self, reason: ShutdownReason) {
         self.shutdown.send_if_modified(|cur| {
             if cur.is_none() {
@@ -851,10 +856,18 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
         }
         n if n == m::SessionDelete::NAME => params::<m::SessionDelete>(&r).and_then(|p| {
             with_lease(state, conn, &p.session_id)?;
+            let settings =
+                genie_core::runtime::SettingsSource::settings(&*state.registry, &p.session_id);
             let Some(info) = state.registry.remove(&p.session_id) else {
                 return Err(not_found("session"));
             };
             state.engine.close_session(&p.session_id);
+            crate::agents::session_end(
+                state.runtime(),
+                &p.session_id,
+                settings,
+                &state.root.child("hooks"),
+            );
             state.leases.forget(&p.session_id);
             crate::code::session_deleted(state, &p.session_id);
             state.listed(ListedChange::Deleted, info.summary);
@@ -865,6 +878,9 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
         }
         n if n == m::SessionInterrupt::NAME => params::<m::SessionInterrupt>(&r).and_then(|p| {
             let h = leased_handle(state, conn, &p.session_id)?;
+            if p.stop_subagents {
+                crate::agents::stop_subagents(state.runtime(), &p.session_id);
+            }
             to_result(&sp::InterruptResult {
                 interrupted: h.interrupt(),
             })

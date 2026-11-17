@@ -9,6 +9,7 @@
 //! * Version skew (01 §4.2), idle exit after 10 min (01 §4.3, SA-01), clean shutdown,
 //!   crash recovery via execution claims, standalone lease mode (01 §4.4).
 
+mod agents;
 mod blobs;
 mod code;
 mod keystore;
@@ -384,6 +385,24 @@ fn build_engine(
             Err(e) => tracing::error!(error = %e, "MCP unavailable"),
         }
     }
+    // Agents, subagents and hooks (06 §11–12).
+    rb = rb
+        .agents(Arc::new(genie_core::runtime::agents::AgentCatalog::new(
+            Some(ep.config_dir.clone()),
+            hub.clone(),
+        )))
+        .subagents(
+            genie_core::runtime::subagents::SubagentConfig::default(),
+            root.child("subagents"),
+        );
+    if let Some(hub) = &hub {
+        rb = rb
+            .config_hub(hub.clone())
+            .hooks(genie_core::runtime::hooks::HooksHub::with_audit(
+                Arc::new(genie_core::runtime::hooks::ConfigHooks { hub: hub.clone() }),
+                services.audit.clone(),
+            ));
+    }
     if let Some(hub) = &hub {
         let skills = genie_core::runtime::skills::SkillsHub::new(
             ep.config_dir.clone(),
@@ -406,11 +425,16 @@ fn build_engine(
         c.store = store.clone();
         c
     }));
+    let subagents = runner.runtime().subagents.clone();
     {
         let sh = shell.clone();
         let br = services.browser.clone();
         let scope = root.child("session-end");
+        let sa = subagents.clone();
         eb = eb.on_session_end(Arc::new(move |id: &str, evicted: bool| {
+            if let Some(sa) = &sa {
+                sa.session_ended(id, evicted);
+            }
             // An evicted actor keeps its running jobs; they report back when done.
             if !evicted || sh.running_jobs(id).is_empty() {
                 sh.end_session(id);
@@ -423,6 +447,12 @@ fn build_engine(
     }
     let engine = eb.turn_runner(Arc::new(runner)).build(root);
     jobs.bind(engine.clone());
+    if let Some(sa) = &subagents {
+        sa.bind(
+            engine.clone(),
+            Some(registry.clone() as Arc<dyn genie_core::runtime::subagents::ChildRegistrar>),
+        );
+    }
     if let Some(h) = &browser_host {
         h.bind(engine.clone());
     }

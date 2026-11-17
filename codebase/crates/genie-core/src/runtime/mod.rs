@@ -22,6 +22,7 @@
 //! (`turn.end` continue), checkpoints, native compaction.
 
 pub mod active;
+pub mod agents;
 pub mod artifacts;
 pub mod attachments;
 pub mod bridge;
@@ -32,6 +33,7 @@ pub mod code;
 pub mod context;
 pub mod conversation;
 pub mod extract;
+pub mod hooks;
 pub mod host;
 pub mod mcp;
 pub mod memory_ctl;
@@ -42,6 +44,7 @@ pub mod projects;
 pub mod prompts;
 pub mod retrieval;
 pub mod skills;
+pub mod subagents;
 mod turn;
 pub mod wire;
 
@@ -135,6 +138,12 @@ pub struct AgentRuntime {
     pub attachments: Option<Arc<attachments::Attachments>>,
     /// Shadow-git checkpoints around mutating steps (Code, D49).
     pub checkpoints: Option<Arc<checkpoint::Checkpoints>>,
+    /// Agent definitions (06 §11): `session.create.agent`, subagent agents.
+    pub agents: Option<Arc<agents::AgentCatalog>>,
+    /// Subagents (06 §11): `task` / `task_wait`, child sessions.
+    pub subagents: Option<Arc<subagents::SubagentHub>>,
+    /// Hooks (06 §12, Code only).
+    pub hooks: Option<Arc<hooks::HooksHub>>,
 }
 
 impl AgentRuntime {
@@ -212,6 +221,9 @@ impl AgentRuntime {
                 r.register(t.tool);
             }
         }
+        if let Some(def) = self.agents.as_ref().and_then(|a| a.for_session(settings)) {
+            def.filter_registry(&mut r);
+        }
         r
     }
 
@@ -260,6 +272,8 @@ impl AgentRuntime {
 /// Builds an [`AgentRuntime`].
 pub struct RuntimeBuilder {
     rt: AgentRuntime,
+    subagents: Option<(subagents::SubagentConfig, crate::task::TaskScope)>,
+    config_hub: Option<Arc<crate::config::ConfigHub>>,
 }
 
 impl RuntimeBuilder {
@@ -288,7 +302,12 @@ impl RuntimeBuilder {
                 memory_ctl: None,
                 attachments: None,
                 checkpoints: None,
+                agents: None,
+                subagents: None,
+                hooks: None,
             },
+            subagents: None,
+            config_hub: None,
         }
     }
 
@@ -458,6 +477,36 @@ impl RuntimeBuilder {
             .spill(Some(Arc::new(bridge::BlobSpill::new(store))))
     }
 
+    /// Agent definitions (06 §11): built-ins + `~/.genie/agents` + trusted project agents.
+    pub fn agents(mut self, catalog: Arc<agents::AgentCatalog>) -> Self {
+        self.rt.agents = Some(catalog);
+        self
+    }
+
+    /// Subagents (06 §11): the `task` / `task_wait` tools (Code) and the child-session
+    /// supervisor, whose tasks run on `scope`. Bind the engine afterwards with
+    /// [`subagents::SubagentHub::bind`].
+    pub fn subagents(
+        mut self,
+        cfg: subagents::SubagentConfig,
+        scope: crate::task::TaskScope,
+    ) -> Self {
+        self.subagents = Some((cfg, scope));
+        self
+    }
+
+    /// Hooks (06 §12): Code sessions only.
+    pub fn hooks(mut self, hooks: Arc<hooks::HooksHub>) -> Self {
+        self.rt.hooks = Some(hooks);
+        self
+    }
+
+    /// Settings for `subagents.maxDepth` (and its policy cap).
+    pub fn config_hub(mut self, hub: Arc<crate::config::ConfigHub>) -> Self {
+        self.config_hub = Some(hub);
+        self
+    }
+
     pub fn build(mut self) -> AgentRunner {
         if self.rt.projects.is_some() || self.rt.memory_ctl.is_some() {
             self.rt.instructions = Arc::new(projects::ContextSources {
@@ -491,7 +540,52 @@ impl RuntimeBuilder {
                 self.rt.code_tools.register(t);
             }
         }
+        self.wire_agents();
         AgentRunner(Arc::new(self.rt))
+    }
+}
+
+impl RuntimeBuilder {
+    /// Agents + subagents: child-aware settings, agent-narrowed instructions and
+    /// authorisation, and the `task` / `task_wait` tools.
+    fn wire_agents(&mut self) {
+        if self.subagents.is_some() && self.rt.agents.is_none() {
+            self.rt.agents = Some(Arc::new(agents::AgentCatalog::builtin_only()));
+        }
+        let Some(catalog) = self.rt.agents.clone() else {
+            return;
+        };
+        if let Some((cfg, scope)) = self.subagents.take() {
+            let hub = subagents::SubagentHub::new(
+                cfg,
+                scope,
+                subagents::HubParts {
+                    base: self.rt.settings.clone(),
+                    models: self.rt.models.clone(),
+                    conversation: self.rt.conversation.clone(),
+                    agents: catalog.clone(),
+                    config: self.config_hub.clone(),
+                    hooks: self.rt.hooks.clone(),
+                },
+            );
+            self.rt.settings = Arc::new(subagents::WithChildren(hub.clone()));
+            self.rt
+                .code_tools
+                .register(Arc::new(subagents::TaskTool::new(hub.clone())));
+            self.rt
+                .code_tools
+                .register(Arc::new(subagents::TaskWaitTool::new(hub.clone())));
+            self.rt.subagents = Some(hub);
+        }
+        self.rt.instructions = Arc::new(agents::AgentInstructions {
+            base: self.rt.instructions.clone(),
+            agents: catalog.clone(),
+        });
+        self.rt.authorizer = Arc::new(agents::AgentAuthorizer {
+            inner: self.rt.authorizer.clone(),
+            agents: catalog,
+            settings: self.rt.settings.clone(),
+        });
     }
 }
 

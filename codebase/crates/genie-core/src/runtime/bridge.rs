@@ -114,6 +114,8 @@ pub(crate) struct CallGate {
     pub started: Arc<Started>,
     /// The turn's taint (SA-29), set by earlier tool results.
     pub taint: Arc<Mutex<Option<String>>>,
+    /// `tool.before` verdict and `permission.request` hooks of this call (06 §12).
+    pub hooks: Option<Arc<crate::runtime::hooks::CallHooks>>,
 }
 
 #[async_trait]
@@ -130,7 +132,12 @@ impl PermissionGate for CallGate {
             mode: self.mode,
             taint: self.taint.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         };
-        match self.authorizer.authorize(&areq) {
+        let mut decision = self.authorizer.authorize(&areq);
+        if let Some(h) = &self.hooks {
+            // Deny rules and policy stand; a hook only moves between allow and ask.
+            decision = h.adjust(decision, &areq);
+        }
+        match decision {
             AuthzDecision::Allow => {}
             AuthzDecision::Deny {
                 rule,
@@ -155,6 +162,13 @@ impl PermissionGate for CallGate {
                 });
             }
             AuthzDecision::Ask(mut ask) => {
+                if let Some(h) = &self.hooks
+                    && let Some(r) = h.before_ask(&areq).await
+                {
+                    r?;
+                    self.started.mark(req.resource);
+                    return Ok(());
+                }
                 if ask.id.is_empty() {
                     ask.id = new_id("ask");
                 }
