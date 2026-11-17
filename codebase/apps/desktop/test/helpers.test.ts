@@ -186,3 +186,38 @@ describe("turn indicator", () => {
     expect(turnLabel({ ...base, status: "compacting" } as never)).toContain("Summarising");
   });
 });
+
+describe("transcript rows", () => {
+  const part = (id: string, kind: string, extra: Record<string, unknown> = {}) => ({ id, kind, text: "", json: "", final: null, streaming: false, ...extra });
+  const call = (id: string, name: string) => part(id, "tool_call", { final: { type: "tool_call", id, call_id: id, name, input: {} } });
+  const msg = (id: string, role: string, parts: unknown[]) => ({ id, role, parentId: null, turnId: "t", model: null, createdAt: "", parts, rev: 0 });
+  it("drops result-only steps and folds consecutive tool-only steps", async () => {
+    const { buildRows } = await import("../src/ui/chat/Transcript");
+    const rows = buildRows([
+      msg("u", "user", [part("u1", "text", { text: "desc this repo" })]),
+      msg("a1", "assistant", [call("c1", "read")]),
+      msg("r1", "tool", [part("r1p", "tool_result")]),
+      msg("a2", "assistant", [call("c2", "read"), call("c3", "list")]),
+      msg("r2", "tool", [part("r2p", "tool_result")]),
+      msg("a3", "assistant", [part("x", "text", { text: "It is a Tauri app." })]),
+    ] as never);
+    expect(rows.map((r) => r.kind)).toEqual(["msg", "tools", "msg"]);
+    expect(rows[1].kind === "tools" && rows[1].parts.length).toBe(3);
+  });
+  it("summarises a folded group", async () => {
+    const { toolGroupSummary } = await import("../src/ui/chat/toolInfo");
+    expect(toolGroupSummary(["read", "read", "list", "bash"])).toBe("Read 2 files, searched the code, ran a command");
+    expect(toolGroupSummary(["mcp__x__y"])).toBe("Used a tool");
+  });
+});
+
+describe("streaming table head", () => {
+  it("adds a provisional separator until the real one arrives", async () => {
+    const { completeTableHead, renderTail } = await import("../src/markdown/markdown");
+    expect(completeTableHead("| Step | Cost |")).toBe("| Step | Cost |\n| --- | --- |");
+    expect(completeTableHead("| Step | Cost |\n|--")).toBe("| Step | Cost |\n| --- | --- |");
+    expect(completeTableHead("| a | b |\n|---|---|\n| 1 | 2 |")).toBe("| a | b |\n|---|---|\n| 1 | 2 |");
+    expect(completeTableHead("plain text")).toBe("plain text");
+    expect(renderTail("| Step | Cost |")).toContain("<table");
+  });
+});

@@ -1,6 +1,6 @@
 // The virtualised transcript (05 §2.2, §7): only visible messages are mounted; rows are
 // memoised on `rev`; the view sticks to the bottom while streaming unless the user scrolls.
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Citation, Part } from "@genie/protocol";
 import { Badge, Button, Icon, IconButton, Textarea } from "@genie/ui";
@@ -12,19 +12,21 @@ import { siblingInfo } from "../../state/sessionModel";
 import type { SessionStore } from "../../state/session";
 import { useAppStatic } from "../context";
 import { TextPart } from "./Markdown";
-import { headTail, resultText, summarizeTool, toolActivity } from "./toolInfo";
+import { headTail, resultText, summarizeTool, toolActivity, toolGroupSummary } from "./toolInfo";
 
 export function Transcript({ store, compact, onRewind }: { store: SessionStore; compact?: boolean; onRewind?: (m: MessageView) => void }) {
   const model = store.model;
   const parentRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const items = model.messages;
+  const [atBottom, setAtBottom] = useState(true);
+  const busy = store.busy;
+  const items = useMemo(() => buildRows(model.messages), [model.messages, model.rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const virt = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 160,
+    estimateSize: () => 120,
     overscan: 4,
-    getItemKey: (i) => items[i].id,
+    getItemKey: (i) => items[i].key,
   });
 
   // After every commit: keep the bottom in view while streaming (unless the user scrolled up).
@@ -37,7 +39,16 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.loading]);
 
+  const jumpToBottom = () => {
+    const el = parentRef.current;
+    if (!el) return;
+    stick.current = true;
+    setAtBottom(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
+
   return (
+    <div className="transcript-wrap">
     <div
       ref={parentRef}
       className="transcript"
@@ -48,25 +59,36 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
       onScroll={(e) => {
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        if (stick.current !== atBottom) setAtBottom(stick.current);
       }}
     >
       <div style={{ height: virt.getTotalSize(), position: "relative" }}>
         {virt.getVirtualItems().map((vi) => {
-          const m = items[vi.index];
+          const row = items[vi.index];
           return (
             <div key={vi.key} data-index={vi.index} ref={virt.measureElement} className="transcript__item" style={{ transform: `translateY(${vi.start}px)` }}>
-              <MessageRow msg={m} rev={m.rev} store={store} model={model} compact={!!compact} onRewind={onRewind} />
+              {row.kind === "msg" ? (
+                <MessageRow msg={row.msg} rev={row.msg.rev} store={store} model={model} tools={model.tools} busy={busy} compact={!!compact} onRewind={onRewind} />
+              ) : (
+                <div className="msg msg--assistant msg--tools">
+                  <ToolGroup parts={row.parts} model={model} busy={busy} compact={!!compact} />
+                </div>
+              )}
             </div>
           );
         })}
       </div>
       <TurnIndicator store={store} />
     </div>
+    {!atBottom && (
+      <IconButton icon="arrowDown" label={t("chat.scrollToBottom")} variant="secondary" className="transcript__jump" onClick={jumpToBottom} />
+    )}
+    </div>
   );
 }
 
 const MessageRow = memo(
-  function MessageRow({ msg, store, model, compact, onRewind }: { msg: MessageView; rev: number; store: SessionStore; model: SessionModel; compact: boolean; onRewind?: (m: MessageView) => void }) {
+  function MessageRow({ msg, store, model, busy, compact, onRewind }: { msg: MessageView; rev: number; store: SessionStore; model: SessionModel; tools: SessionModel["tools"]; busy: boolean; compact: boolean; onRewind?: (m: MessageView) => void }) {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState("");
     const app = useAppStatic();
@@ -121,13 +143,13 @@ const MessageRow = memo(
           </div>
         ) : (
           <div className="assistant">
-            {msg.parts.map((p) => (
-              <PartRow key={p.id} part={p} model={model} compact={compact} />
-            ))}
+            {chunkParts(msg.parts, model).map((c) =>
+              c.kind === "tools" ? <ToolGroup key={c.key} parts={c.parts} model={model} busy={busy} compact={compact} /> : <PartRow key={c.part.id} part={c.part} model={model} busy={busy} compact={compact} />,
+            )}
           </div>
         )}
         {/* While streaming the row keeps its height (empty) so it doesn't push content when it appears. */}
-        {streaming ? (
+        {!isUser && !text.trim() ? null : streaming ? (
           <div className="msg__actions" aria-hidden />
         ) : (
           <div className="msg__actions">
@@ -159,10 +181,12 @@ const MessageRow = memo(
       </article>
     );
   },
-  (a, b) => a.msg === b.msg && a.rev === b.rev && a.compact === b.compact && a.model.tools === b.model.tools,
+  // `tools` and `busy` are passed by value: comparing `a.model.tools` with `b.model.tools` read the
+  // same mutable model twice, so rows never re-rendered when a tool finished (stuck spinners).
+  (a, b) => a.msg === b.msg && a.rev === b.rev && a.compact === b.compact && a.tools === b.tools && a.busy === b.busy,
 );
 
-function PartRow({ part, model, compact }: { part: PartView; model: SessionModel; compact: boolean }) {
+function PartRow({ part, model, busy, compact }: { part: PartView; model: SessionModel; busy: boolean; compact: boolean }) {
   switch (part.kind) {
     case "text": {
       const cites = part.final?.type === "text" ? part.final.citations : undefined;
@@ -176,7 +200,7 @@ function PartRow({ part, model, compact }: { part: PartView; model: SessionModel
     case "reasoning":
       return <Thought part={part} />;
     case "tool_call":
-      return <ToolRow part={part} model={model} compact={compact} />;
+      return <ToolRow part={part} model={model} busy={busy} compact={compact} />;
     case "tool_result":
       return null; // shown inside its tool row
     case "media":
@@ -253,7 +277,7 @@ function findResult(model: SessionModel, tool: ToolView | undefined): Part | nul
   return null;
 }
 
-function ToolRow({ part, model, compact }: { part: PartView; model: SessionModel; compact: boolean }) {
+function ToolRow({ part, model, busy, compact, nested }: { part: PartView; model: SessionModel; busy: boolean; compact: boolean; nested?: boolean }) {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState(false);
   const app = useAppStatic();
@@ -271,11 +295,14 @@ function ToolRow({ part, model, compact }: { part: PartView; model: SessionModel
   const result = findResult(model, tool);
   const content = result?.type === "tool_result" ? result.content : undefined;
   const sum = summarizeTool(name, input, tool?.outcome ?? null, content);
-  const running = !tool?.outcome && (part.streaming || !!tool);
+  // Running only while the turn is live: a call whose result was compacted away or whose
+  // turn was interrupted has no outcome but is not running.
+  const running = busy && !tool?.outcome && (part.streaming || !!tool);
   const status = tool?.outcome === "blocked" ? t("tool.blocked") : tool?.outcome === "declined" ? t("tool.declined") : tool?.outcome === "error" ? t("tool.failed") : null;
   const out = headTail(resultText(content));
 
-  if (sum.memory && !compact)
+  void compact;
+  if (sum.memory)
     return (
       <div className="memory-chip">
         <Badge tone="accent">
@@ -286,7 +313,7 @@ function ToolRow({ part, model, compact }: { part: PartView; model: SessionModel
         </button>
       </div>
     );
-  if (sum.artifact && !compact)
+  if (sum.artifact)
     return (
       <button className="artifact-card" onClick={() => app.setUi({ panelOpen: true, panelTab: "artifact" })}>
         <Icon name="file" />
@@ -298,15 +325,18 @@ function ToolRow({ part, model, compact }: { part: PartView; model: SessionModel
     );
 
   return (
-    <div className={`tool ${compact ? "tool--compact" : ""}`}>
+    <div className={`tool ${nested ? "tool--nested" : ""} ${open ? "is-open" : ""}`}>
       <button className="tool__head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <Icon name={open ? "chevronDown" : "chevronRight"} />
-        <Icon name={sum.icon} />
-        <span className="tool__title">{sum.title}</span>
+        <Icon name={sum.icon} size={14} />
+        <span className={`tool__title ${running ? "is-running" : ""}`}>
+          <InlineCode text={sum.title} />
+        </span>
         {sum.server && <Badge>{sum.server}</Badge>}
-        {running && <span className="g-spinner" aria-label={t("tool.running", { name })} />}
         {status && <Badge tone={tool?.outcome === "error" ? "danger" : "warning"}>{status}</Badge>}
-        {tool?.progress?.message && <span className="muted">{tool.progress.message}</span>}
+        {running && tool?.progress?.message && <span className="muted tool__progress">{tool.progress.message}</span>}
+        <span className="tool__chev" aria-hidden>
+          <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
+        </span>
       </button>
       {tool?.error && <div className="tool__error">{tool.error.message}</div>}
       {open && (
@@ -377,7 +407,8 @@ export function TurnIndicator({ store }: { store: SessionStore }) {
   if (!store.busy || m.status === "awaiting_ask" || m.status === "paused") return null;
   const label = turnLabel(m);
   return (
-    <div className="turn" role="status" aria-label={label || t("chat.statusRunning")}>
+    // While reply text streams, tuck the mark into the reply's reserved action row.
+    <div className={`turn ${label ? "" : "turn--tuck"}`} role="status" aria-label={label || t("chat.statusRunning")}>
       <span className="turn__mark" aria-hidden>
         <Icon name="sparkle" size={18} />
       </span>
@@ -397,4 +428,89 @@ export function turnLabel(m: SessionModel): string {
   if (live?.kind === "text") return "";
   if (live?.kind === "tool_call") return t("chat.preparingTool");
   return t("chat.workingOnIt");
+}
+
+type Row = { key: string; kind: "msg"; msg: MessageView } | { key: string; kind: "tools"; parts: PartView[] };
+type Chunk = { kind: "part"; part: PartView } | { kind: "tools"; key: string; parts: PartView[] };
+
+/** Is this part something the transcript draws? Tool results render inside their call. */
+function visiblePart(p: PartView): boolean {
+  if (p.kind === "text") return p.streaming || p.text.trim().length > 0;
+  return p.kind === "reasoning" || p.kind === "tool_call" || p.kind === "media" || p.kind === "compaction";
+}
+
+/** A plain tool call that can fold into a group (memory chips and artifact cards stand alone). */
+function groupable(p: PartView): boolean {
+  if (p.kind !== "tool_call") return false;
+  const name = p.final?.type === "tool_call" ? p.final.name : "";
+  return !name.startsWith("memory_") && !name.startsWith("artifact_");
+}
+
+/**
+ * Transcript rows (pure, for tests): messages with nothing to draw (tool-result-only steps)
+ * are dropped, and runs of tool-only assistant steps fold into one "Read 4 files" row.
+ */
+export function buildRows(messages: MessageView[]): Row[] {
+  const rows: Row[] = [];
+  for (const m of messages) {
+    const vis = m.parts.filter(visiblePart);
+    if (m.role !== "user" && !vis.length) continue;
+    if (m.role !== "user" && vis.every(groupable)) {
+      const last = rows[rows.length - 1];
+      if (last?.kind === "tools") last.parts = [...last.parts, ...vis];
+      else rows.push({ key: `tools:${m.id}`, kind: "tools", parts: vis });
+      continue;
+    }
+    rows.push({ key: m.id, kind: "msg", msg: m });
+  }
+  return rows;
+}
+
+/** Within one message: consecutive tool calls fold into a group, everything else as is. */
+function chunkParts(parts: PartView[], _model: SessionModel): Chunk[] {
+  const out: Chunk[] = [];
+  for (const p of parts) {
+    if (!visiblePart(p)) continue;
+    const last = out[out.length - 1];
+    if (groupable(p)) {
+      if (last?.kind === "tools") last.parts.push(p);
+      else out.push({ kind: "tools", key: `g:${p.id}`, parts: [p] });
+    } else out.push({ kind: "part", part: p });
+  }
+  return out;
+}
+
+/** One tool call shows as its own line; several fold into "Read 4 files, ran a command ›". */
+function ToolGroup({ parts, model, busy, compact }: { parts: PartView[]; model: SessionModel; busy: boolean; compact: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (parts.length === 1) return <ToolRow part={parts[0]} model={model} busy={busy} compact={compact} />;
+  const names = parts.map((p) => (p.final?.type === "tool_call" ? p.final.name : "tool"));
+  const outcomes = parts.map((p) => (p.final?.type === "tool_call" ? model.tools.get(p.final.call_id)?.outcome : null));
+  const running = busy && outcomes.some((o) => !o);
+  const failed = outcomes.filter((o) => o === "error").length;
+  return (
+    <div className={`toolgroup ${open ? "is-open" : ""}`}>
+      <button className="tool__head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Icon name="layers" size={14} />
+        <span className={`tool__title ${running ? "is-running" : ""}`}>{toolGroupSummary(names)}</span>
+        {failed > 0 && <Badge tone="danger">{t("tool.failedCount", { n: failed })}</Badge>}
+        <span className="tool__chev" aria-hidden>
+          <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="toolgroup__list">
+          {parts.map((p) => (
+            <ToolRow key={p.id} part={p} model={model} busy={busy} compact={compact} nested />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Tool titles mark commands and paths with backticks; show those as code, the rest as text. */
+function InlineCode({ text }: { text: string }) {
+  const bits = text.split("`");
+  return <>{bits.map((b, i) => (i % 2 ? <code key={i}>{b}</code> : b))}</>;
 }

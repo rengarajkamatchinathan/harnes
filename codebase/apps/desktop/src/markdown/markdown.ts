@@ -126,7 +126,24 @@ export function renderSettled(src: string): string {
   }
   return h;
 }
-export const renderTail = (src: string) => mdStream.parse(src) as string;
+export const renderTail = (src: string) => mdStream.parse(completeTableHead(src)) as string;
+
+/**
+ * A streaming table's header row arrives before its `|---|` line, so it showed as raw
+ * `| Step | Cost |` text until then. Supply a provisional separator (pure, for tests).
+ */
+export function completeTableHead(src: string): string {
+  const lines = src.split("\n");
+  const head = lines[0]?.trim() ?? "";
+  if (!head.startsWith("|") || head.length < 3) return src;
+  const sep = lines[1];
+  const sepLike = sep !== undefined && /^\s*\|?[\s:|-]*$/.test(sep);
+  // The separator is complete once another line follows it; until then it may be half-typed.
+  if (sepLike && lines.length > 2) return src;
+  if (sep !== undefined && !sepLike) return src; // not a table after all
+  const cols = Math.max(1, head.replace(/^\||\|$/g, "").split("|").length);
+  return [lines[0], "|" + " --- |".repeat(cols)].join("\n");
+}
 
 /** Incremental splitter: a blank line outside a fence / `$$` block ends a block. */
 export class BlockSplitter {

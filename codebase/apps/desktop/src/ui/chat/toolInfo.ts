@@ -105,3 +105,24 @@ export function toolActivity(name: string): string {
   if (/skill/i.test(name)) return "Using a skill";
   return `Using ${name.replace(/_/g, " ")}`;
 }
+
+/** "Read 4 files, searched the code 2 times, ran a command" for a folded group of tool calls. */
+export function toolGroupSummary(names: string[]): string {
+  const counts = new Map<string, number>();
+  const kind = (n: string) =>
+    n === "read" || n === "read_file" ? "read" : n === "grep" || n === "glob" || n === "list" ? "search" : n === "shell" || n === "bash" ? "run" : ["edit", "write", "apply_patch", "multi_edit"].includes(n) ? "edit" : n === "web_search" ? "web" : n === "web_fetch" ? "fetch" : n.startsWith("browser_") ? "browse" : "other";
+  for (const n of names) counts.set(kind(n), (counts.get(kind(n)) ?? 0) + 1);
+  const plural = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("#", String(k)));
+  const phrase: Record<string, (k: number) => string> = {
+    read: (k) => plural(k, "read a file", "read # files"),
+    search: (k) => plural(k, "searched the code", "searched the code # times"),
+    run: (k) => plural(k, "ran a command", "ran # commands"),
+    edit: (k) => plural(k, "edited a file", "edited # files"),
+    web: (k) => plural(k, "searched the web", "searched the web # times"),
+    fetch: (k) => plural(k, "read a web page", "read # web pages"),
+    browse: (k) => plural(k, "used the browser", "used the browser # times"),
+    other: (k) => plural(k, "used a tool", "used # tools"),
+  };
+  const out = [...counts.entries()].map(([k, n]) => phrase[k](n)).join(", ");
+  return out ? out[0].toUpperCase() + out.slice(1) : "";
+}

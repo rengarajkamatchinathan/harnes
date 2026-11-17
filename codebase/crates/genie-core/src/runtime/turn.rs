@@ -397,7 +397,11 @@ impl Run {
             let (req, estimate) = self.assemble(final_step)?;
             let threshold =
                 compaction_threshold(self.model.context_window(), self.rt.cfg.compaction_buffer);
-            if estimate >= threshold && compacted_for != Some(step) {
+            // At most once per step, and never on back-to-back steps: if one step's growth
+            // already crosses the threshold again, another summary can't help and would loop
+            // ("Summarising…" before every tool call). Real overflow still compacts below.
+            let just_compacted = compacted_for.is_some_and(|c| c + 1 >= step);
+            if estimate >= threshold && !just_compacted {
                 compacted_for = Some(step);
                 self.compact("auto", None, 1.0).await?;
                 step -= 1;

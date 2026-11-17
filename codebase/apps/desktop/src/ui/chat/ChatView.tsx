@@ -318,7 +318,7 @@ function SessionView({ id }: { id: string }) {
             ]}
             trigger={(p) => (
               <button className="titlebtn" {...p}>
-                <h1 className="chat__title">{info?.title || t("sidebar.untitled")}</h1>
+                <h1 className="chat__title">{info?.title || firstPrompt(m.messages) || t("sidebar.untitled")}</h1>
                 <Icon name="chevronDown" size={14} />
               </button>
             )}
@@ -417,9 +417,11 @@ function SessionView({ id }: { id: string }) {
               <span className="composer-foot__item">
                 <Icon name="computer" size={14} /> {t("code.thisComputer")}
               </span>
-              <span className="composer-foot__item" title={info?.workspace_id ?? ""}>
-                <Icon name="folder" size={14} /> {folderName(info?.workspace_id ?? "")}
-              </span>
+              {folderName(info?.workspace_id ?? "") && (
+                <span className="composer-foot__item" title={info?.workspace_id ?? ""}>
+                  <Icon name="folder" size={14} /> {folderName(info?.workspace_id ?? "")}
+                </span>
+              )}
             </>
           ) : (
             <span className="composer-foot__item composer-foot__note">{t("chat.disclaimer")}</span>
@@ -446,4 +448,11 @@ function SessionView({ id }: { id: string }) {
       {rewind && <RewindDialog sessionId={id} message={rewind} onClose={() => setRewind(null)} onDone={() => void store.reload()} />}
     </div>
   );
+}
+
+/** Until the engine names the chat, the header shows what you asked (first line, trimmed). */
+function firstPrompt(messages: MessageView[]): string {
+  const first = messages.find((x) => x.role === "user");
+  const text = first?.parts.find((p) => p.kind === "text")?.text ?? "";
+  return text.split("\n")[0].trim().slice(0, 80);
 }

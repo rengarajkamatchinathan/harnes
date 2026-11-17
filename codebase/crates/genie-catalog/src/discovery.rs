@@ -123,16 +123,24 @@ pub fn azure_deployment(
     base_model: &str,
     protocol: Protocol,
 ) -> Entry {
-    match catalog
+    let exact = catalog
         .entries()
-        .find(|e| e.wire_model_id == base_model || e.id == base_model)
-    {
+        .find(|e| e.wire_model_id == base_model || e.id == base_model);
+    match exact.or_else(|| family_sibling(catalog, base_model)) {
         Some(base) => {
             let mut e = base.clone();
+            let inherited = e.wire_model_id != base_model;
             e.id = format!("{provider}/{deployment}");
             e.provider = provider.into();
             e.wire_model_id = deployment.into();
             e.protocol = protocol;
+            if inherited {
+                // A newer base model the catalog doesn't list yet: borrow its closest
+                // sibling's limits rather than the 8k "unknown model" default.
+                e.display_name = format!("{deployment} ({base_model})");
+                e.pricing = None;
+                e.limited_info = true;
+            }
             e
         }
         None => Discovered {
@@ -144,6 +152,21 @@ pub fn azure_deployment(
         }
         .to_entry(),
     }
+}
+
+/// The catalog entry closest to an unlisted base model of the same family: `gpt-5.2` →
+/// the highest listed `gpt-5.x` (not a `-mini`/`-nano` variant). `None` when no entry
+/// shares the family prefix (everything up to the last `.`).
+fn family_sibling<'a>(catalog: &'a crate::Catalog, base_model: &str) -> Option<&'a Entry> {
+    let (family, _) = base_model.rsplit_once('.')?;
+    let prefix = format!("{family}.");
+    let suffix_of = |id: &str| id.strip_prefix(&prefix).map(str::to_owned);
+    catalog
+        .entries()
+        .filter_map(|e| suffix_of(&e.wire_model_id).map(|v| (v, e)))
+        .filter(|(v, _)| v.chars().all(|c| c.is_ascii_digit()))
+        .max_by_key(|(v, _)| v.parse::<u32>().unwrap_or(0))
+        .map(|(_, e)| e)
 }
 
 #[cfg(test)]
@@ -192,5 +215,17 @@ mod tests {
         assert!(!e.limited_info);
         let u = azure_deployment(&c, "azure", "grok-dep", "grok-9", Protocol::OpenaiChat);
         assert!(u.limited_info);
+        assert_eq!(u.context_window, DEFAULT_CONTEXT);
+    }
+
+    #[test]
+    fn azure_deployment_of_newer_model_borrows_family_limits() {
+        let c = crate::Catalog::bundled();
+        let e = azure_deployment(&c, "azure", "gpt-5.2-atg", "gpt-5.2", Protocol::OpenaiResponses);
+        assert_eq!(e.wire_model_id, "gpt-5.2-atg");
+        assert_eq!(e.display_name, "gpt-5.2-atg (gpt-5.2)");
+        assert!(e.limited_info);
+        assert!(e.pricing.is_none());
+        assert!(e.context_window > DEFAULT_CONTEXT, "inherits a gpt-5.x window, got {}", e.context_window);
     }
 }

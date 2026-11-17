@@ -356,9 +356,10 @@ pub fn estimate_messages(ms: &[Message]) -> u64 {
 }
 
 /// The compaction threshold: window − max(15 % of window, 16k), or `buffer` when set
-/// (`compaction.buffer`, 06 §3).
+/// (`compaction.buffer`, 06 §3). The default reserve is capped at a quarter of the window:
+/// for small windows (8k) the 16k floor used to make the threshold 0, so every step compacted.
 pub fn compaction_threshold(window: u64, buffer: Option<u64>) -> u64 {
-    let reserve = buffer.unwrap_or_else(|| (window * 15 / 100).max(16_000));
+    let reserve = buffer.unwrap_or_else(|| (window * 15 / 100).max(16_000).min(window / 4));
     window.saturating_sub(reserve)
 }
 
@@ -509,5 +510,7 @@ mod tests {
         assert_eq!(compaction_threshold(200_000, None), 170_000);
         assert_eq!(compaction_threshold(64_000, None), 48_000);
         assert_eq!(compaction_threshold(64_000, Some(1_000)), 63_000);
+        // Small windows keep three quarters usable instead of collapsing to 0.
+        assert_eq!(compaction_threshold(8_192, None), 6_144);
     }
 }
