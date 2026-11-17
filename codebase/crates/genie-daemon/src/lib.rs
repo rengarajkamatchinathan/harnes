@@ -9,9 +9,11 @@
 //! * Version skew (01 §4.2), idle exit after 10 min (01 §4.3, SA-01), clean shutdown,
 //!   crash recovery via execution claims, standalone lease mode (01 §4.4).
 
+mod blobs;
 mod keystore;
 mod lease;
 mod listener;
+mod projects;
 mod registry;
 mod server;
 mod services;
@@ -34,6 +36,7 @@ use genie_core::{Engine, EngineBuilder, TaskScope};
 
 pub use keystore::PlaceholderKeyStore;
 
+pub use blobs::Uploads;
 pub use lease::LEASE_GRACE;
 pub use registry::Registry;
 pub use server::{DaemonState, ShutdownReason, serve_stream};
@@ -238,6 +241,16 @@ fn build_engine(
         rb = rb.store(store.clone());
         eb = eb.journal(Arc::new(StoreJournal::new(store.clone())));
     }
+    // Artifacts, projects + retrieval, memory state, attachments, chat search
+    // (D28, D31, D32, 06 §2.5).
+    rb = projects::wire(
+        rb,
+        &mut services,
+        store.as_ref(),
+        &models,
+        root,
+        hub.as_deref(),
+    );
     // Shell (Code, 06 §13) with background jobs bound to the engine below; web tools
     // (Chat + Code, 06 §8) tainting the turn.
     let jobs = genie_core::runtime::host::EngineJobs::new(store.clone());

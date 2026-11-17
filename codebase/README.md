@@ -207,9 +207,9 @@ output, exit codes 0/1/2/3, `--on-ask deny`, `--ask-timeout`, an ask answered vi
 #### Spec 07 gaps
 
 - **Engine-side pieces the CLI can't supply:** the daemon answers `not_implemented` for
-  `provider.*`, `memory.*`, `model.list`,
-  `usage.query`, `checkpoint.*` (`/rewind`), `worktree.finish`, `session.compact`,
-  `session.export` and `import.*`; the CLI wires each one and prints "not available in this
+  `provider.*`, `model.list`,
+  `usage.query`, `checkpoint.*` (`/rewind`), `worktree.finish`, `session.compact`
+  and `import.*`; the CLI wires each one and prints "not available in this
   engine build yet". `session.get` returns an empty `path`, so `genie chat open` replays the
   event log instead of printing the branch.
 - **Headless flags:** `--allow/--deny`, `--settings`, `--add-dir` and `--worktree <name>` go
@@ -415,6 +415,29 @@ server (ask vs pasted), `browser_navigate` site ask against the fake CDP endpoin
 notification, headless browser gating + `browser.sites` persistence + `browser.status`);
 `config::tests` (hub trust gating and approvals).
 
+### Projects, artifacts, memory, blobs, retrieval (02 §6.9, D28, D31, D32, 06 §2.5, §4.1, §6)
+
+| § | What | Where |
+|---|---|---|
+| 02 §6.9 | `project.list/create/update/delete`, `project.file.add/remove`, `project.index.status` (`mode`, files, tokens, `capacity_pct`, `indexing`), `artifact.list` (versions on the active path or up to `leaf_id`) / `artifact.get`, `memory.list/update/delete/set_state/reset`, `blob.put.begin/chunk/end` (1 MiB chunks, in order, retried chunk idempotent, `expected_offset` on conflict), `blob.put.path`, ranged `blob.get` (≤ 4 MiB) | `genie-daemon::{projects, blobs}` (hooked first in `Services::dispatch`) |
+| 02 §6.2 | `session.search` (`message_fts`, all / project scope, incognito excluded), `session.export` (JSON `{info, messages, parts, artifacts}` with `sanitize`, Markdown; > 1 MiB → blob; policy `export.allowed: false` → `policy_blocked`) | `genie-daemon::projects` |
+| D28, t39, 06 §4.1 | `artifact_create {type, title, content, language?}` / `artifact_update {id, old_str, new_str}` (exact, unique) / `artifact_rewrite {id, content}`; six types; always allowed (no ask), Chat only, admin switch `artifacts.enabled`; 4 MiB cap; versions **staged per tool call** and committed with the assistant message that carries the call (`ArtifactConversation` decorator), so branches get their own versions; `artifact.versioned {artifact_id, n, message_id, type, title}`; > 256 KiB content as a blob; `feature.artifacts` guidance with the bundled library list | `genie-core::runtime::artifacts` |
+| D31, t10, 06 §6 | memory on/paused (`kv memory.state`, survives restarts; admin `memory.enabled`); paused/incognito → memory tools hidden and memory left out of the prompt; `<memory scope="global|project">` baseline sources (MRU first, ~8 KiB each, ids shown for `memory_update`, pointer to `memory_search` when cut); changes reach running sessions as `<system-update>` | `genie-core::runtime::memory_ctl`, `turn::tool_env` |
+| D31 | `chat_search {query, scope: current_project|non_project}` (current chat and incognito chats excluded, hits with chat/message ids), `feature.chat_search`; admin `chatSearch.enabled` | `genie-core::runtime::chat_search` |
+| D32, SA-18, 04 §7 | text extraction (UTF-8 text/code/Markdown, PDF via a built-in `FlateDecode` + text-operator extractor), chunking (~800 tokens; Markdown by heading, code by top-level item, PDF by page, plain by paragraph; overlap when a section is cut), file + chunks in one transaction, background embedding job (cached by content hash, `indexing` flag), capacity cap = min(10 × capacity window, 20M) tokens and 500 files; full mode while ≤ 50 % of the current model's window (re-evaluated every turn) → `<project_instructions>` + `<project_knowledge>` in the baseline (1 h TTL), retrieval mode → `<project_excerpts>` (top 5, ≤ 4k tokens) on the user message + `project_search` tool + `feature.project_search`; ranking BM25 (any word) + cosine fused with RRF, BM25 alone without vectors; sessions linked to their project for chat search scopes | `genie-core::runtime::{projects, retrieval, extract}`, `genie-store::retrieval::{bm25_any, project_stats}` |
+| 03 §9 | `EmbeddingClient` port; `OpenAiEmbeddings` (OpenAI-compatible `/v1/embeddings` through the `Transport`, errors classified, batches of 64, cancel) wired from `OPENAI_API_KEY`; deterministic offline `HashEmbedder` for tests | `genie-providers::embedding`, `projects::embedder_from_env` |
+| 06 §2.5 | attachments: images → media parts (blob-referenced, refcounted via `part.blob_id`), base64 at assembly; no vision → clear note; PDFs → media with extracted text, text for models without PDF input; text files inlined as `<attachment>` (≤ 256 KiB); other types → note; image budget 25 MiB → ≤ 15 MiB in 10 MiB steps | `genie-core::runtime::attachments` |
+
+Tests: `genie-core/tests/knowledge.rs` (cassette turns, real store/engine/Anthropic adapter,
+`HashEmbedder`): artifact create → update (v1, v2, `artifact.versioned`, branch sees v1 only,
+failed update makes no version), project knowledge in full mode, retrieval mode (excerpts on the
+message, `project_search` result, embeddings computed), capacity cap + unreadable files, memory
+paused (tools hidden, `<system-update>` removal, nothing saved, state persisted), `chat_search`
+across chats, attachments (text, image, PDF fallback, no-vision note); unit tests for the chunker,
+PDF extractor, image budget and embedders; `genie-daemon/tests/projects.rs` (in-memory transport):
+chunked upload round trip (conflict, retry, early end, ranged reads, `blob.put.path`), project
+methods and files, memory methods and state, artifact list/get, `session.search`, `session.export`.
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -434,6 +457,31 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
 - **Windows token file** relies on the per-user `%LOCALAPPDATA%` ACL; no explicit DACL is set.
 - **Not in this milestone:** desktop app, `packages/ui` and the Platform-adapter lint rule (spec 05);
   CI workflows.
+
+### Projects, artifacts, memory, retrieval gaps and deviations
+
+- **Artifact language** (`artifact_create.language`) is echoed to the model but not stored (no
+  column / wire field); the artifact panel, sandbox and "Fix with Genie" are desktop work.
+- **Capacity window** (SA-18) is a config value (`ProjectsConfig::capacity_window`, default
+  200k), not computed from the user's enabled models; `project.index.status` reports the mode
+  for `status_window` (200k) because it has no session model.
+- **PDF extraction** handles uncompressed and Flate content streams with Latin-1/UTF-16BE
+  strings; CID fonts with custom CMaps, ASCII85/LZW streams and page-tree ordering are not
+  handled (pages = content streams in file order). Images in PDFs are ignored.
+- **Embeddings:** only OpenAI (`OPENAI_API_KEY`, `OPENAI_BASE_URL`); SA-14's provider order
+  and `projectRetrieval.embeddingsProvider` are not applied; no embedding usage line;
+  `OpenAiEmbeddings` does one attempt per batch (no Executor retry loop).
+- **Uploads** are buffered in daemon memory until `end` (≤ 512 MiB, 32 concurrent, dropped
+  after 1 h idle); `name` in `blob.put.begin` is not stored.
+- **Excerpts** are stored with the user message (so they stay in history and in `session.get`);
+  `session.search` returns title hits with an empty `message_id`.
+- **Memory:** Code sessions use global memory only (no workspace scope yet); `memory.*`
+  methods publish no `memory.changed` (that is a session event); sensitive-category filtering
+  is left to the prompt guidance. Policy keys `memory.enabled`, `artifacts.enabled`,
+  `chatSearch.enabled` are read once at daemon start (our names).
+- **Not implemented:** `export.all` (SA-17 zip), session import, custom instructions ("Your
+  Genie") as a baseline source, project file update/re-index on change, reading `kchunk` text
+  for full mode (file text is re-extracted and cached in memory).
 
 ### Engine wiring gaps and deviations
 
@@ -484,8 +532,8 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
 
 ### Spec 02 gaps and deviations
 
-- **Methods owned by other specs** (providers, terminal, projects, blobs, Code mode,
-  `browser.popout`, `session.export/search`) are typed in the table and generated
+- **Methods owned by other specs** (providers, terminal, Code mode, `export.all`,
+  `browser.popout`) are typed in the table and generated
   into TS, but the daemon answers `method_not_found` with `data.reason = "not_implemented"`
   until their subsystem lands.
 - **Session metadata is in memory** (`genie-daemon::registry`); `session.get` returns the
@@ -506,7 +554,7 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
 - **Out of scope here (typed extension points only):** code tools (§4.2), `tool_search`
   deferral (§7), subagents (§11:
   `finish = stop` with running children), hooks (§12: `turn.end` continue, `compact.before/after`),
-  checkpoints (D49), artifacts (D28), `chat_search` / `project_search` tools.
+  checkpoints (D49).
 - **Native compaction** (`capabilities.native_compaction`) is not used; we always write our own
   summary. Re-injection after compaction covers the rebuilt baseline only (skills, artifact
   refs, read-state, grants, todo, MCP resources come with their subsystems). If the summary
@@ -518,8 +566,8 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
   otherwise), not in the adapters; updates are only computed at turn start.
 - **Per-model tuning table** lives in `genie-core/prompts/tuning/` (not `genie-providers`) so
   all prompt text is in one versioned place. Eval set (§2.6.8) not built (needs live layer).
-- **Attachments (§2.5)**, MCP resources, skills and file refs in prompts become text
-  placeholders; no image budget yet. `UsageLine` web-search fees are not counted.
+- **MCP resources, skills and file refs** in prompts become text placeholders (attachments
+  are read, see the projects section). `UsageLine` web-search fees are not counted.
 - **Wire records** for byte-exact replay are cached in memory per daemon run (the store's
   `wire_record` table stores request/response blobs, not compiled items).
 - **Parallel tools:** all calls of a step run concurrently; per-path serialisation of mutating
@@ -551,9 +599,8 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
   (Argon2id) land with spec 08. Recovery-key UI/`.txt` download is UI work (spec 05).
 - **Blobs**: `put_blob` takes the whole buffer (two passes would be needed for streaming input
   because the address is the plaintext hash); no streaming writer yet.
-- **Not implemented:** long resumable data migrations (kv cursor jobs); retrieval chunking,
-  indexing job, full/retrieval mode switch and capacity cap (SA-18); export-all `.zip` (SA-17),
-  session import with id remapping, `export.allowed` policy; checkpoints / shadow git (§10, M5);
+- **Not implemented:** long resumable data migrations (kv cursor jobs); export-all `.zip` (SA-17),
+  session import with id remapping; checkpoints / shadow git (§10, M5);
   the in-memory `Store` for incognito (§8); the daily scheduler that calls `run_maintenance`.
 - **Build:** `rusqlite` uses `bundled-sqlcipher-vendored-openssl` (macOS has no OpenSSL headers);
   it needs Perl and a C compiler. Not yet tried on Windows with `scripts/cargo-win-gnu.sh`.
@@ -573,9 +620,10 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
   exists), so cached catalogs never verify in production yet and the bundled snapshot is used.
 - **The bundled snapshot is provisional**: model ids, limits and prices must be re-checked
   against vendor docs before release (03 §8.4: provider docs only, no models.dev).
-- Not implemented: `EmbeddingClient` (§9), Azure `prefer_responses` fallback to Chat on
+- Not implemented: Azure / Gemini embedding clients (only the OpenAI-compatible
+  `OpenAiEmbeddings` exists, §9), Azure `prefer_responses` fallback to Chat on
   "Model not supported" (the flag and `UnsupportedOnDeployment` exist), `ReplayRejected`
-  recompile (engine side), PDF text extraction (daemon side), `<system-update>` lowering (06),
+  recompile (engine side), `<system-update>` lowering (06),
   model-family detection is a heuristic on the wire id, Bedrock (v2).
 - Catalog body `quirks` with a body merge patch re-serialise the request through `Value`, so
   they must not be used on routes that need byte-exact history replay.

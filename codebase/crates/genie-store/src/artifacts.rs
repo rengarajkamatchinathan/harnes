@@ -164,3 +164,14 @@ pub fn versions_on_active_path(
     let rows = st.query_map([artifact_id], version_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
+
+/// Insert an artifact row with a caller-chosen id (the engine hands the id to the model
+/// before the producing message is stored, D28). An existing id is left as it is.
+pub fn insert(conn: &Connection, a: &Artifact) -> Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO artifact (id, session_id, type, title, created)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![a.id, a.session_id, a.ty, a.title, a.created],
+    )?;
+    Ok(())
+}

@@ -21,6 +21,7 @@ genie-skills.workspace = true
 genie-tools.workspace = true
 genie-browser.workspace = true
 async-trait.workspace = true
+base64.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 serde.workspace = true
