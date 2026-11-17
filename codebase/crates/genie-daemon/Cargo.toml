@@ -12,7 +12,7 @@ genie-protocol.workspace = true
 genie-core.workspace = true
 genie-client.workspace = true
 genie-audit.workspace = true
-genie-process.workspace = true
+genie-process = { workspace = true, features = ["pty"] }
 genie-store.workspace = true
 genie-config.workspace = true
 genie-permissions.workspace = true

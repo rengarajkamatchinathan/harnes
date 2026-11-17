@@ -13,11 +13,14 @@
 //!
 //! [`pipe`] is pipe mode (06 §13.4): piped stdio, exact/scrubbed environment, output head +
 //! tail + spill file, deadlines, kill-tree on cancel and a [`pipe::SpawnHook`] for the
-//! sandbox. PTY mode (D55) is behind the `pty` feature and lands with the Terminal tab.
+//! sandbox. [`pty`] (feature `pty`) is PTY mode for the Terminal tab (D55): replay ring,
+//! VT checkpoint, bounded writer, kill-tree.
 //! Code adapted from `opencode-pty` will carry its MIT notice (C3); pipe mode here is
 //! written against its documented semantics (KB ch.16), not copied.
 
 pub mod pipe;
+#[cfg(feature = "pty")]
+pub mod pty;
 
 use std::io;
 use std::process::ExitStatus;
