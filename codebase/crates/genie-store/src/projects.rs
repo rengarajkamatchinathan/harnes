@@ -186,6 +186,21 @@ pub fn get_file(conn: &Connection, id: &str) -> Result<Option<ProjectFile>> {
         .optional()?)
 }
 
+/// Move a session into a project, or out of one with `None` (`session.update`).
+/// Creates a bare session row if the journal has not written one yet.
+pub fn set_session_project(
+    conn: &Connection,
+    session_id: &str,
+    project_id: Option<&str>,
+) -> Result<()> {
+    crate::sessions::ensure(conn, session_id)?;
+    conn.execute(
+        "UPDATE session SET project_id = ?2 WHERE id = ?1",
+        params![session_id, project_id],
+    )?;
+    Ok(())
+}
+
 /// Record that a session belongs to a project (chat search scopes, 04 §6). Creates a
 /// bare session row if the journal has not written one yet; unknown projects are ignored.
 pub fn link_session(conn: &Connection, session_id: &str, project_id: &str) -> Result<()> {

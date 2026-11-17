@@ -244,6 +244,15 @@ pub fn finish(
     Ok(())
 }
 
+/// Record the usage (JSON) and cost of the step that produced an assistant message.
+pub fn set_usage(conn: &Connection, id: &str, usage: &Value, cost_usd: f64) -> Result<()> {
+    conn.execute(
+        "UPDATE message SET usage = ?2, cost_usd = ?3 WHERE id = ?1",
+        params![id, serde_json::to_string(usage)?, cost_usd],
+    )?;
+    Ok(())
+}
+
 pub fn set_snapshots(
     conn: &Connection,
     id: &str,

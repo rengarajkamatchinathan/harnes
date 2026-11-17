@@ -1248,6 +1248,9 @@ fn session_update(
         with_lease(state, conn, &p.session_id)?;
     }
     let h = handle(state, &p.session_id)?;
+    if let Some(pid) = &p.project_id {
+        move_to_project(state, &p.session_id, pid)?;
+    }
     if state.registry.update(&p).is_none() {
         return Err(not_found("session"));
     }
@@ -1259,9 +1262,47 @@ fn session_update(
         pinned: p.pinned,
         archived: p.archived,
         active_leaf_id: p.active_leaf_id,
+        project_id: p.project_id,
+        web_search: p.web_search,
+        code_execution: p.code_execution,
     }))
     .map_err(|e| e.to_rpc())?;
     empty()
+}
+
+/// `session.update.project_id` (D32): only Chat sessions belong to projects; `""` moves
+/// the chat out. The store's session row follows (chat search scopes, 04 §6); the next
+/// turn picks up the project's instructions/knowledge as a baseline delta.
+fn move_to_project(state: &DaemonState, session: &str, project: &str) -> Result<(), RpcError> {
+    let Some(cur) = state.registry.get(session) else {
+        return Err(not_found("session"));
+    };
+    if cur.summary.kind != genie_protocol::common::SessionKind::Chat {
+        return Err(RpcError::invalid_params(
+            "only Chat sessions can belong to a project",
+        ));
+    }
+    let store = state.services().and_then(|s| s.store.clone());
+    let target = Some(project).filter(|p| !p.is_empty());
+    if let Some(pid) = target {
+        let exists = match &store {
+            Some(st) => st
+                .read(|c| genie_store::projects::get(c, pid))
+                .map_err(|e| RpcError::internal(e.to_string()))?
+                .is_some(),
+            None => false,
+        };
+        if !exists {
+            return Err(not_found("project"));
+        }
+    }
+    if let Some(st) = &store
+        && !cur.incognito
+    {
+        st.write(|tx| genie_store::projects::set_session_project(tx, session, target))
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn session_prompt(

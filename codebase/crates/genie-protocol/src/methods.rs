@@ -151,6 +151,15 @@ methods! {
     TrustSet = "trust.set", Request, false, config::TrustSetParams => Empty;
     TrustPendingDefinitions = "trust.pending_definitions", Request, false, config::PathParams => config::PendingDefinitionsResult;
     TrustApproveDefinition = "trust.approve_definition", Request, false, config::ApproveDefinitionParams => Empty;
+    /// Stored folder decisions (Settings → Privacy); revoke with `trust.set {decision: revoke}`.
+    TrustList = "trust.list", Request, false, Empty => config::TrustListResult;
+    /// Saved permission rules per scope (Settings → Permissions, 06 §5.4).
+    PermissionRulesList = "permissions.rules.list", Request, false, config::PermissionRulesListParams => config::PermissionRulesListResult;
+    PermissionRulesRemove = "permissions.rules.remove", Request, false, config::PermissionRuleRemoveParams => Empty;
+    /// "Delete all data" step 1 (04 §8): what will go, and a short-lived confirmation token.
+    DataDeleteAllBegin = "data.delete_all.begin", Request, false, Empty => config::DeleteAllBeginResult;
+    /// Step 2: wipe sessions, projects, blobs, memory, artifacts, snapshots, caches (+ local audit).
+    DataDeleteAll = "data.delete_all", Request, false, config::DeleteAllParams => config::DeleteAllResult;
 
     // ---- providers, catalog, usage (§6.5)
     ProviderList = "provider.list", Request, false, Empty => provider::ProviderListResult;
@@ -213,6 +222,7 @@ methods! {
     ProjectDelete = "project.delete", Request, false, project::ProjectIdParams => Empty;
     ProjectFileAdd = "project.file.add", Request, false, project::ProjectFileAddParams => project::FileIdResult;
     ProjectFileRemove = "project.file.remove", Request, false, project::ProjectFileRemoveParams => Empty;
+    ProjectFileList = "project.file.list", Request, false, project::ProjectIdParams => project::ProjectFileListResult;
     ProjectIndexStatus = "project.index.status", Request, false, project::ProjectIdParams => project::IndexStatus;
     ArtifactList = "artifact.list", Request, false, project::ArtifactListParams => project::ArtifactListResult;
     ArtifactGet = "artifact.get", Request, false, project::ArtifactGetParams => project::ArtifactGetResult;

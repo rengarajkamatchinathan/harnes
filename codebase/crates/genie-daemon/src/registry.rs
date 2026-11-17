@@ -92,6 +92,8 @@ impl Registry {
             head_seq: 0,
             incognito: p.incognito,
             created_at: now,
+            web_search: p.web_search.unwrap_or(true),
+            code_execution: p.code_execution.unwrap_or(false),
         };
         self.lock().insert(id.to_string(), info.clone());
         info
@@ -129,6 +131,15 @@ impl Registry {
         }
         if let Some(v) = &p.active_leaf_id {
             s.active_leaf_id = Some(v.clone());
+        }
+        if let Some(v) = &p.project_id {
+            s.summary.project_id = Some(v.clone()).filter(|v| !v.is_empty());
+        }
+        if let Some(v) = p.web_search {
+            s.web_search = v;
+        }
+        if let Some(v) = p.code_execution {
+            s.code_execution = v;
         }
         s.summary.updated_at = rfc3339_ms(now_ms());
         Some(s.clone())
@@ -201,6 +212,16 @@ impl Registry {
     pub fn all_summaries(&self) -> Vec<SessionSummary> {
         self.list(&ListParams::default())
     }
+
+    /// Forget every session (`data.delete_all`); returns what was there, incognito
+    /// sessions included.
+    pub fn clear(&self) -> Vec<SessionInfo> {
+        self.extra
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.lock().drain().map(|(_, v)| v).collect()
+    }
 }
 
 /// The turn loop reads per-session settings from the registry (06 §1).
@@ -220,6 +241,8 @@ impl SettingsSource for Registry {
             workspace: x.workspace,
             overlay: x.overlay,
             headless: x.headless,
+            web_search_off: !s.web_search,
+            code_execution: s.code_execution,
         })
     }
 

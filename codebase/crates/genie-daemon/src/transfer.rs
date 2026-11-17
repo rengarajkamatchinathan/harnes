@@ -182,10 +182,8 @@ fn session_import(
         title: row.title.clone(),
         pinned: Some(row.pinned),
         archived: Some(row.archived),
-        model: None,
-        effort: None,
-        mode: None,
         active_leaf_id: row.active_leaf_id.clone(),
+        ..UpdateParams::default()
     }) {
         state.listed(ListedChange::Created, info.summary);
     }

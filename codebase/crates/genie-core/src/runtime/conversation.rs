@@ -36,6 +36,9 @@ pub struct StoredMessage {
     pub created_ms: u64,
     /// Catalog model id for assistant messages.
     pub model: Option<String>,
+    /// Assistant messages: the usage and cost of the step that produced them.
+    pub usage: Option<Usage>,
+    pub cost_usd: Option<f64>,
 }
 
 impl StoredMessage {
@@ -47,6 +50,8 @@ impl StoredMessage {
             turn_id: None,
             created_ms: crate::bus::now_ms(),
             model: None,
+            usage: None,
+            cost_usd: None,
         }
     }
 
@@ -96,6 +101,8 @@ pub struct UsageLine {
     pub project_id: Option<String>,
     pub usage: Usage,
     pub cost_usd: f64,
+    /// The assistant message the usage belongs to (chat steps); shown per message.
+    pub message_id: Option<String>,
 }
 
 pub trait ConversationStore: Send + Sync {
@@ -227,11 +234,17 @@ impl ConversationStore for MemoryConversation {
     }
 
     fn record_usage(&self, session: &str, line: &UsageLine) -> Result<(), Defect> {
-        self.lock()
-            .entry(session.to_string())
-            .or_default()
-            .usage
-            .push(line.clone());
+        let mut g = self.lock();
+        let s = g.entry(session.to_string()).or_default();
+        if let Some(m) = line
+            .message_id
+            .as_ref()
+            .and_then(|id| s.messages.get_mut(id))
+        {
+            m.usage = Some(line.usage);
+            m.cost_usd = Some(line.cost_usd);
+        }
+        s.usage.push(line.clone());
         Ok(())
     }
 }
@@ -334,6 +347,11 @@ impl StoreConversation {
             turn_id,
             created_ms: u64::try_from(row.created).unwrap_or(0),
             model: row.model,
+            usage: row
+                .usage
+                .as_ref()
+                .and_then(|u| serde_json::from_value(u.clone()).ok()),
+            cost_usd: row.cost_usd,
         })
     }
 }
@@ -459,6 +477,10 @@ impl ConversationStore for StoreConversation {
             .write(|tx| {
                 genie_store::sessions::ensure(tx, session)?;
                 genie_store::sessions::add_usage(tx, session, tin, tout, line.cost_usd)?;
+                if let Some(id) = &line.message_id {
+                    let v = serde_json::to_value(u)?;
+                    genie_store::messages::set_usage(tx, id, &v, line.cost_usd)?;
+                }
                 genie_store::kv::add_usage(
                     tx,
                     &genie_store::kv::Usage {

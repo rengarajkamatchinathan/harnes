@@ -130,6 +130,12 @@ pub struct CreateParams {
     pub worktree_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<SessionSettingsOverlay>,
+    /// Per-chat provider web search toggle (06 §8; default on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
+    /// Per-chat provider code execution toggle (D35; default off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_execution: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -154,16 +160,28 @@ pub struct UpdateParams {
     pub mode: Option<Mode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_leaf_id: Option<String>,
+    /// Move a Chat session into a project; `""` moves it out of its project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Per-chat provider web search toggle (06 §8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
+    /// Per-chat provider code execution toggle (D35).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_execution: Option<bool>,
 }
 
 impl UpdateParams {
-    /// `model`, `effort`, `mode` and `active_leaf_id` change how the session runs and
-    /// need the driver lease; title/pinned/archived are list metadata (02 §5).
+    /// `model`, `effort`, `mode`, `active_leaf_id` and the capability toggles change how
+    /// the session runs and need the driver lease; title/pinned/archived/project_id are
+    /// list metadata (02 §5).
     pub fn is_mutating(&self) -> bool {
         self.model.is_some()
             || self.effort.is_some()
             || self.mode.is_some()
             || self.active_leaf_id.is_some()
+            || self.web_search.is_some()
+            || self.code_execution.is_some()
     }
 }
 
