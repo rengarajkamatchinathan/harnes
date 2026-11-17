@@ -37,7 +37,8 @@ crates/
   genie-mcp        MCP client: stdio + Streamable HTTP, lifecycle/status machine, tools/resources/
                    prompts, progress, cancellation, elicitation/sampling/OAuth ports (06 §7)
   genie-tools      Tool trait + ports, registry, input repair/validation, output limits + spill,
-                   v1 chat tools (`tool_output_read`, `memory_*`) (spec 06 §2.4, §4)
+                   v1 chat tools (`tool_output_read`, `memory_*`) (spec 06 §2.4, §4);
+                   `shell` tool + command scanner (06 §13), `web_fetch` / web search (06 §8)
   genie-{skills,sandbox,browser,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
@@ -278,6 +279,48 @@ session expiry → reconnect, 401 → `needs_auth` → restart, 401 → refresh.
 | Error split | `SpawnError` / `RunError::Spawn` = couldn't start, safe to retry; `RunError::Io` = may have run | `pipe` |
 | Spawn hook | `SpawnHook::wrap(&mut PipeSpec)` for the v2 sandbox (D44) | `pipe::SpawnHook` |
 
+### Spec 06 §13 (`shell` tool, `genie-tools::shell`)
+
+| 06 §13 / D45 | What | Where |
+|---|---|---|
+| 13.1 hidden shell | each call spawns the session's shell in pipe mode (`genie-process`: own kill-tree, stdin null, env = inherited minus `GENIE_*`, `PAGER`/`GIT_PAGER=cat`, `GIT_TERMINAL_PROMPT=0`) in the session cwd | `shell::tool` |
+| 13.1 `cd` persists | trailer (`trap … EXIT` / PowerShell `finally`) writes the final directory to a side file; the next call starts there; variables/functions don't carry over; a vanished cwd resets to the session's initial dir; `[cwd is now …]` note | `shell::tool::script`, `ShellRuntime::{cwd,set_cwd}` |
+| 13.1 timeout → background | `timeout_ms` (default 2 min, max 10 min); on timeout the running child moves to a `TaskTracker` task (job `bg_…`), `BackgroundJobs::started` (→ `background_job` row) and, at exit, `BackgroundJobs::finished` with exit code, head+tail and spill ref (→ `background_done` inbox message); the model is told it will be notified and not to poll; `run_in_background: true` starts there | `shell::{BackgroundJobs, JobStarted, JobFinished}`, `ShellTool::background` |
+| 13.1 kill | call cancel (stop / interrupt) kills a foreground command's whole tree; `ShellRuntime::end_session`, `kill_job` and the shutdown token kill background jobs | `shell::ShellRuntime` |
+| 13.1 output | combined stdout+stderr to a 0700 temp file; the model gets ≤ 400 head + 400 tail lines (20 KiB each) with `[… lines a–b of n omitted; full output: <ref>]`, full text in the `SpillStore` | `shell::tool::render` |
+| 13.1 errors | spawn failure → `Failed {may_have_run: false}` (safe to retry); anything later → `may_have_run: true`; exit code / signal noted in the output | `shell::tool` |
+| 13.2 shells | Unix: `$SHELL` zsh (`+o nomatch`) or bash, else bash, else `/bin/sh`; `shell: "powershell"` → `pwsh`. Windows: `pwsh` → Windows PowerShell 5.1; `shell: "bash"` → Git Bash (next to `git`, then the install dirs; never WSL bash); PowerShell gets the script via `-EncodedCommand`; the description names the active shell | `shell::select`, `ShellTool::description` |
+| 13.3 scanner | bash/zsh: `&&` `\|\|` `;` `&` newlines, pipes, `( )`, `{ ;}`, `$( )`, backticks, `<( )`/`>( )`, substitutions in `"…"` and `${…}`, here-docs, comments, `if/while/until`; PowerShell: `;`, newlines, pipelines, `&&`/`\|\|`, `&`, script blocks, `( )`, `$( )`, `@( )`, `@{ }`, here-strings, `#`/`<# #>`, control keywords, `$x = …`; redirections stay in the part; unparseable (unbalanced, `for`/`case`/functions, `switch`/`function`/`param`, `--%`, deep nesting) → `Err` → ask | `shell::scan` |
+| 13.3 permissions | ask with resource `Bash(<cmd>)` / `PowerShell(<cmd>)` + `Command {command, cwd}` preview; `shell::authz_from_request` decodes it into dialect, command, cwd and scanned parts for `genie_permissions::Action::Shell`; hidden in Chat and in `plan` mode | `shell::{permission_resource, authz_from_request}` |
+
+Tests: `genie-tools/tests/shell.rs` (real bash/zsh processes: run, cd persistence, no variable
+persistence, subshell `cd`, permission request shape, exit codes + stderr, timeout → background →
+finished notification, `run_in_background`, `end_session` / `kill_job`, cancel kills a grandchild,
+head/tail + spill, declined never runs, spawn failure, timeout without a jobs port, zsh `nomatch` and
+EXIT-trap cwd, availability); unit tables for the bash and PowerShell scanner (`shell::scan`), shell
+selection on fake Unix/Windows machines (`shell::select`), scripts and `-EncodedCommand`.
+
+### Spec 06 §8 / 08 §2.1 (web, `genie-tools::web`)
+
+| § | What | Where |
+|---|---|---|
+| 06 §8 fetch | `web_fetch {url}`: http/https only, credential URLs rejected, ≤ 10 redirects (manual, `Location` resolved per hop), 5 MB body cap with a note, 30 s network budget (time waiting for the user excluded), cancel; HTML → Markdown, text/JSON/XML pass through, binary refused, HTTP errors reported | `web::fetch` |
+| 06 §8 / D35 permission | `resource` = host, `Url` preview; asked again for **each new host** on a redirect; `web::fetch_authz` decodes it for `Action::WebFetch` (engine adds `pasted` / `seen`) | `web::fetch`, `web::fetch_authz` |
+| 06 §8 SSRF | loopback, private, link-local, CGNAT, unspecified, multicast/broadcast, reserved and cloud metadata (incl. IPv4-mapped/compatible, NAT64, 6to4 forms) blocked; every resolved address must pass; the client is pinned to the checked addresses (`resolve_to_addrs`, no proxy) and the peer address re-checked; checks repeat on every redirect; `SsrfPolicy {allow_private, allow}` (metadata stays blocked) | `web::ssrf`, `WebFetch::{checked_addrs, client}` |
+| HTML → Markdown | lenient parser (implied end tags, void/raw-text elements, entities), headings, paragraphs, nested lists, links/images resolved against the page URL, emphasis, code, fenced `pre` with language, blockquotes, tables, `hr`; drops head/script/style/noscript/template/svg/iframe/forms and hidden content (`hidden`, `aria-hidden`, `display:none`, `visibility:hidden`) | `web::html` |
+| 08 §2.1 / 06 §2.6.4 | results framed as `<untrusted_web_content origin="…">`, a closing tag inside the page is defused; `TaintPort::tainted(session, turn, origin)` on every page / search result (SA-29) | `web::{frame_untrusted, TaintPort}` |
+| 06 §8 search (native) | `native_search` → `Declare {allowed, blocked, max_uses: 5}` (copied into `ServerTools.web_search`) or `Disabled {reason}` from policy, global/per-chat toggles, model capability, and what the protocol can enforce (Anthropic: allow + block; Responses: allow only; Gemini: none) | `web::search::native_search` |
+| 06 §8 search (local) | `web_search` over a `SearchBackend` port: policy on/off, allowed = policy ∩ requested, blocked = policy ∪ requested, results filtered again, per-turn `max_uses`, untrusted framing, taint | `web::search::WebSearch` |
+
+Tests: `genie-tools/tests/web.rs` (loopback HTTP server + fake resolver, no live network): framed
+Markdown + taint + one ask; SSRF blocks loopback by literal, name, mapped IPv6 and hex forms, private,
+mixed public/private answers and metadata with zero server hits; pinning (a name only the fake resolver
+knows still connects); redirects re-authorised per new host, same-host redirect not re-asked, redirect
+into a private range blocked, declined redirect, redirect loop; bad URLs rejected without asking; size
+cap, timeout, JSON, binary refused, 404; cancel; frame breakout defused; `web_search` with a fake
+backend (filtering, merged block lists, per-turn budget, taint, policy off). Unit tables for the SSRF
+classifier, URL/host parsing, content types, HTML conversion and the native-search decision.
+
 ### Spec 06 (turn loop, context, compaction, tools)
 
 | 06 § | What | Where |
@@ -479,3 +522,37 @@ compaction; `length` continuation; max steps; interrupt; regenerate; title; base
   user commands may legitimately need them.
 - The `genie-mcp-fake-server` test binary is built with the workspace (it is tiny and only used by
   tests).
+
+### Spec 06 §8 and §13 gaps and deviations
+
+- **Not registered yet.** `shell::ShellRuntime` / `shell::tools(cfg)` and `web::tools(cfg)` are
+  constructors only; `genie-core` wires them into the code/chat registries and implements the
+  ports (`SessionDirs`, `BackgroundJobs`, `TaintPort`, optionally `Resolver` / `SearchBackend`).
+- **Permission request encoding.** `PermissionRequest` has no structured field, so the shell tool
+  puts the dialect in the resource (`Bash(<cmd>)` / `PowerShell(<cmd>)`) and the cwd in the
+  `Command` preview; the authorizer must call `shell::authz_from_request` to get the scanned parts.
+  `web_fetch` sends the host as resource. A typed field on `PermissionRequest` would be cleaner but
+  changes a struct `genie-core` builds.
+- **Scanner location.** The compound-command scanner lives in `genie-tools::shell::scan` (the
+  dependency rules forbid `genie-tools → genie-permissions`); `genie-permissions` keeps receiving
+  pre-split parts. Redirections stay inside a part, so `Bash(cat:*)` also matches `cat a > b`
+  (the read-only list never does). `for`/`case`/`select`/function definitions, arithmetic
+  commands and PowerShell `switch`/`function`/`param` blocks are unparseable (→ ask) rather than
+  split. Leading `VAR=value` assignments stay in the part (no rule-prefix match → ask).
+- **Background jobs vs interrupt.** Interrupting the turn kills a foreground command; a command
+  already in the background survives until it ends, `kill_job`, `end_session` or shutdown (our
+  reading of "stop / interrupt / session end"). The background job's own `cd` is not persisted.
+  Jobs live in daemon memory; a daemon restart kills them (the kill-tree) without a `finished`.
+- **Shell details.** The login shell runs with `-c` (no `-l`; rc/profile files beyond `.zshenv`
+  aren't read). A command that installs its own `EXIT` trap loses the cwd trailer. PowerShell and
+  Git Bash paths are covered by unit tests only (no Windows run yet); PowerShell 5.1 output in a
+  non-UTF-8 code page is decoded lossily. Temp side files live in `$TMPDIR/genie-shell-<pid>`.
+- **`web_fetch`.** No `prompt`/summarisation by a small model (the page Markdown is returned);
+  charset is assumed UTF-8 (lossy); no gzip/brotli (reqwest features off); HTTP→HTTPS isn't
+  upgraded; permission is asked before DNS (so a model-built hostname leaks nothing via DNS before
+  approval), which means a host that later fails the SSRF check was still asked about. PDF and
+  other binary types are refused.
+- **Web search.** Native search is a decision function only: declaring it in `ServerTools`,
+  replaying results to the same provider, citations, fees and tainting on provider result parts
+  are engine/provider work. The local `web_search` tool is for hosts with their own backend and
+  must not be registered together with the native declaration (same name).

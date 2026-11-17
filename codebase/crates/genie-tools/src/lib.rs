@@ -5,11 +5,18 @@
 //! leaf exceptions in `xtask/src/deps.rs`). What a tool needs from another subsystem is a
 //! port defined in [`tool`] ([`PermissionGate`], [`SpillStore`], [`MemoryPort`],
 //! [`EventSink`]) and implemented by `genie-core`, which runs the calls.
+//!
+//! [`shell`] (06 §13: the `shell` tool, shell selection, the command scanner) and [`web`]
+//! (06 §8: `web_fetch` with the SSRF guard, web search) bring their own ports
+//! ([`shell::SessionDirs`], [`shell::BackgroundJobs`], [`web::TaintPort`],
+//! [`web::Resolver`], [`web::SearchBackend`]) in their configs.
 
 pub mod chat;
 pub mod output;
 pub mod registry;
+pub mod shell;
 pub mod tool;
+pub mod web;
 
 pub use output::{Limited, MemorySpill, OutputLimits, apply_limits};
 pub use registry::{ToolRegistry, ToolSpec, parse_input, schema_of};
