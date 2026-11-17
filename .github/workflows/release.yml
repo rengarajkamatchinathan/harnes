@@ -1,0 +1,179 @@
+# Release pipeline (spec/09-distribution-and-ops.md §5.3, t27):
+#   build per target -> OS signing -> notarisation (macOS) -> SBOM + notices -> checksums
+#   -> signed update manifests -> publish to beta -> staged rollout for stable (rollout.yml).
+#
+# Signing reads secrets by name and every signing step is skipped (with a log line) when
+# its secret is absent, so the pipeline runs end to end before the identities exist.
+# Secrets (all optional until the release owner provisions them, see release/README.md):
+#   APPLE_CERTIFICATE_P12, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER            (Developer ID + notarytool)
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+#   TRUSTED_SIGNING_ENDPOINT, TRUSTED_SIGNING_ACCOUNT, TRUSTED_SIGNING_PROFILE (Authenticode)
+#   GPG_PRIVATE_KEY, GPG_KEY_ID                                      (Linux packages/repos)
+#   GENIE_FEED_KEY_UPDATES                                           (Ed25519 online updates key)
+#   GENIE_TAURI_UPDATER_PUBKEY, TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) (desktop updater artifacts)
+#   AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_CONTAINER                   (feed/CDN upload)
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Channel to build for (beta first; stable starts its staged rollout at 10%)"
+        type: choice
+        options: [beta, stable, dev]
+        default: beta
+
+permissions:
+  contents: read
+  id-token: write # Azure OIDC login for Trusted Signing and the feed upload
+
+env:
+  CARGO_TERM_COLOR: always
+  CHANNEL: ${{ inputs.channel || 'beta' }}
+
+defaults:
+  run:
+    working-directory: codebase
+
+jobs:
+  build:
+    name: build + sign ${{ matrix.target }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc }
+          - { os: macos-14, target: universal-apple-darwin, rustup: "aarch64-apple-darwin x86_64-apple-darwin" }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, apt: musl-tools }
+    runs-on: ${{ matrix.os }}
+    environment: release
+    env:
+      GENIE_FEED_KEY_UPDATES: ${{ secrets.GENIE_FEED_KEY_UPDATES }}
+      GENIE_TAURI_UPDATER_PUBKEY: ${{ secrets.GENIE_TAURI_UPDATER_PUBKEY }}
+      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      TRUSTED_SIGNING_ENDPOINT: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+      TRUSTED_SIGNING_ACCOUNT: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+      TRUSTED_SIGNING_PROFILE: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustup || matrix.target }}
+      - if: ${{ matrix.apt }}
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+
+      # --- signing identities (each skipped when its secret is absent) ---
+      - name: macOS - import Developer ID certificate + notary key
+        if: ${{ runner.os == 'macOS' && env.APPLE_CERTIFICATE_P12 != '' }}
+        run: |
+          KC="$RUNNER_TEMP/genie-signing.keychain-db"; KCPW="$(uuidgen)"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          security list-keychain -d user -s "$KC"
+          rm "$RUNNER_TEMP/cert.p12"
+          if [ -n "$APPLE_API_KEY_P8" ]; then
+            echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+            echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+          fi
+      - name: Windows - Azure login for Trusted Signing
+        if: ${{ runner.os == 'Windows' && env.AZURE_CLIENT_ID != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Windows - Trusted Signing client (signtool dlib + metadata)
+        if: ${{ runner.os == 'Windows' && env.TRUSTED_SIGNING_ACCOUNT != '' }}
+        shell: pwsh
+        run: |
+          nuget install Microsoft.Trusted.Signing.Client -OutputDirectory "$env:RUNNER_TEMP\ts" -ExcludeVersion
+          $dlib = Get-ChildItem "$env:RUNNER_TEMP\ts" -Recurse -Filter Azure.CodeSigning.Dlib.dll | Where-Object FullName -match 'x64' | Select-Object -First 1
+          @{ Endpoint = $env:TRUSTED_SIGNING_ENDPOINT; CodeSigningAccountName = $env:TRUSTED_SIGNING_ACCOUNT; CertificateProfileName = $env:TRUSTED_SIGNING_PROFILE } |
+            ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\ts-metadata.json"
+          "TRUSTED_SIGNING_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
+          "TRUSTED_SIGNING_METADATA=$env:RUNNER_TEMP\ts-metadata.json" >> $env:GITHUB_ENV
+      - name: Linux - import GPG key
+        if: ${{ runner.os == 'Linux' && env.GPG_PRIVATE_KEY != '' }}
+        run: echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+      # Build, sign the binary (codesign + notarytool / Authenticode), archive, GPG-sign
+      # (Linux), SBOM + notices, Ed25519 artifact signature, checksums, manifest draft.
+      - run: cargo xtask dist --target ${{ matrix.target }} --channel "$CHANNEL" --out dist
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: codebase/dist/
+
+  # Desktop bundles (MSI/MSIX, DMG, deb/rpm/AppImage): `cargo xtask dist --desktop` builds
+  # them through the per-channel Tauri config overlay. The per-OS job is added together with
+  # apps/desktop (release/packaging/README.md); it is deliberately not stubbed here.
+
+  publish:
+    name: SBOM, checksums, signed manifests, publish to ${{ inputs.channel || 'beta' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      GENIE_FEED_KEY_UPDATES: ${{ secrets.GENIE_FEED_KEY_UPDATES }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+      AZURE_STORAGE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: codebase/dist
+          merge-multiple: true
+      - run: cargo xtask checksums --out dist
+      - name: Fetch the currently published update feeds (rollback check)
+        if: ${{ env.AZURE_CLIENT_ID != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - if: ${{ env.AZURE_CLIENT_ID != '' }}
+        run: |
+          mkdir -p published
+          az storage blob download-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --source "$AZURE_STORAGE_CONTAINER" --destination published --pattern 'updates/*' || true
+      # Skipped without the key; the upload below needs it too, so nothing unsigned ships.
+      - name: Sign update manifests
+        if: ${{ env.GENIE_FEED_KEY_UPDATES != '' }}
+        run: |
+          prev=""; [ -d published ] && prev="--previous-dir published"
+          cargo xtask feed build --only updates --updates-dir dist --out feeds-out $prev
+      - name: Upload artifacts + feeds to Azure Storage (CDN origin)
+        if: ${{ env.AZURE_CLIENT_ID != '' && env.GENIE_FEED_KEY_UPDATES != '' }}
+        run: |
+          ver="$(cargo pkgid -p genie-cli | sed 's/.*[#@]//')"
+          az storage blob upload-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --destination "$AZURE_STORAGE_CONTAINER/releases/$ver" --source dist --overwrite false
+          az storage blob upload-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --destination "$AZURE_STORAGE_CONTAINER" --source feeds-out --pattern 'updates/*' --overwrite true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            codebase/dist/
+            codebase/feeds-out/

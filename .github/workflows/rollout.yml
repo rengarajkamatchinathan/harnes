@@ -1,0 +1,86 @@
+# Staged rollout for stable (spec/09-distribution-and-ops.md §4.1, SA-33; runbook:
+# codebase/release/runbooks/staged-rollout.md). 10% -> 50% -> 100%; each stage soaks
+# >= 48 h (24 h expedited) and advances only if crash-free sessions >= 99.5% and no more
+# than 0.2 points below the previous stable. A failed gate pauses the rollout.
+#
+# The crash-free rates are typed in by the release owner from the D39 crash dashboard
+# until that service exposes an API (README Known gaps).
+name: rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [advance, pause, resume]
+        default: advance
+      candidate_crash_free:
+        description: "Crash-free session % of the rolling-out release"
+        default: ""
+      baseline_crash_free:
+        description: "Crash-free session % of the previous stable"
+        default: ""
+      soak_hours:
+        description: "Hours since the current stage started"
+        default: ""
+      expedited:
+        description: "Critical security fix: 24 h soak (08 §9)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    working-directory: codebase
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      GENIE_FEED_KEY_UPDATES: ${{ secrets.GENIE_FEED_KEY_UPDATES }}
+      AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+      AZURE_STORAGE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
+      EXPEDITED: ${{ inputs.expedited && '--expedited' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Fetch the published stable manifests
+        run: |
+          mkdir -p published
+          az storage blob download-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --source "$AZURE_STORAGE_CONTAINER" --destination published --pattern 'updates/stable/*.json'
+      - name: Crash-rate gate (SA-33)
+        if: ${{ inputs.action == 'advance' }}
+        run: >
+          cargo xtask feed gate --candidate "${{ inputs.candidate_crash_free }}"
+          --baseline "${{ inputs.baseline_crash_free }}" --soak-hours "${{ inputs.soak_hours }}" $EXPEDITED
+      - name: Pause on a failed gate
+        if: ${{ failure() && inputs.action == 'advance' }}
+        run: |
+          for m in published/updates/stable/*.json; do cargo xtask feed rollout "$m" --pause; done
+          for m in published/updates/stable/*.json; do cargo xtask feed sign "$m" --kind updates --key-env GENIE_FEED_KEY_UPDATES; done
+          az storage blob upload-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --destination "$AZURE_STORAGE_CONTAINER" --source published --pattern 'updates/stable/*' --overwrite true
+      - name: Advance / pause / resume, re-sign, verify, publish
+        run: |
+          case "${{ inputs.action }}" in
+            advance) flag="--next" ;; pause) flag="--pause" ;; resume) flag="--resume" ;;
+          esac
+          cp -r published previous
+          for m in published/updates/stable/*.json; do
+            cargo xtask feed rollout "$m" $flag $EXPEDITED
+            cargo xtask feed sign "$m" --kind updates --key-env GENIE_FEED_KEY_UPDATES
+            pub="$(cargo xtask feed pubkey --key-env GENIE_FEED_KEY_UPDATES | sed 's/^ok: //')"
+            cargo xtask feed verify "$m" --kind updates --pubkey "$pub" --previous "previous/${m#published/}"
+          done
+          az storage blob upload-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --destination "$AZURE_STORAGE_CONTAINER" --source published --pattern 'updates/stable/*' --overwrite true

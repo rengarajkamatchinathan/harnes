@@ -1,0 +1,60 @@
+# Catalog, connector/skills directories and notices (spec/09 §4; D27, D30, D37).
+# Every push that touches a feed source dry-runs the build with throwaway keys; a manual
+# dispatch signs with the online feed keys and publishes to Azure Storage + CDN.
+# Runbook: codebase/release/runbooks/feeds.md. Kill switch: incident-response.md.
+name: feeds
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "codebase/feeds/**"
+      - "codebase/crates/genie-catalog/catalog/**"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Sign with the online keys and publish"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    working-directory: codebase
+
+jobs:
+  feeds:
+    runs-on: ubuntu-latest
+    env:
+      GENIE_FEED_KEY_CATALOG: ${{ inputs.publish && secrets.GENIE_FEED_KEY_CATALOG || '' }}
+      GENIE_FEED_KEY_CONNECTORS: ${{ inputs.publish && secrets.GENIE_FEED_KEY_CONNECTORS || '' }}
+      GENIE_FEED_KEY_SKILLS: ${{ inputs.publish && secrets.GENIE_FEED_KEY_SKILLS || '' }}
+      GENIE_FEED_KEY_NOTICES: ${{ inputs.publish && secrets.GENIE_FEED_KEY_NOTICES || '' }}
+      GENIE_FEED_ROOT_PUBKEY: ${{ vars.GENIE_FEED_ROOT_PUBKEY }}
+      AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+      AZURE_STORAGE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo xtask ci feeds
+      - if: ${{ inputs.publish }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - if: ${{ inputs.publish }}
+        name: Build, sign, verify (no rollback vs what is live), publish
+        run: |
+          mkdir -p published
+          az storage blob download-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --source "$AZURE_STORAGE_CONTAINER" --destination published \
+            --pattern '[cdnk]*' || true
+          root=""; [ -n "$GENIE_FEED_ROOT_PUBKEY" ] && root="--root $GENIE_FEED_ROOT_PUBKEY"
+          cargo xtask feed build --only catalog --only connectors --only skills --only notices --only keylist \
+            --out feeds-out --previous-dir published $root
+          az storage blob upload-batch --auth-mode login --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --destination "$AZURE_STORAGE_CONTAINER" --source feeds-out --overwrite true

@@ -1,0 +1,10 @@
+# Files containing code adapted from OpenCode (MIT), one path per line, relative to codebase/.
+# `cargo xtask check-headers` (part of `cargo xtask ci`) checks that each one's first 15
+# lines carry the OpenCode MIT notice (C3, t38). Files that only follow OpenCode's *design*
+# ("written for Genie") are not listed.
+#
+# The header to use:
+#   // Portions adapted from OpenCode (https://github.com/sst/opencode),
+#   // Copyright (c) 2025 opencode, MIT License. See THIRD-PARTY-NOTICES.
+#
+# None yet. The opencode-pty port (D45) adds genie-process files here.

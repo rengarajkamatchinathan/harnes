@@ -1,0 +1,125 @@
+# Merge to main + nightly (spec/09-distribution-and-ops.md §5.2). Builds every target
+# unsigned on the `dev` channel and runs the per-OS suites. Suites whose code doesn't
+# exist yet are gated on their prerequisite so they start running when it lands.
+name: main
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 2 * * *" # nightly, 02:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: codebase
+
+jobs:
+  build:
+    name: dist ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc }
+          - { os: macos-14, target: universal-apple-darwin, rustup: "aarch64-apple-darwin x86_64-apple-darwin" }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, apt: musl-tools }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustup || matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codebase
+          key: ${{ matrix.target }}
+      - if: ${{ matrix.apt }}
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+      # Nightlies are unsigned on `dev` (09 §5.2): no signing secrets in this workflow.
+      - run: cargo xtask dist --target ${{ matrix.target }} --channel dev --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-${{ matrix.target }}
+          path: codebase/dist/
+          retention-days: 14
+
+  os-suites:
+    name: daemon + process suites (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codebase
+      # Socket/pipe security, ensure race, version skew, crash -> Resume (01 §4);
+      # shells (PowerShell, Git Bash, zsh) and kill-tree (M5).
+      - run: cargo xtask nightly daemon
+      - run: cargo xtask nightly process
+
+  desktop-suites:
+    name: ${{ matrix.suite }} (${{ matrix.os }})
+    # Needs apps/desktop (spec 05). Hostile-artifact (D28), renderer perf gate (D8, D57),
+    # end-to-end smoke flows. The perf gate also needs the self-hosted boxes (SA-34).
+    if: ${{ hashFiles('codebase/apps/desktop/package.json') != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        suite: [hostile-artifact, perf-gate, e2e-desktop]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo xtask nightly ${{ matrix.suite }}
+
+  browser-redteam:
+    name: browser injection red-team
+    if: ${{ github.event_name == 'schedule' && hashFiles('codebase/crates/genie-browser/tests/redteam/**') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: browser-actions/setup-chrome@v1 # Chrome for Testing, CI only
+      - run: cargo xtask nightly browser-redteam
+
+  fuzz:
+    name: fuzz (time-boxed)
+    if: ${{ github.event_name == 'schedule' && hashFiles('codebase/fuzz/Cargo.toml') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo xtask nightly fuzz
+
+  live-providers:
+    name: live provider smoke (conformance layer 4)
+    # Nightly + pre-release only, never on PRs or forks (t34). Turned on by setting the
+    # repository variable GENIE_LIVE_SMOKE=true once layer 4 exists.
+    if: ${{ github.event_name != 'pull_request' && vars.GENIE_LIVE_SMOKE == 'true' && github.repository_owner == 'synergech' }}
+    runs-on: ubuntu-latest
+    environment: provider-keys
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo xtask nightly live-providers

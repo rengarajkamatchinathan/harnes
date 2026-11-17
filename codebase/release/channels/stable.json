@@ -1,0 +1,15 @@
+{
+  "channel": "stable",
+  "app_name": "Genie",
+  "bundle_id": "com.synergech.genie",
+  "data_dir_suffix": "",
+  "db_name": "genie.db",
+  "endpoint_suffix": "",
+  "update_feed": "updates/stable/{target}.json",
+  "rollout": { "stages": [10, 50, 100], "soak_hours": 48, "expedited_soak_hours": 24, "min_crash_free": 99.5, "max_drop_vs_previous": 0.2 },
+  "signing": "release",
+  "windows": { "upgrade_code": "ea5d75e6-a910-48f1-8c10-c676dc0d015e", "msix_identity": "Synergech.Genie" },
+  "macos": { "cask": "genie" },
+  "linux": { "package": "genie", "apt_suite": "stable", "yum_repo": "genie-stable" },
+  "winget": { "id": "Synergech.Genie" }
+}
