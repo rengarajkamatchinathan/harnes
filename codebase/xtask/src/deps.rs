@@ -31,6 +31,8 @@ const LEAF_EXCEPTIONS: &[(&str, &str)] = &[
     ("genie-tools", "genie-process"),
     ("genie-mcp", "genie-process"),
     ("genie-browser", "genie-process"),
+    // Browser tools implement the `Tool` trait (06 §4, §10); genie-tools is a leaf framework.
+    ("genie-browser", "genie-tools"),
     ("genie-providers", "genie-secrets"),
     ("genie-mcp", "genie-secrets"),
 ];

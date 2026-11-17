@@ -919,6 +919,24 @@ dependencies = [
 [[package]]
 name = "genie-browser"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "genie-process",
+ "genie-protocol",
+ "genie-tools",
+ "libc",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "genie-catalog"

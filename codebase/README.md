@@ -42,7 +42,10 @@ crates/
   genie-skills     skills: scanner (built-in / user / trusted project), SKILL.md schema, catalogue
                    (policy, enable state, index, load, skill_read), .zip/.skill import, signed
                    skills directory; Markdown slash commands (06 §9)
-  genie-{sandbox,browser,markdown}
+  genie-browser    agent browser engine side (06 §10): Chrome/Edge discovery + launch over
+                   `--remote-debugging-pipe`, own CDP client, AX snapshot/diff/read, site
+                   permissions + D21 gates, the 18 `browser_*` tools, screencast + input
+  genie-{sandbox,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
                    `genie chat`, importer, `hook-adapter`; also runs `genie daemon`
@@ -366,6 +369,29 @@ mutating tool, decline fed back to the model; steer injected mid-turn; retry →
 compaction; `length` continuation; max steps; interrupt; regenerate; title; baseline
 `<system-update>`; store-backed turn (messages, memory, `usage_daily`, FTS).
 
+### Spec 06 §10 (browser, `genie-browser`)
+
+| § | What | Where |
+|---|---|---|
+| 06 §10 backend, SA-36 | `BrowserBackend` trait; `SystemChromeBackend`: Chrome / Edge / Chromium discovery per OS (macOS app bundles, Windows Program Files / LocalAppData, Linux `PATH` + snap), version ≥ 120 (`--version`, Windows version dir), separate profile `<data>/browser/profile` (0700) or ephemeral, prefs that turn off password saving / autofill and auto-deny geolocation / camera / mic / notifications, flags (no sync / extensions / first-run, `--headless=new` for the desktop), own kill-tree via `genie-process` | `backend`, `discover` |
+| 06 §10 transport | `--remote-debugging-pipe` (no TCP port): fds 3/4 on Unix (`pre_exec` + `dup2`), `--remote-debugging-io-pipes=<r>,<w>` inheritable handles on Windows; NUL-framed messages bridged to a channel `Wire` | `transport` |
+| 06 §10 CDP client | own async client: id → response routing, flattened sessions (`sessionId`), event fan-out, per-call timeouts, `Timeout`/`Closed` = result lost → status `unknown`, never retried | `cdp` |
+| 06 §10 model input, 08 §2.1 | `Accessibility.getFullAXTree` + `DOMSnapshot.captureSnapshot` → outline with stable per-tab refs (`e12` ↔ `backendNodeId`, reset on navigation); interactive (default) / full / `scope=ref`; ≤ 6k tokens with viewport + one screen first and "N more elements"; diff ≤ 1.5k (changed / added / removed); `browser_read` Markdown ≤ 8k from the `main`/`article` landmark; hidden-content stripping (AX-ignored, `visibility`, ancestor opacity < 0.05, ≤ 1 px or off-screen boxes, fonts < 3 px) with a removed count; password/OTP/card values masked | `snapshot`, `read` |
+| 06 §10 tools | all 18 tools (`open, navigate, snapshot, read, find, screenshot, click, type, fill_form, select, press_key, hover, scroll, wait, tabs, upload, downloads, handoff`) as `genie_tools::Tool` via `genie_browser::tools(&browser)`; every result = `status` (`ok | blocked | needs_confirmation | user_in_control | unknown`) + tab + URL + title + diff inside `<untrusted_web_content origin=…>`; screenshot only with `BrowserHost::vision`; upload takes chat attachment ids only; pop-ups opened by our tabs join the tab list unfocused | `tools`, `session` |
+| 06 §10 per-site permissions (D21) | key = eTLD+1 with exact-host override; `blocked | ask | read | act`; order admin block → admin allow → user host → category → user site → `ask`; default-blocked categories (banking, payment dashboards, government ID/tax, health, password managers, AI provider consoles / API-key pages, cloud consoles); messaging sites readable but every `act` confirms; first visit asks through `ctx.authorize` with a `Browser(site:…)` save suggestion (`once` = this chat, kept as a session grant); `browser.sites.list/set` data | `site`, `Op::gate` |
+| 06 §10 sensitive actions (D21) | deterministic: submit of a form with password / `cc-*` / OTP fields or on a page with a payment iframe, clicks named with commit verbs (en/de/fr/es/pt/it/nl), every upload, every download start (cancelled, confirmed, re-fetched into quarantine), category navigation → `browser_confirm` via `BrowserHost::confirm` (also in bypass); typing into password / OTP / card fields refused (hand off instead); plan mode = navigate/read only | `sensitive`, `Op::{confirm, check_downloads}`, `tools` |
+| 06 §10 injection defences, SA-29 | untrusted framing, hidden stripping, model-built URL exfiltration guard (> 256 chars of query+fragment, or a ≥ 12-char value copied from another origin's page → blocked; page links and user-typed URLs exempt), taint reported per turn (`BrowserHost::taint`) + ask before `act` on an origin not read this turn, step/time caps (50 actions or 15 min per turn → check-in confirmation), landing pages re-gated after redirects | `site::exfiltration_check`, `Op::{gate, gate_navigation, count_step, finish}` |
+| 06 §10 audit | `browser.action` event per call (tab, tool, origin, decision `allowed:{site,chat,user,policy}` / `confirmed:user` / `blocked:{policy,category,user,mode,scheme,exfiltration}` / `denied:user`, status, thumbnail after `act` steps via `BrowserHost::store_image`) | `Op::conclude` |
+| 05 §9, SA-23/24, D56 | `screencast_start/ack/stop` (one CDP screencast per tab, many streams, one frame in flight per client, Chrome acked only when a client can take a frame, newest frame wins, JPEG size → `device_scale`); `input` maps mouse / key / wheel / IME (`imeSetComposition`) / `insertText`, and any input but pointer moves takes control; `takeover / handback / stop`, `tabs`, `tab_activate`, `clear_data`, `status` | `screencast`, `input`, `Browser` |
+
+Tests: unit tests per module; `tests/browser.rs` runs every gate through the tools against
+`testing::FakeCdp` replaying `tests/fixtures/checkout.json` (recorded AX/DOMSnapshot/Target
+responses): site ask + act upgrade + submit confirmation + audit, password refusal,
+exfiltration, category, scheme, plan mode, commit-verb denial, take-over/hand-back note,
+step-cap check-in, handoff, lost result → `unknown`, download confirmation, read/find/tabs/
+type/fill_form, screenshot, screencast flow control + input. `real_chrome_smoke` (`--ignored`)
+drives a local Chrome against a tiny local HTTP page.
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -607,3 +633,45 @@ compaction; `length` continuation; max steps; interrupt; regenerate; title; base
   replaying results to the same provider, citations, fees and tainting on provider result parts
   are engine/provider work. The local `web_search` tool is for hosts with their own backend and
   must not be registered together with the native declaration (same name).
+
+### Spec 06 §10 (browser) gaps and deviations
+
+- **Not wired yet** (integration owner): the daemon must build one `Browser` (with
+  `SystemChromeBackend`, the shared `SitePolicy`, a `BrowserHost` implementation and the
+  download quarantine dir), register `genie_browser::tools(&browser)` for Chat and Code sessions,
+  and route `browser.*` methods to `Browser::{status, screencast_start/ack/stop, input, takeover,
+  handback, stop, tabs, tab_activate, clear_data}` and `sites.{list,set}`. `BrowserHost` must map
+  `confirm` to a durable `AskKind::BrowserConfirm` ask (Approve / Take over / Deny), `taint` to the
+  evaluator's `Taint { source, read_origins }`, `store_image` to blobs, `attachment_path` to chat
+  attachments, `user_supplied_url` to the turn's user message, `control_changed` to the banner, and
+  must persist `browser.sites.set` and "always" answers into settings. Headless `-p` gating
+  (SA-28c: off unless `--allow 'Browser(site:…)'` / `--enable-browser`) is the registering side's
+  decision. The permission adapter should read `resource` (the site key) of browser asks as
+  `Action::Browser { site, action }` (read vs act by tool name).
+- **Generated CDP types** (research §3) are not used: commands and results are `serde_json::Value`
+  with a few typed accessors; no `chromiumoxide_cdp` dependency.
+- **Windows pipe transport** uses `--remote-debugging-io-pipes` with inheritable handles; it
+  type-checks for `x86_64-pc-windows-msvc` but has not been run on Windows. Inheritable handles can
+  leak into a child spawned concurrently (no `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` in std).
+- **eTLD+1** uses a short built-in multi-label suffix list, not the full Public Suffix List; the
+  category list is a curated placeholder until the shipped, updatable list exists. Admin
+  allow/blocklist are `SitePolicy::set_admin` inputs; reading them from managed policy is wiring.
+- **Images to the model:** `browser_screenshot` stores the JPEG through `BrowserHost::store_image`
+  and returns its reference; `ToolOutput` has no image variant, so the engine must lift the
+  reference into an image part. Set-of-marks overlays are v1.x.
+- **Context hygiene** ("only the latest full snapshot per tab stays in context") is compaction-side
+  (core) and not done here.
+- **Not implemented:** cross-origin iframe auto-attach (OOPIF content is missing from snapshots and
+  their payment fields are only detected through the iframe `src`), `browser_wait` for network idle,
+  file-chooser interception during take-over (SA-24; `browser_upload` uses `DOM.setFileInputFiles`),
+  copy/paste during take-over (the clipboard lives in the desktop app), pop-out of a headless
+  browser (needs a relaunch with a window), the Linux "no keyring → ephemeral + warning" detection
+  (`ProfileKind::Ephemeral` exists), enterprise-policy detection of disabled remote debugging, the
+  v1.x critic model / injection classifier, the "always allow this action on this site" option
+  for non-payment confirmations, and moving downloads out of quarantine.
+- **Assumptions:** `browser.stop` = take over + end screencasts (the daemon interrupts the turn);
+  any take-over input except plain pointer movement pauses the agent; the step cap counts every
+  browser tool call in a turn and resets after an approved check-in; a messaging-site `act` and a
+  category navigation always confirm even when the site was allowed; downloads triggered by an agent
+  action from an unknown frame are attributed to the acting session; refs keep counting up per tab
+  so a stale ref never names a new element.
