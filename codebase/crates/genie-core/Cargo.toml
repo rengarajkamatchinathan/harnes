@@ -11,6 +11,7 @@ publish.workspace = true
 genie-protocol.workspace = true
 # Subsystem crates (01 §2 graph) are added here as the engine starts using them;
 # `cargo xtask check-deps` enforces the allowed directions.
+genie-store.workspace = true
 
 futures.workspace = true
 serde.workspace = true
