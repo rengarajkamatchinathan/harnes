@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "App origin only. The artifact origin (genie-artifact://) gets no capabilities (05 §8).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

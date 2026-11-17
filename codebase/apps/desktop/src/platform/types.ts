@@ -1,0 +1,81 @@
+// The Platform adapter (01 §1.3, §2.1 rule 8; D8 condition 2): the only way the React app
+// reaches the host. `platform/tauri/` implements it with Tauri IPC; `platform/mock/` is an
+// in-memory engine for tests and for running the UI in a plain browser.
+//
+// Message shapes mirror `apps/desktop/src-tauri/src/relay.rs` (`HostMessage`, `HostStatus`,
+// `HostInfo`, `WireError`).
+
+export type ConnState = "connecting" | "starting" | "restarting" | "ready" | "degraded" | "busy_updating" | "reconnecting" | "failed";
+
+export interface HostStatus {
+  state: ConnState;
+  detail?: string;
+  engine_version?: string;
+  /** The secrets store is locked; `secrets.unlock` with the passphrase (D26). */
+  locked?: string;
+  running?: number;
+}
+
+/** A daemon notification as relayed: `{method, params}`. */
+export interface RelayedNotification {
+  method: string;
+  params: unknown;
+}
+
+export type HostMessage =
+  | ({ kind: "status" } & HostStatus)
+  | { kind: "batch"; messages: RelayedNotification[] }
+  | { kind: "server_request"; req_id: number; method: string; params: unknown }
+  | { kind: "request_cancelled"; req_id: number }
+  | { kind: "reload"; session_id: string };
+
+export interface HostInfo {
+  client_instance_id: string;
+  os: string;
+  app_version: string;
+  batch_ms: number;
+}
+
+export interface WireError {
+  code: number;
+  message: string;
+  data?: { kind?: string; [k: string]: unknown } | null;
+}
+
+export interface Platform {
+  readonly kind: "tauri" | "mock";
+  /** Start receiving host messages (status first). Call again after nothing; idempotent per page. */
+  connect(onMessage: (m: HostMessage) => void): Promise<HostInfo>;
+  /** One JSON-RPC request to the daemon; rejects with a `WireError`. */
+  request(method: string, params: unknown): Promise<unknown>;
+  /** Answer a `server_request` (e.g. `permission.ask`). */
+  respond(reqId: number, result: { ok: unknown } | { error: WireError }): Promise<void>;
+  /** "Retry" on the engine error card. */
+  retry(): Promise<void>;
+  /** System browser for http(s)/mailto links (citations, sign-in pages). */
+  openExternal(url: string): Promise<void>;
+  /** Open a local file or folder with the OS ("open in editor"). */
+  openPath(path: string): Promise<void>;
+  /** `state.json`: window/panel state, never settings (D23). */
+  loadState(): Promise<Record<string, unknown>>;
+  saveState(state: Record<string, unknown>): Promise<void>;
+  /** Save an export to Downloads; resolves with the saved path. */
+  saveFile(name: string, content: { text: string } | { base64: string }): Promise<string>;
+  /** URL of an artifact page on the sandboxed scheme (05 §8). */
+  artifactUrl(artifactId: string, n: number): string;
+  log(level: "info" | "warn" | "error", message: string): void;
+}
+
+export function isWireError(e: unknown): e is WireError {
+  return typeof e === "object" && e !== null && "code" in e && "message" in e;
+}
+
+export function errorKind(e: unknown): string | undefined {
+  return isWireError(e) ? (e.data?.kind as string | undefined) : undefined;
+}
+
+export function errorMessage(e: unknown): string {
+  if (isWireError(e)) return e.message;
+  if (e instanceof Error) return e.message;
+  return String(e);
+}

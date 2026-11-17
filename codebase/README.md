@@ -57,8 +57,11 @@ crates/
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
                    `genie chat`, `genie import`, `hook-adapter`; also runs `genie daemon`
+apps/desktop       desktop app (spec 05): `src-tauri` (crate `genie-desktop`, Tauri 2: genie-client relay,
+                   IPC bridge, 8 ms delta batching, artifact scheme) + `src` (React + TypeScript)
 policy-templates   Windows ADMX/ADML (GPO/Intune) and a macOS .mobileconfig sample (08 §5.1)
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
+packages/ui        design tokens (OKLCH, light/dark) + core React components (05 §6, D19)
 xtask              `cargo xtask check` = check-deps (01 §2.1 rules 1–3) + check-spawn (rule 4)
                    + schema drift/compat; `cargo xtask schema [--release]` regenerates;
                    `ci`, `nightly`, `dist`, `sbom`, `notices`, `checksums`, `sign`, `feed …` (spec 09)
@@ -83,6 +86,21 @@ cargo xtask dist --channel beta            # release archive + SBOM + notices + 
 
 Release, feeds and operations: see [release/README.md](release/README.md) and
 [feeds/README.md](feeds/README.md).
+
+Desktop (pnpm workspace in this folder: `apps/desktop`, `packages/*`):
+
+```sh
+pnpm install
+pnpm -r typecheck                          # tsc --noEmit for apps/desktop and packages/ui
+pnpm -r test                               # vitest
+cd apps/desktop && pnpm dev                # UI in a browser against the in-memory mock engine
+cd apps/desktop && pnpm tauri dev          # the real app (GENIE_DAEMON_PATH=<genie binary> if not on PATH)
+```
+
+On Linux the webview needs the WebKitGTK 4.1 development packages, so `genie-desktop` only
+compiles its Tauri shell with `--features linux-webview`; without it the crate builds the relay
+library and a stub binary, and `cargo build --workspace` works on a bare box. Windows and macOS
+always build the shell.
 
 On Windows without Visual Studio Build Tools, use `scripts/cargo-win-gnu.sh <args>`. It reuses the
 gnu-toolchain workaround from `prototypes/37-streaming-chat/.tools` (see that README).
@@ -565,6 +583,38 @@ CI platform: **GitHub Actions** (ticket 41, spec 10 R8). Workflows live at the g
 (`publish = false`), `native-tls`/`hyper-tls` banned, crate-scoped licence exceptions and
 advisory ignores with reasons (see gaps).
 
+### Spec 05 (desktop app) and 01 §1.3
+
+| § | What | Where |
+|---|---|---|
+| 01 §1.3, D22 | Tauri side owns one `genie-client` connection (`ensure` with "Starting engine…", error card + Retry, degraded / busy-updating, reconnect loop); the token never reaches JS | `genie-desktop::relay::Relay::{start, run, serve}`, `host::ensure_options` |
+| 01 §1.3, D57, 05 §7 | typed IPC bridge: `host_request` = one JSON-RPC request; one IPC `Channel` streams `HostMessage`s; notifications flushed every 8 ms with adjacent `part.delta` merged (text + JSON) and `tool.progress` latest-wins | `relay`, `batch::Batcher`, `shell::{host_connect, host_request}` |
+| 02 §3.1 | resume cursor per subscribed session (`SessionTracker`): dedupe, stale-delta drop, overflow → resubscribe from the cursor, below floor → `reload` to the webview; after a reconnect every tracked session and the workspace feed are resubscribed with `after_seq = last_seq` | `relay::{request, resubscribe_all, on_notification}`, `src/state/session.ts` (`session.get` → subscribe from `head_seq`) |
+| 02 §7 | daemon → client `permission.ask` relayed as `server_request`, answered via `host_respond`; `$/cancelRequest` and connection loss → `request_cancelled`; pending asks re-sent to a reloaded webview; asks not asked of us are answered with `permission.respond` | `relay::{on_server_request, respond, attach}`, `src/state/app.ts::answerAsk` |
+| 01 §1.3, D8, §2.1 rule 8 | Platform adapter (`src/platform/types.ts`): the Tauri implementation is the only `@tauri-apps` importer; an in-memory mock engine for browser dev and tests; enforced by `test/architecture.test.ts` | `src/platform/{tauri,mock}` |
+| 05 §1, D23 | frame: sidebar · main · resizable/hideable right panel; Settings replaces the main column; window/panel/sidebar/tab/appearance state in `<data>/desktop/state.json` (never settings); deep links `genie://session/…`, `genie://settings/…` | `src/ui/Root.tsx`, `host::StateFile`, `App::openDeepLink` |
+| 05 §2.1 | New chat (+ incognito toggle and banner), FTS search (`session.search`), projects (starred first, create), recents by date with pinned; rename, pin, delete with confirm, export Markdown/JSON to Downloads | `src/ui/Sidebar.tsx`, `host::save_download` |
+| 05 §2.2, §7 | streaming Markdown (settled/tail split, memoised blocks, one commit per frame, virtualised transcript, highlight.js, KaTeX + Mermaid lazy, pre-warmed on idle, rendered only when settled); raw HTML escaped, links open in the system browser; thinking ("Thought" / "omitted"); copy, edit → branch, regenerate, `‹ 2/3 ›`; tool rows (search / fetch / MCP / memory chip / artifact card / browser / shell); citations `[n]` + Sources chips; compaction divider; interrupted + Resume; retry countdown; take-over / lease-lost banner; subagent cards | `src/markdown/markdown.ts`, `src/ui/chat/{Transcript,Markdown,toolInfo,ChatView}.tsx`, `src/state/sessionModel.ts` |
+| 05 §2.2 asks | permission (tool, resource, diff/command/url/MCP-args preview, annotations as info, Allow once / Always allow with scope from save suggestions / Deny + reason), elicitation and question forms (sensitive fields masked), sampling (cost, budget), browser confirmation (screenshot, Approve / Take over / Deny), definition-hash approvals; subagent label | `src/ui/chat/AskCard.tsx` |
+| 05 §2.3 | Enter sends, Shift+Enter newline, steer while running, Alt+Enter queues (SA-06), Stop, Esc interrupts; queued chips with remove; attachments by picker/drag/paste via `blob.put.begin/chunk/end` (SA-27 limits, size + too-big warning); model picker grouped by provider, effort only when supported; "+" menu (attach, skills, per-chat connector toggles via `mcp.set_enabled {session_id}`, browser); context ring with tokens/window/cost | `src/ui/chat/Composer.tsx`, `src/state/attachments.ts` |
+| 05 §2.4 | project page: name, instructions, starred, knowledge upload/remove, capacity bar + "Using retrieval", chats | `src/ui/ProjectPage.tsx` |
+| 05 §2.5, §8 | artifact panel: versions, Code/Preview, Copy, Download, Fullscreen, Fix with Genie; the `genie-artifact:` scheme is served by Rust from `artifact.get` with the 05 §8 CSP, inline scripts moved to scheme files, a bridge script (fixed postMessage schema, dialog shims); `<iframe sandbox="allow-scripts">` without same-origin; the parent checks `event.source` and the schema; SVG as `<img>`; the capability file lists the app window only | `src-tauri/src/artifact.rs`, `shell::serve_artifact`, `src/ui/panel/ArtifactPanel.tsx` |
+| 05 §9 | Browser tab: screencast on `<canvas>` with ack, control pill, Take over / Hand back (Esc) / Stop / Pop out, tab strip, mouse/wheel/key/paste forwarding with device-scale mapping, step log, no-browser empty state | `src/ui/panel/BrowserPanel.tsx` |
+| 05 §3 | Code mode: sessions grouped by repo with status dots, archive; new session (folder + recents, agent, worktree), trust dialog (Trust / Trust once / Don't trust) and definition-hash approvals; mode selector; compact tool rows; rewind dialog (files / conversation / both, preview); worktree finish footer; right panel Changes (branch, unified/split diffs, Commit / Commit & push / Create PR, checkpoints) and Files (filterable tree with M/A/D, read-only preview) | `src/ui/code/*`, `src/ui/panel/CodePanels.tsx` |
+| 05 §4 | Settings: section nav, search over all settings, deep links; schema-generated controls from `config.schema` (`$ref` / `Option` resolved; boolean, enum, number, string, list, JSON) with live `config.set`, inline Saved / errors, restart banner, admin lock "Managed by <org>", scope picker in Code mode; Appearance (theme, chat font, size, density); Your Genie (memory list, edit, delete, pause, reset); Providers (credentials with source, API key, Sign in with Microsoft PKCE / device code with polling, test, models, catalog refresh); Capabilities (skills, browser detection, site permissions, clear data); Connectors (status, sign-in, logs, enable, add custom stdio/URL); Usage (grouped table, budget); Privacy (export all); Developer (daemon status, restart, doctor, copy diagnostics, problems, effective policy); Account | `src/ui/settings/*` |
+| 05 §5 | first run: welcome → privacy consent (policy-locked values disabled) → connect a provider (skippable) → import (only when found) → memory notice; unlock screen when the engine reports a locked store | `src/ui/FirstRun.tsx`, `Root.tsx::Unlock` |
+| 05 §6, D19, C1 | tokens: 12-step OKLCH grey (cool seed) and accent (SA-20 teal) scales; semantic colour, type, space, radius and motion tokens; light/dark following the system with an override; density; reduced motion; WCAG AA contrast checked in tests; bundled Inter + JetBrains Mono; i18n keys + `plural()` | `packages/ui`, `src/i18n.ts` |
+| 05 §11 | `role="log"` transcript with the streaming tail hidden from AT (settled blocks are announced), ask cards as `alertdialog`, dialogs trap focus, keyboard tabs and menus, visible focus rings | `packages/ui/src/components.tsx`, `src/ui/chat/*` |
+
+Paths in the table are under `apps/desktop/` unless they start with `packages/`.
+
+Tests: `genie-desktop` unit tests (batching, artifact paths/CSP/inline scripts, state file, URL
+checks) and `tests/relay.rs` (in-memory daemon: batching, dedupe, ask relay + answer + cancel,
+reconnect resume from the cursor, overflow resubscribe, below-floor reload, re-attach); vitest in
+`apps/desktop/test` (platform boundary, session model, Markdown safety, settings schema, composer
+keys, panels, first run, end to end over the mock engine incl. a relayed ask) and
+`packages/ui/test` (tokens, AA contrast, components).
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -580,8 +630,6 @@ advisory ignores with reasons (see gaps).
   starts in that gap escapes. Closing it needs a raw `CreateProcessW` with `CREATE_SUSPENDED`
   (planned with the `opencode-pty` port, D45).
 - **Windows token file** relies on the per-user `%LOCALAPPDATA%` ACL; no explicit DACL is set.
-- **Not in this milestone:** desktop app, `packages/ui` and the Platform-adapter lint rule (spec 05).
-
 ### Terminal tab, `tool_search`, export/import and engine gaps (D55, 02 §6.7, 06 §7, 04 §9, 07 §5)
 
 | § | What | Where |
@@ -613,6 +661,44 @@ then remaps ids, blobs, sanitized input, `session.list`, `import.scan/preview/ap
 `genie-daemon` unit test for child `session.listed`; `genie-tools/tests/shell.rs`
 (`kill_session_jobs`); `genie-daemon/tests/projects.rs` (`memory.changed`, file re-index);
 `apps/cli` unit tests (`--enable-browser`, passphrase retries against a fake locked daemon).
+
+### Desktop app (spec 05) gaps and deviations
+
+- **`cargo deny` is red pending a legal decision (user chose to commit and decide later).**
+  Tauri 2 (D1) brings in 5 MPL-2.0 crates (`cssparser`, `cssparser-macros`, `dtoa-short`,
+  `selectors`, `option-ext`) and 6 "unmaintained" advisories (`proc-macro-error`
+  RUSTSEC-2024-0370; `unic-char-range`/`unic-common`/`unic-char-property`/`unic-ucd-version`/
+  `unic-ucd-ident` RUSTSEC-2025-0075/0080/0081/0098/0100) — none are vulnerabilities. Resolving
+  it needs crate-scoped `deny.toml` exceptions/ignores, which a human must approve.
+- **Terminal tab is a stub** ("Coming soon"): the daemon now serves `terminal.*` (see "Terminal
+  tab…"), but the desktop tab (xterm.js + attach/replay) is not wired yet and the client still
+  declares `capabilities.terminal = false` (05 §10).
+- **React artifacts** need `packages/artifact-runtime` (esbuild-wasm + bundled libraries), which
+  is not built: the scheme serves a placeholder and the Code view works. SVG is shown through
+  `<img>` (scripts never run) rather than sanitised. The hostile-artifact CI test (05 §8) is not
+  written.
+- **Not run in a real window here:** only `cargo check/test/clippy`, `tsc`, `vitest` and
+  `vite build`; no `tauri dev/build`, so the D8 performance gate and the three-engine runs are
+  still open. Tauri resolved to 2.11.x from the local registry cache.
+- **Design system:** plain React + CSS variables, not shadcn/ui + Radix + Tailwind (05 §6) yet;
+  focus trapping, roving tabs and menus are hand-written. The dyslexia-friendly font is not bundled.
+- **OS notifications** (`notification` on the workspace feed) show as in-app toasts; the Tauri
+  notification plugin and the updater (D40) are not wired.
+- **Native pickers:** no dialog plugin; attachments use the HTML file input and Code folders are
+  typed (with recent workspaces). Export-all asks for a path.
+- **Branch switching** calls `session.update {active_leaf_id: sibling}` then
+  `session.get {leaf_id: sibling}`; showing the sibling's latest descendant relies on the daemon.
+- **Missing UI:** per-message token/cost hover, model badges, "attach MCP resource",
+  `/server:prompt` argument forms, and web-search / code-execution toggles (no per-chat toggle in
+  the protocol; the menu items are disabled with "Not available from this engine yet").
+- **Settings placeholders:** Install-in-PATH, delete all data, licence, trusted-folder list/revoke
+  and the saved "always" approvals list (no methods); per-model Advanced overrides go through the
+  raw `models` JSON setting; usage "charts" are a table with bars.
+- **Protocol changes the app needs:** `session.update.project_id` (move a chat to a project),
+  `trust.list` (+ revoke by path), a list of saved permission rules per scope, a delete-all-data
+  method, `project.file.list` (the page only lists files added during the visit), per-session
+  capability toggles (`web_search`, `code_execution`) on `session.update`, and per-message usage
+  on `Message` for the hover card.
 
 ### Projects, artifacts, memory, retrieval gaps and deviations
 

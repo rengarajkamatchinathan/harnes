@@ -107,7 +107,8 @@ pub fn check(root: &Path) -> Result<String, Vec<String>> {
     }
     let crates = graph
         .keys()
-        .filter(|k| k.starts_with("genie-") && *k != "genie-cli")
+        // Apps are not crates of the 01 §2 graph.
+        .filter(|k| k.starts_with("genie-") && *k != "genie-cli" && *k != "genie-desktop")
         .count();
     if crates != 19 {
         errors.push(format!(
