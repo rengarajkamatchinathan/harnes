@@ -117,7 +117,8 @@ impl Kind {
 // Keys and signatures
 
 pub fn parse_public(s: &str) -> Result<VerifyingKey, String> {
-    let bytes: [u8; 32] = decode_32(s).ok_or_else(|| format!("`{s}` is not a 32-byte public key"))?;
+    let bytes: [u8; 32] =
+        decode_32(s).ok_or_else(|| format!("`{s}` is not a 32-byte public key"))?;
     VerifyingKey::from_bytes(&bytes).map_err(|e| format!("bad public key: {e}"))
 }
 
@@ -140,6 +141,16 @@ fn decode_32(s: &str) -> Option<[u8; 32]> {
 
 pub fn public_hex(k: &VerifyingKey) -> String {
     hex::encode(k.to_bytes())
+}
+
+/// SubjectPublicKeyInfo DER (RFC 8410) as base64: the body of a `PUBLIC KEY` PEM, for
+/// install scripts that verify with `openssl pkeyutl -rawin`.
+pub fn spki_b64(k: &VerifyingKey) -> String {
+    let mut der = vec![
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+    ];
+    der.extend_from_slice(&k.to_bytes());
+    B64.encode(der)
 }
 
 pub fn sign_bytes(key: &SigningKey, body: &[u8]) -> String {
@@ -262,7 +273,9 @@ pub fn keys_from_keylist(
         if k["feed"].as_str() != Some(kind.as_str()) {
             continue;
         }
-        let nb = k["not_before"].as_str().and_then(|s| timefmt::parse(s).ok());
+        let nb = k["not_before"]
+            .as_str()
+            .and_then(|s| timefmt::parse(s).ok());
         let na = k["not_after"].as_str().and_then(|s| timefmt::parse(s).ok());
         if nb.is_some_and(|t| now < t) || na.is_some_and(|t| now >= t) {
             continue;
@@ -291,11 +304,17 @@ pub fn validate_keylist(doc: &Value) -> Vec<String> {
             errs.push(format!("{at}: `id` is required"));
         }
         match k["feed"].as_str().map(Kind::parse) {
-            Some(Ok(Kind::KeyList)) => errs.push(format!("{at}: the root key is pinned, not listed")),
+            Some(Ok(Kind::KeyList)) => {
+                errs.push(format!("{at}: the root key is pinned, not listed"))
+            }
             Some(Ok(_)) => {}
             _ => errs.push(format!("{at}: `feed` must be a feed kind")),
         }
-        if k["public_key"].as_str().map(parse_public).is_none_or(|r| r.is_err()) {
+        if k["public_key"]
+            .as_str()
+            .map(parse_public)
+            .is_none_or(|r| r.is_err())
+        {
             errs.push(format!("{at}: `public_key` must be 32-byte hex"));
         }
         for t in ["not_before", "not_after"] {
@@ -341,7 +360,11 @@ pub fn validate_update(doc: &Value) -> Vec<String> {
     if !matches!(rel_version, Some(Ok(_))) {
         errs.push("update: `release.version` must be semver".into());
     }
-    if release["pub_date"].as_str().map(timefmt::parse).is_none_or(|r| r.is_err()) {
+    if release["pub_date"]
+        .as_str()
+        .map(timefmt::parse)
+        .is_none_or(|r| r.is_err())
+    {
         errs.push("update: `release.pub_date` must be a UTC timestamp".into());
     }
     if let Some(mv) = doc.get("min_version").and_then(Value::as_str) {
@@ -365,7 +388,11 @@ pub fn validate_update(doc: &Value) -> Vec<String> {
         None => errs.push("rollout: `percent` is required".into()),
         _ => {}
     }
-    if r["started_at"].as_str().map(timefmt::parse).is_none_or(|r| r.is_err()) {
+    if r["started_at"]
+        .as_str()
+        .map(timefmt::parse)
+        .is_none_or(|r| r.is_err())
+    {
         errs.push("rollout: `started_at` must be a UTC timestamp".into());
     }
     let arts = doc["artifacts"].as_array();
@@ -391,7 +418,9 @@ pub fn validate_update(doc: &Value) -> Vec<String> {
             .and_then(|s| B64.decode(s).ok())
             .is_some_and(|b| b.len() == 64);
         if !sig_ok {
-            errs.push(format!("{at}: `signature` must be a base64 Ed25519 signature"));
+            errs.push(format!(
+                "{at}: `signature` must be a base64 Ed25519 signature"
+            ));
         }
         if a["format"].as_str().is_none_or(str::is_empty) {
             errs.push(format!("{at}: `format` is required"));
@@ -459,7 +488,11 @@ pub fn gate(candidate: f64, baseline: f64, soak_hours: f64, expedited: bool) -> 
     if baseline - candidate > MAX_DROP + 1e-9 {
         return Gate::Pause("crash-free rate is more than 0.2 points below the previous stable");
     }
-    let need = if expedited { EXPEDITED_SOAK_HOURS } else { SOAK_HOURS };
+    let need = if expedited {
+        EXPEDITED_SOAK_HOURS
+    } else {
+        SOAK_HOURS
+    };
     if soak_hours < need {
         return Gate::Hold("soak time not reached");
     }
@@ -502,7 +535,9 @@ fn kind_of(o: &Opts, path: &Path) -> Result<Kind, String> {
 }
 
 fn now_from(o: &Opts) -> Result<i64, String> {
-    o.get("--now").map(timefmt::parse).unwrap_or(Ok(timefmt::now()))
+    o.get("--now")
+        .map(timefmt::parse)
+        .unwrap_or(Ok(timefmt::now()))
 }
 
 /// Content checks per kind (beyond the header).
@@ -510,7 +545,9 @@ pub fn validate(kind: Kind, doc: &Value) -> Vec<String> {
     match kind {
         Kind::Updates => validate_update(doc),
         Kind::KeyList => validate_keylist(doc),
-        Kind::Catalog if !doc["models"].is_array() => vec!["catalog: `models` must be an array".into()],
+        Kind::Catalog if !doc["models"].is_array() => {
+            vec!["catalog: `models` must be an array".into()]
+        }
         Kind::Connectors | Kind::Skills if !doc["entries"].is_array() => {
             vec![format!("{}: `entries` must be an array", kind.as_str())]
         }
@@ -541,8 +578,16 @@ pub fn run(root: &Path, args: Vec<String>) -> Result<String, Vec<String>> {
             ))
         }
         "pubkey" => {
-            let sk = load_signing_key(&o).map_err(one)?;
-            Ok(public_hex(&sk.verifying_key()))
+            // From a signing key, or convert a public hex key (`--pubkey`).
+            let vk = match o.get("--pubkey") {
+                Some(h) => parse_public(h).map_err(one)?,
+                None => load_signing_key(&o).map_err(one)?.verifying_key(),
+            };
+            if o.has("--pem") {
+                Ok(spki_b64(&vk))
+            } else {
+                Ok(public_hex(&vk))
+            }
         }
         "stamp" => {
             let path = PathBuf::from(o.pos(0, "feed.json").map_err(one)?);
@@ -550,10 +595,14 @@ pub fn run(root: &Path, args: Vec<String>) -> Result<String, Vec<String>> {
             let (_, mut doc) = read_json(&path).map_err(one)?;
             let now = now_from(&o).map_err(one)?;
             let ttl: i64 = match o.get("--ttl-days") {
-                Some(t) => t.parse().map_err(|_| one("--ttl-days must be a number".into()))?,
+                Some(t) => t
+                    .parse()
+                    .map_err(|_| one("--ttl-days must be a number".into()))?,
                 None => kind.default_ttl_days(),
             };
-            let obj = doc.as_object_mut().ok_or_else(|| one("feed must be a JSON object".into()))?;
+            let obj = doc
+                .as_object_mut()
+                .ok_or_else(|| one("feed must be a JSON object".into()))?;
             stamp(obj, now, ttl, o.has("--bump"));
             write_json(&path, &doc).map_err(one)?;
             Ok(format!(
@@ -606,7 +655,10 @@ pub fn run(root: &Path, args: Vec<String>) -> Result<String, Vec<String>> {
                 return Err(errs);
             }
             write_json(&path, &doc).map_err(one)?;
-            Ok(format!("{msg}; re-sign {} before publishing", path.display()))
+            Ok(format!(
+                "{msg}; re-sign {} before publishing",
+                path.display()
+            ))
         }
         "gate" => {
             let num = |k: &str| -> Result<f64, Vec<String>> {
@@ -633,7 +685,10 @@ pub fn run(root: &Path, args: Vec<String>) -> Result<String, Vec<String>> {
                 o.require("--version").map_err(one)?,
             );
             match o.get("--percent").and_then(|p| p.parse::<u64>().ok()) {
-                Some(p) => Ok(format!("bucket {b}: {}", if b < p { "in rollout" } else { "not yet" })),
+                Some(p) => Ok(format!(
+                    "bucket {b}: {}",
+                    if b < p { "in rollout" } else { "not yet" }
+                )),
                 None => Ok(format!("bucket {b}")),
             }
         }
@@ -688,7 +743,9 @@ fn rollout(doc: &mut Value, o: &Opts, now: i64) -> Result<String, String> {
     if o.has("--expedited") {
         r.insert("expedited".into(), json!(true));
     }
-    let obj = doc.as_object_mut().ok_or("manifest must be a JSON object")?;
+    let obj = doc
+        .as_object_mut()
+        .ok_or("manifest must be a JSON object")?;
     stamp(obj, now, Kind::Updates.default_ttl_days(), true);
     Ok(msg)
 }
@@ -743,7 +800,11 @@ fn verify_cmd(o: &Opts) -> Result<String, Vec<String>> {
         errs.extend(verify_artifacts(&doc, Path::new(dir), &keys));
     }
     if errs.is_empty() {
-        Ok(format!("{} verifies ({} feed)", path.display(), kind.as_str()))
+        Ok(format!(
+            "{} verifies ({} feed)",
+            path.display(),
+            kind.as_str()
+        ))
     } else {
         Err(errs)
     }
@@ -761,7 +822,9 @@ fn write_secret(path: &Path, content: &str) -> Result<(), String> {
         opts.mode(0o600);
     }
     use std::io::Write;
-    let mut f = opts.open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut f = opts
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     f.write_all(content.as_bytes()).map_err(|e| e.to_string())
 }
 
@@ -795,7 +858,10 @@ mod tests {
         let vk = key.verifying_key();
         // genie-catalog accepts our signature and key encoding.
         let ck = genie_catalog::signature::parse_key(&public_hex(&vk)).unwrap();
-        assert_eq!(genie_catalog::signature::verify_with(&[ck], &body, &sig), Ok(()));
+        assert_eq!(
+            genie_catalog::signature::verify_with(&[ck], &body, &sig),
+            Ok(())
+        );
         // genie-skills too (its Feed ignores the extra header fields).
         let skills = serde_json::to_vec(&feed(3, false)).unwrap();
         let ssig = sign_bytes(&key, &skills);
@@ -829,9 +895,11 @@ mod tests {
         assert!(!check_header(&h, Kind::Updates, T0 + 60, None).is_empty());
         // rollback
         let prev = Header { version: 5, ..h };
-        assert!(check_header(&h, Kind::Catalog, T0 + 60, Some(&prev))
-            .iter()
-            .any(|e| e.starts_with("rollback")));
+        assert!(
+            check_header(&h, Kind::Catalog, T0 + 60, Some(&prev))
+                .iter()
+                .any(|e| e.starts_with("rollback"))
+        );
         let older = Header { version: 4, ..h };
         assert!(check_header(&h, Kind::Catalog, T0 + 60, Some(&older)).is_empty());
         assert!(header(&json!({"version": 0, "issued_at": "x"})).is_err());
@@ -857,12 +925,19 @@ mod tests {
             keys_from_keylist(&body, &sig, &[root.verifying_key()], Kind::Catalog, T0 + 1).unwrap();
         assert_eq!(keys, vec![online.verifying_key()]);
         // Wrong feed type: no key.
-        assert!(keys_from_keylist(&body, &sig, &[root.verifying_key()], Kind::Updates, T0 + 1).is_err());
+        assert!(
+            keys_from_keylist(&body, &sig, &[root.verifying_key()], Kind::Updates, T0 + 1).is_err()
+        );
         // Not signed by the pinned root.
-        assert!(keys_from_keylist(&body, &sig, &[sk(3).verifying_key()], Kind::Catalog, T0 + 1).is_err());
+        assert!(
+            keys_from_keylist(&body, &sig, &[sk(3).verifying_key()], Kind::Catalog, T0 + 1)
+                .is_err()
+        );
         // Past not_after.
         let late = timefmt::parse("2027-12-31T00:00:00Z").unwrap();
-        assert!(keys_from_keylist(&body, &sig, &[root.verifying_key()], Kind::Catalog, late).is_err());
+        assert!(
+            keys_from_keylist(&body, &sig, &[root.verifying_key()], Kind::Catalog, late).is_err()
+        );
         // The root key can't be listed.
         let (b2, _) = keylist(&root, &online, "keylist");
         let d: Value = serde_json::from_slice(&b2).unwrap();

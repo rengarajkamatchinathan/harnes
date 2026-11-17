@@ -85,7 +85,11 @@ pub fn run(root: &Path, sub: &str, args: Vec<String>) -> Result<String, Vec<Stri
     let one = |e: String| vec![e];
     let o = Opts::parse(args).map_err(one)?;
     let out_dir = PathBuf::from(o.get("--out").unwrap_or("dist"));
-    let out_dir = if out_dir.is_absolute() { out_dir } else { root.join(out_dir) };
+    let out_dir = if out_dir.is_absolute() {
+        out_dir
+    } else {
+        root.join(out_dir)
+    };
     match sub {
         "sbom" => {
             std::fs::create_dir_all(&out_dir).map_err(|e| one(e.to_string()))?;
@@ -110,7 +114,11 @@ pub fn run(root: &Path, sub: &str, args: Vec<String>) -> Result<String, Vec<Stri
             // Recompute over a directory that holds every target's artifacts (release job).
             let sums = checksums(&out_dir).map_err(one)?;
             std::fs::write(out_dir.join("SHA256SUMS"), &sums).map_err(|e| one(e.to_string()))?;
-            Ok(format!("{} files in {}/SHA256SUMS", sums.lines().count(), out_dir.display()))
+            Ok(format!(
+                "{} files in {}/SHA256SUMS",
+                sums.lines().count(),
+                out_dir.display()
+            ))
         }
         _ => dist(root, &o, &out_dir),
     }
@@ -123,9 +131,7 @@ fn dist(root: &Path, o: &Opts, out_dir: &Path) -> Result<String, Vec<String>> {
         .map(String::from)
         .or_else(|| std::env::var("GENIE_CHANNEL").ok())
         .unwrap_or_else(|| "dev".into());
-    channel
-        .parse::<genie_protocol::Channel>()
-        .map_err(one)?;
+    channel.parse::<genie_protocol::Channel>().map_err(one)?;
     let triple = match o.get("--target") {
         Some(t) => t.to_string(),
         None => host_triple().map_err(one)?,
@@ -168,7 +174,11 @@ fn dist(root: &Path, o: &Opts, out_dir: &Path) -> Result<String, Vec<String>> {
     }
 
     // archive (COPYFILE_DISABLE keeps macOS `._*` metadata files out of the tarball)
-    let archive = if windows { format!("{base}.zip") } else { format!("{base}.tar.gz") };
+    let archive = if windows {
+        format!("{base}.zip")
+    } else {
+        format!("{base}.tar.gz")
+    };
     let tar_args: Vec<&str> = if windows {
         vec!["-a", "-c", "-f", &archive, &base]
     } else {
@@ -191,7 +201,9 @@ fn dist(root: &Path, o: &Opts, out_dir: &Path) -> Result<String, Vec<String>> {
     }
 
     // 4. feed-key signatures (artifact signatures in the update manifest)
-    let key = std::env::var(UPDATES_KEY_ENV).ok().filter(|k| !k.trim().is_empty());
+    let key = std::env::var(UPDATES_KEY_ENV)
+        .ok()
+        .filter(|k| !k.trim().is_empty());
     let mut artifacts = vec![];
     let apath = out_dir.join(&archive);
     let bytes = std::fs::read(&apath).map_err(|e| one(e.to_string()))?;
@@ -205,7 +217,10 @@ fn dist(root: &Path, o: &Opts, out_dir: &Path) -> Result<String, Vec<String>> {
         }
         None => String::new(),
     };
-    let base_url = o.get("--base-url").unwrap_or(DEFAULT_BASE_URL).trim_end_matches('/');
+    let base_url = o
+        .get("--base-url")
+        .unwrap_or(DEFAULT_BASE_URL)
+        .trim_end_matches('/');
     artifacts.push(json!({
         "kind": "cli",
         "format": if windows { "zip" } else { "tar.gz" },
@@ -228,8 +243,14 @@ fn dist(root: &Path, o: &Opts, out_dir: &Path) -> Result<String, Vec<String>> {
     write(&opath, &overlay).map_err(one)?;
     let mut msg = format!(
         "{archive}, SBOM, SHA256SUMS, {} and {} in {}{}",
-        mpath.file_name().map(|s| s.to_string_lossy()).unwrap_or_default(),
-        opath.file_name().map(|s| s.to_string_lossy()).unwrap_or_default(),
+        mpath
+            .file_name()
+            .map(|s| s.to_string_lossy())
+            .unwrap_or_default(),
+        opath
+            .file_name()
+            .map(|s| s.to_string_lossy())
+            .unwrap_or_default(),
         out_dir.display(),
         if key.is_none() {
             format!(" (unsigned: {UPDATES_KEY_ENV} not set)")
@@ -238,7 +259,10 @@ fn dist(root: &Path, o: &Opts, out_dir: &Path) -> Result<String, Vec<String>> {
         }
     );
     if o.has("--desktop") {
-        msg.push_str(&format!("; {}", desktop(root, &channel, &opath, &commit, &build_date)?));
+        msg.push_str(&format!(
+            "; {}",
+            desktop(root, &channel, &opath, &commit, &build_date)?
+        ));
     }
     Ok(msg)
 }
@@ -257,7 +281,17 @@ fn build(
     };
     for t in &triples {
         let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-            .args(["build", "--release", "--locked", "-p", "genie-cli", "--bin", "genie", "--target", t])
+            .args([
+                "build",
+                "--release",
+                "--locked",
+                "-p",
+                "genie-cli",
+                "--bin",
+                "genie",
+                "--target",
+                t,
+            ])
             .env("GENIE_CHANNEL", channel)
             .env("GENIE_COMMIT", commit)
             .env("GENIE_BUILD_DATE", date)
@@ -298,7 +332,9 @@ fn locate_binary(root: &Path, triple: &str, exe: &str) -> Result<PathBuf, String
             return Ok(p);
         }
     }
-    Err(format!("no built `{exe}` for {triple}; run without --no-build"))
+    Err(format!(
+        "no built `{exe}` for {triple}; run without --no-build"
+    ))
 }
 
 pub fn update_manifest(
@@ -357,7 +393,9 @@ fn checksums(dir: &Path) -> Result<String, String> {
 // Channels and the Tauri overlay
 
 pub fn channel_config(root: &Path, channel: &str) -> Result<Value, String> {
-    let p = root.join("release/channels").join(format!("{channel}.json"));
+    let p = root
+        .join("release/channels")
+        .join(format!("{channel}.json"));
     let s = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
     serde_json::from_str(&s).map_err(|e| format!("{}: {e}", p.display()))
 }
@@ -439,19 +477,46 @@ pub fn sign_files(os: &str, files: &[&str]) -> Result<String, Vec<String>> {
                 cmd(
                     Path::new("."),
                     "codesign",
-                    &["--force", "--options", "runtime", "--timestamp", "--sign", &identity, f],
+                    &[
+                        "--force",
+                        "--options",
+                        "runtime",
+                        "--timestamp",
+                        "--sign",
+                        &identity,
+                        f,
+                    ],
                 )?;
             }
             // Notarise: one submission for the CLI archive / app bundle (09 §1).
-            match (env("APPLE_API_KEY_PATH"), env("APPLE_API_KEY_ID"), env("APPLE_API_ISSUER")) {
+            match (
+                env("APPLE_API_KEY_PATH"),
+                env("APPLE_API_KEY_ID"),
+                env("APPLE_API_ISSUER"),
+            ) {
                 (Some(k), Some(id), Some(iss)) => {
                     for f in files {
                         let zip = format!("{f}.notarize.zip");
-                        cmd(Path::new("."), "ditto", &["-c", "-k", "--keepParent", f, &zip])?;
+                        cmd(
+                            Path::new("."),
+                            "ditto",
+                            &["-c", "-k", "--keepParent", f, &zip],
+                        )?;
                         cmd(
                             Path::new("."),
                             "xcrun",
-                            &["notarytool", "submit", &zip, "--key", &k, "--key-id", &id, "--issuer", &iss, "--wait"],
+                            &[
+                                "notarytool",
+                                "submit",
+                                &zip,
+                                "--key",
+                                &k,
+                                "--key-id",
+                                &id,
+                                "--issuer",
+                                &iss,
+                                "--wait",
+                            ],
                         )?;
                         let _ = std::fs::remove_file(&zip);
                     }
@@ -466,15 +531,32 @@ pub fn sign_files(os: &str, files: &[&str]) -> Result<String, Vec<String>> {
         "windows" => {
             // Azure Trusted Signing through signtool + the Trusted Signing dlib; the
             // metadata.json naming account/profile is written by the workflow.
-            let (Some(dlib), Some(meta)) = (env("TRUSTED_SIGNING_DLIB"), env("TRUSTED_SIGNING_METADATA"))
+            let (Some(dlib), Some(meta)) =
+                (env("TRUSTED_SIGNING_DLIB"), env("TRUSTED_SIGNING_METADATA"))
             else {
-                return Ok("Windows signing skipped: TRUSTED_SIGNING_DLIB / _METADATA not set".into());
+                return Ok(
+                    "Windows signing skipped: TRUSTED_SIGNING_DLIB / _METADATA not set".into(),
+                );
             };
             for f in files {
                 cmd(
                     Path::new("."),
                     "signtool",
-                    &["sign", "/v", "/fd", "SHA256", "/tr", "http://timestamp.acs.microsoft.com", "/td", "SHA256", "/dlib", &dlib, "/dmdf", &meta, f],
+                    &[
+                        "sign",
+                        "/v",
+                        "/fd",
+                        "SHA256",
+                        "/tr",
+                        "http://timestamp.acs.microsoft.com",
+                        "/td",
+                        "SHA256",
+                        "/dlib",
+                        &dlib,
+                        "/dmdf",
+                        &meta,
+                        f,
+                    ],
                 )?;
             }
             Ok(format!("Authenticode-signed {} file(s)", files.len()))
@@ -487,7 +569,15 @@ pub fn sign_files(os: &str, files: &[&str]) -> Result<String, Vec<String>> {
                 cmd(
                     Path::new("."),
                     "gpg",
-                    &["--batch", "--yes", "--local-user", &keyid, "--armor", "--detach-sign", f],
+                    &[
+                        "--batch",
+                        "--yes",
+                        "--local-user",
+                        &keyid,
+                        "--armor",
+                        "--detach-sign",
+                        f,
+                    ],
                 )?;
             }
             Ok(format!("GPG-signed {} file(s)", files.len()))
@@ -518,7 +608,10 @@ pub fn graph(root: &Path) -> Result<Vec<Pkg>, String> {
         .output()
         .map_err(|e| format!("cargo metadata: {e}"))?;
     if !out.status.success() {
-        return Err(format!("cargo metadata: {}", String::from_utf8_lossy(&out.stderr)));
+        return Err(format!(
+            "cargo metadata: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
     }
     let meta: Value = serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())?;
     let pkgs: BTreeMap<String, &Value> = meta["packages"]
@@ -544,7 +637,12 @@ pub fn graph(root: &Path) -> Result<Vec<Pkg>, String> {
         if !seen.insert(id.clone()) {
             continue;
         }
-        for d in nodes.get(&id).and_then(|n| n["deps"].as_array()).into_iter().flatten() {
+        for d in nodes
+            .get(&id)
+            .and_then(|n| n["deps"].as_array())
+            .into_iter()
+            .flatten()
+        {
             let shipped = d["dep_kinds"]
                 .as_array()
                 .into_iter()
@@ -629,7 +727,10 @@ pub fn notices(root: &Path, pkgs: &[Pkg]) -> String {
             p.name,
             p.version,
             p.license.as_deref().unwrap_or("see crate"),
-            p.repository.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
+            p.repository
+                .as_ref()
+                .map(|r| format!(" ({r})"))
+                .unwrap_or_default()
         ));
         let dir = p.manifest.parent().unwrap_or(Path::new("."));
         let Ok(rd) = std::fs::read_dir(dir) else {
@@ -642,7 +743,10 @@ pub fn notices(root: &Path, pkgs: &[Pkg]) -> String {
                 f.is_file()
                     && f.file_name().is_some_and(|n| {
                         let n = n.to_string_lossy().to_ascii_uppercase();
-                        n.starts_with("LICENSE") || n.starts_with("LICENCE") || n.starts_with("COPYING") || n.starts_with("NOTICE")
+                        n.starts_with("LICENSE")
+                            || n.starts_with("LICENCE")
+                            || n.starts_with("COPYING")
+                            || n.starts_with("NOTICE")
                     })
             })
             .collect();
@@ -660,7 +764,11 @@ pub fn notices(root: &Path, pkgs: &[Pkg]) -> String {
     }
     s.push_str("\n## Licence texts\n");
     for (t, users) in texts.values() {
-        s.push_str(&format!("\n### Used by: {}\n\n```text\n{}\n```\n", users.join(", "), t.trim()));
+        s.push_str(&format!(
+            "\n### Used by: {}\n\n```text\n{}\n```\n",
+            users.join(", "),
+            t.trim()
+        ));
     }
     if let Ok(extra) = std::fs::read_to_string(root.join("release/notices/extra.md")) {
         s.push('\n');
@@ -709,7 +817,11 @@ mod tests {
                 &ed25519_dalek::SigningKey::from_bytes(&[1; 32]), b"abc") });
         for ch in ["stable", "beta", "dev"] {
             let m = update_manifest(ch, "linux-x86_64", "abc", 1_794_873_600, vec![art.clone()]);
-            assert!(feed::validate_update(&m).is_empty(), "{ch}: {:?}", feed::validate_update(&m));
+            assert!(
+                feed::validate_update(&m).is_empty(),
+                "{ch}: {:?}",
+                feed::validate_update(&m)
+            );
             assert!(feed::header(&m).is_ok());
         }
     }
@@ -729,7 +841,11 @@ mod tests {
             assert!(ids.insert(c["bundle_id"].as_str().unwrap().to_string()));
             let name = c["app_name"].as_str().unwrap();
             assert!(name.starts_with("Genie"));
-            assert!(c["windows"]["upgrade_code"].as_str().is_some_and(|u| u.len() == 36));
+            assert!(
+                c["windows"]["upgrade_code"]
+                    .as_str()
+                    .is_some_and(|u| u.len() == 36)
+            );
             let o = tauri_overlay(&root(), ch.as_str(), DEFAULT_BASE_URL).unwrap();
             assert_eq!(o["identifier"], c["bundle_id"]);
         }

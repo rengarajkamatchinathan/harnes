@@ -1,0 +1,30 @@
+# winget singleton manifest (spec/09 §1). Rendered per release and submitted to
+# microsoft/winget-pkgs by the release owner (`wingetcreate update` or a PR).
+# Id per channel: release/channels/<channel>.json `winget.id`. The CLI-only package is the
+# zip (portable); the desktop package switches InstallerType to msi/msix once it exists.
+PackageIdentifier: @WINGET_ID@
+PackageVersion: @VERSION@
+PackageLocale: en-US
+Publisher: Synergech Technologies Pvt Ltd
+PackageName: @APP_NAME@
+License: Proprietary
+ShortDescription: Multi-provider AI harness (CLI and engine daemon)
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: genie-@VERSION@-@CHANNEL@-windows-x86_64/genie.exe
+        PortableCommandAlias: genie
+    InstallerUrl: @WINDOWS_X86_64_URL@
+    InstallerSha256: @WINDOWS_X86_64_SHA256@
+  - Architecture: arm64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: genie-@VERSION@-@CHANNEL@-windows-aarch64/genie.exe
+        PortableCommandAlias: genie
+    InstallerUrl: @WINDOWS_AARCH64_URL@
+    InstallerSha256: @WINDOWS_AARCH64_SHA256@
+ManifestType: singleton
+ManifestVersion: 1.6.0

@@ -14,12 +14,16 @@ use regex::Regex;
 
 /// 08 §9: `genie-process` (PTY/Job Object FFI), `genie-secrets` (platform APIs), the Tauri
 /// side (`apps/desktop`).
-const UNSAFE_CRATES: &[&str] = &["crates/genie-process/", "crates/genie-secrets/", "apps/desktop/"];
+const UNSAFE_CRATES: &[&str] = &[
+    "crates/genie-process/",
+    "crates/genie-secrets/",
+    "apps/desktop/",
+];
 
 /// Deviations that predate the check, each a small OS FFI shim. Listed in README "Known
 /// gaps"; moving them into `genie-process` (or a `genie-sys` crate) removes them from here.
 const UNSAFE_DEVIATIONS: &[&str] = &[
-    "crates/genie-client/src/win.rs",    // Windows SIDs / pipe security descriptors
+    "crates/genie-client/src/win.rs", // Windows SIDs / pipe security descriptors
     "crates/genie-client/src/ensure.rs", // detached spawn (setsid / creation flags)
     "crates/genie-daemon/src/listener.rs", // peer credential check (getuid, pipe client pid)
     "crates/genie-browser/src/transport.rs", // --remote-debugging-pipe fds 3/4
@@ -29,7 +33,8 @@ const UNSAFE_DEVIATIONS: &[&str] = &[
 const SAFETY_WINDOW: usize = 4;
 
 pub fn check_unsafe(root: &Path) -> Result<String, Vec<String>> {
-    let re = Regex::new(r"\bunsafe\s*(\{|fn\b|impl\b|extern\b)").map_err(|e| vec![e.to_string()])?;
+    let re =
+        Regex::new(r"\bunsafe\s*(\{|fn\b|impl\b|extern\b)").map_err(|e| vec![e.to_string()])?;
     let mut errors = vec![];
     let mut sites = 0;
     for dir in ["crates", "apps", "xtask"] {
@@ -91,8 +96,8 @@ const MIT_MARKERS: &[&str] = &["OpenCode", "MIT"];
 
 pub fn check_headers(root: &Path) -> Result<String, Vec<String>> {
     let list = root.join(DERIVED_LIST);
-    let text = std::fs::read_to_string(&list)
-        .map_err(|e| vec![format!("{}: {e}", list.display())])?;
+    let text =
+        std::fs::read_to_string(&list).map_err(|e| vec![format!("{}: {e}", list.display())])?;
     let mut errors = vec![];
     let mut n = 0;
     for line in text.lines().map(str::trim) {
@@ -128,20 +133,38 @@ pub const SECRET_ALLOW: &str = "release/secret-scan-allow.txt";
 pub const INLINE_ALLOW: &str = "secret-scan:allow";
 
 const RULES: &[(&str, &str)] = &[
-    ("Anthropic API key", r"sk-ant-[a-zA-Z0-9]{2,8}-[A-Za-z0-9_\-]{40,}"),
-    ("OpenAI API key", r"\bsk-(proj-|svcacct-|admin-)?[A-Za-z0-9_\-]{20,}T3BlbkFJ[A-Za-z0-9_\-]{20,}"),
+    (
+        "Anthropic API key",
+        r"sk-ant-[a-zA-Z0-9]{2,8}-[A-Za-z0-9_\-]{40,}",
+    ),
+    (
+        "OpenAI API key",
+        r"\bsk-(proj-|svcacct-|admin-)?[A-Za-z0-9_\-]{20,}T3BlbkFJ[A-Za-z0-9_\-]{20,}",
+    ),
     ("OpenAI project key", r"\bsk-proj-[A-Za-z0-9_\-]{80,}"),
     ("Google API key", r"\bAIza[0-9A-Za-z_\-]{35}\b"),
     ("Google OAuth secret", r"\bGOCSPX-[0-9A-Za-z_\-]{28}\b"),
     ("AWS access key", r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"),
-    ("GitHub token", r"\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{60,}"),
+    (
+        "GitHub token",
+        r"\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{60,}",
+    ),
     ("Slack token", r"\bxox[abposr]-[0-9A-Za-z\-]{10,}"),
     ("Azure storage key", r"AccountKey=[A-Za-z0-9+/]{80,}={0,2}"),
     ("Azure SAS signature", r"[?&]sig=[A-Za-z0-9%]{40,}"),
     // At line start (optionally quoted), so prose like "`-----BEGIN PRIVATE KEY-----` → DER" passes.
-    ("Private key block", r#"^\s*(r?#*["'])?(\\n)?-----BEGIN ((RSA|EC|DSA|OPENSSH|ENCRYPTED) )?PRIVATE KEY-----"#),
-    ("Bearer token in a recording", r"(?i)authorization[\x22']?\s*[:=]\s*[\x22']?bearer\s+[A-Za-z0-9._\-]{40,}"),
-    ("x-api-key header in a recording", r"(?i)x-(goog-)?api-key[\x22']?\s*[:=]\s*[\x22']?[A-Za-z0-9_\-]{30,}"),
+    (
+        "Private key block",
+        r#"^\s*(r?#*["'])?(\\n)?-----BEGIN ((RSA|EC|DSA|OPENSSH|ENCRYPTED) )?PRIVATE KEY-----"#,
+    ),
+    (
+        "Bearer token in a recording",
+        r"(?i)authorization[\x22']?\s*[:=]\s*[\x22']?bearer\s+[A-Za-z0-9._\-]{40,}",
+    ),
+    (
+        "x-api-key header in a recording",
+        r"(?i)x-(goog-)?api-key[\x22']?\s*[:=]\s*[\x22']?[A-Za-z0-9_\-]{30,}",
+    ),
 ];
 
 /// Text extensions we read; binaries (images, archives) are skipped.
@@ -205,7 +228,12 @@ pub fn secret_scan(root: &Path) -> Result<String, Vec<String>> {
 pub fn scan_text(text: &str) -> Vec<&'static str> {
     RULES
         .iter()
-        .filter(|(_, r)| Regex::new(r).is_ok_and(|re| text.lines().any(|l| !l.contains(INLINE_ALLOW) && re.is_match(l))))
+        .filter(|(_, r)| {
+            Regex::new(r).is_ok_and(|re| {
+                text.lines()
+                    .any(|l| !l.contains(INLINE_ALLOW) && re.is_match(l))
+            })
+        })
         .map(|(n, _)| *n)
         .collect()
 }
@@ -232,7 +260,15 @@ fn path_matches(pattern: &str, rel: &str) -> bool {
 /// Tracked + new (not ignored) files under `root`, relative to it.
 fn tracked_files(root: &Path) -> Result<Vec<String>, Vec<String>> {
     let out = Command::new("git")
-        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."])
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            ".",
+        ])
         .current_dir(root)
         .output();
     match out {
@@ -270,9 +306,9 @@ pub fn walk(dir: &Path, exts: &[&str], f: &mut dyn FnMut(&Path)) {
     entries.sort();
     for p in entries {
         if p.is_dir() {
-            if p.file_name().is_some_and(|n| {
-                n == "target" || n == "node_modules" || n == "dist" || n == ".git"
-            }) {
+            if p.file_name()
+                .is_some_and(|n| n == "target" || n == "node_modules" || n == "dist" || n == ".git")
+            {
                 continue;
             }
             walk(&p, exts, f);
@@ -309,6 +345,9 @@ mod tests {
     #[test]
     fn allow_patterns() {
         assert!(path_matches("crates/x/tests/", "crates/x/tests/a.rs"));
-        assert!(!path_matches("crates/x/tests/a.rs", "crates/x/tests/a.rs.bak"));
+        assert!(!path_matches(
+            "crates/x/tests/a.rs",
+            "crates/x/tests/a.rs.bak"
+        ));
     }
 }

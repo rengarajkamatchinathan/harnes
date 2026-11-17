@@ -98,7 +98,10 @@ fn env_name(kind: Kind) -> String {
 
 pub fn run(root: &Path, o: &Opts) -> Result<String, Vec<String>> {
     let one = |e: String| vec![e];
-    let src = o.get("--src").map(PathBuf::from).unwrap_or_else(|| root.join("feeds"));
+    let src = o
+        .get("--src")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("feeds"));
     let out = PathBuf::from(o.require("--out").map_err(one)?);
     let updates = o.get("--updates-dir").map(PathBuf::from);
     let previous = o.get("--previous-dir").map(PathBuf::from);
@@ -178,7 +181,10 @@ pub fn build(
         feed::stamp(obj, now, s.kind.default_ttl_days(), false);
         // A darwin-universal manifest copied to a per-arch path names that arch.
         if s.kind == Kind::Updates
-            && let Some(t) = s.to.rsplit('/').next().and_then(|f| f.strip_suffix(".json"))
+            && let Some(t) =
+                s.to.rsplit('/')
+                    .next()
+                    .and_then(|f| f.strip_suffix(".json"))
         {
             obj.insert("target".into(), json!(t));
         }
@@ -230,7 +236,9 @@ fn copy_keylist(
     let kl = src.join("keys/keylist.json");
     let sig = sig_of(&kl);
     if !kl.is_file() || !sig.is_file() {
-        return Ok("no signed key list in feeds/keys/ (root key ceremony pending), not published".into());
+        return Ok(
+            "no signed key list in feeds/keys/ (root key ceremony pending), not published".into(),
+        );
     }
     let body = std::fs::read(&kl).map_err(|e| e.to_string())?;
     let s = std::fs::read_to_string(&sig).map_err(|e| e.to_string())?;
@@ -296,7 +304,8 @@ mod tests {
         // genie-catalog decodes and verifies the published catalog (header fields ignored).
         let body = std::fs::read(tmp.join("v1/catalog/v1/catalog.json")).unwrap();
         let sig = std::fs::read_to_string(tmp.join("v1/catalog/v1/catalog.json.sig")).unwrap();
-        let vk = genie_catalog::signature::parse_key(&feed::public_hex(&key.verifying_key())).unwrap();
+        let vk =
+            genie_catalog::signature::parse_key(&feed::public_hex(&key.verifying_key())).unwrap();
         genie_catalog::signature::verify_with(&[vk], &body, &sig).unwrap();
         let cat = genie_catalog::decode(
             &String::from_utf8_lossy(&body),
@@ -309,15 +318,26 @@ mod tests {
         // genie-skills accepts the skills directory.
         let body = std::fs::read(tmp.join("v1/directory/skills/v1.json")).unwrap();
         let sig = std::fs::read_to_string(tmp.join("v1/directory/skills/v1.json.sig")).unwrap();
-        let pk = genie_skills::directory::parse_key(&feed::public_hex(&key.verifying_key())).unwrap();
+        let pk =
+            genie_skills::directory::parse_key(&feed::public_hex(&key.verifying_key())).unwrap();
         genie_skills::directory::verify_feed(
             &[pk],
-            &genie_skills::SignedFeed { body, signature_b64: sig },
+            &genie_skills::SignedFeed {
+                body,
+                signature_b64: sig,
+            },
         )
         .unwrap();
 
         // A second build against the first as "previous" bumps every version.
-        build(&srcs, &tmp.join("v2"), Some(&tmp.join("v1")), now + 60, &key_for).unwrap();
+        build(
+            &srcs,
+            &tmp.join("v2"),
+            Some(&tmp.join("v1")),
+            now + 60,
+            &key_for,
+        )
+        .unwrap();
         for s in &srcs {
             let a = feed::header(&feed::read_json(&tmp.join("v1").join(&s.to)).unwrap().1).unwrap();
             let b = feed::header(&feed::read_json(&tmp.join("v2").join(&s.to)).unwrap().1).unwrap();

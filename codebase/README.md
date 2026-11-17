@@ -56,7 +56,11 @@ apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless
                    `genie chat`, importer, `hook-adapter`; also runs `genie daemon`
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
 xtask              `cargo xtask check` = check-deps (01 §2.1 rules 1–3) + check-spawn (rule 4)
-                   + schema drift/compat; `cargo xtask schema [--release]` regenerates
+                   + schema drift/compat; `cargo xtask schema [--release]` regenerates;
+                   `ci`, `nightly`, `dist`, `sbom`, `notices`, `checksums`, `sign`, `feed …` (spec 09)
+feeds/             feed sources: connector/skills directories, notices, key list template (09 §4)
+release/           channels, packaging (install.sh/.ps1, nfpm, brew, winget), notices, runbooks (09)
+../.github/workflows/  pr, main (+ nightly), release, rollout, feeds: thin wrappers over `cargo xtask`
 ```
 
 ## Build and test
@@ -69,7 +73,12 @@ cargo xtask check                          # dependency rules + no untracked tok
 cargo xtask schema                         # regenerate packages/protocol-ts after protocol changes
 cargo xtask schema --release               # move the compatibility baseline (when shipping)
 cargo deny check                           # licences/advisories (needs cargo-deny)
+cargo xtask ci                             # everything PR CI runs (09 §5.1); `--list` for steps
+cargo xtask dist --channel beta            # release archive + SBOM + notices + manifest (09 §1)
 ```
+
+Release, feeds and operations: see [release/README.md](release/README.md) and
+[feeds/README.md](feeds/README.md).
 
 On Windows without Visual Studio Build Tools, use `scripts/cargo-win-gnu.sh <args>`. It reuses the
 gnu-toolchain workaround from `prototypes/37-streaming-chat/.tools` (see that README).
@@ -516,6 +525,28 @@ fail-closed, non-zero exit / bad JSON / `tool.after` context, `turn.end` continu
 approved), unit tests in `agents` (frontmatter, narrowing, precedence, trust) and `hooks`
 (parsing, matching, ranking).
 
+### Spec 09 (distribution and operations) and 08 §9 (CI-shaped security practices)
+
+CI platform: **GitHub Actions** (ticket 41, spec 10 R8). Workflows live at the git root in
+`.github/workflows/` and only call `cargo xtask`; nothing is pushed or published from here.
+
+| § | What | Where |
+|---|---|---|
+| 5.1 every PR | fmt, clippy `-D warnings` + tests on Linux/macOS/Windows (incl. provider conformance layers 1–2, catalog tests), `xtask check` (crate graph, `genie-protocol` has no internal deps, no stray spawns, protocol schema drift + compatibility vs the released baseline), cargo-deny, secret scan of every tracked file incl. fixtures/cassettes, OpenCode MIT header check (path list), feeds dry run; frontend job (typecheck/lint/test/`pnpm audit`) switches on when the pnpm workspace exists | `pr.yml`; `cargo xtask ci [fmt\|clippy\|test\|check\|unsafe\|headers\|secrets\|feeds\|deny\|frontend]` (`xtask/src/ci.rs`, `checks.rs`) |
+| 5.2 main / nightly | unsigned `dev` builds of every target (Windows x64/arm64, macOS universal, Linux x64/arm64, musl CLI); cross-OS daemon + process/shell suites; desktop suites, red-team, fuzz and live smoke gated on their prerequisites | `main.yml`; `cargo xtask nightly <suite>`, `cargo xtask dist --target T` |
+| 5.3 release | build per target → codesign + notarytool / Authenticode (Trusted Signing) / GPG (each skipped with a log line when its secret is absent) → SBOM (CycloneDX 1.5) + third-party notices → Ed25519 artifact signatures → checksums → signed update manifests → beta; stable starts at 10% | `release.yml`; `xtask dist`, `sign`, `sbom`, `notices`, `checksums`, `feed build --only updates` (`dist.rs`) |
+| 1 packages | CLI archives (tar.gz / zip), universal macOS via `lipo`; `genie --version` shows channel, commit, build date (env set by `dist`); install.sh (SHA-256 + Ed25519 via OpenSSL 3) / install.ps1 (SHA-256 + pinned Authenticode publisher); nfpm .deb/.rpm; Homebrew formula + cask; winget; per-channel Tauri config overlay for the desktop bundles | `release/packaging/`, `dist::tauri_overlay` |
+| 2 updates | update manifest schema (`release`, `min_version`, `rollout`, artifacts with SHA-256 + signature) and reference rollout bucketing | `feed::validate_update`, `feed::bucket`, `feeds/README.md` |
+| 3 channels | stable/beta/dev: app name, bundle id, data-dir suffix (checked against `genie_protocol::Channel`), DB name, upgrade codes, package/cask/winget ids | `release/channels/*.json`, test `channel_configs_match_protocol` |
+| 4 signed feeds | detached Ed25519 `.sig` in the format `genie-catalog` / `genie-skills` verify (tests verify our output with their code); header `{version, issued_at, expires_at}`, per-kind max lifetime, expiry, rollback (version must rise), key list (SA-31) with root-signed online keys per feed kind; `feed build` stamps + signs + verifies the whole tree with `version = max(source, live + 1)` | `xtask/src/feed.rs`, `feedbuild.rs`, `feeds/` |
+| 4.1 staged rollout | stable 10 → 50 → 100; SA-33 gate (≥ 48 h / 24 h expedited, ≥ 99.5% crash-free, ≤ 0.2 below previous stable; a failed rate gate pauses); `rollout --next/--pause/--resume` re-stamps and refuses to shrink | `feed::{gate, rollout}`, `rollout.yml` |
+| 6 operations | owners, secrets inventory, runbooks: release, staged rollout, rollback, incident response (feed kill switch, `min_version`), key custody + rotation, feed curation | `release/README.md`, `release/runbooks/` |
+| 08 §9 | `unsafe` only in genie-process / genie-secrets / Tauri side (+ listed deviations), each with a `SAFETY` note; cargo-deny; SBOM | `xtask check-unsafe`, `deny.toml`, `xtask sbom` |
+
+`cargo deny check` (cargo-deny 0.21) passes: internal path deps allowed as wildcards
+(`publish = false`), `native-tls`/`hyper-tls` banned, crate-scoped licence exceptions and
+advisory ignores with reasons (see gaps).
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -531,8 +562,7 @@ approved), unit tests in `agents` (frontmatter, narrowing, precedence, trust) an
   starts in that gap escapes. Closing it needs a raw `CreateProcessW` with `CREATE_SUSPENDED`
   (planned with the `opencode-pty` port, D45).
 - **Windows token file** relies on the per-user `%LOCALAPPDATA%` ACL; no explicit DACL is set.
-- **Not in this milestone:** desktop app, `packages/ui` and the Platform-adapter lint rule (spec 05);
-  CI workflows.
+- **Not in this milestone:** desktop app, `packages/ui` and the Platform-adapter lint rule (spec 05).
 
 ### Projects, artifacts, memory, retrieval gaps and deviations
 
@@ -902,3 +932,54 @@ approved), unit tests in `agents` (frontmatter, narrowing, precedence, trust) an
   folder is inside the repo; slugs come from `worktree_name` or `session` (the title isn't known
   at create). `pr` and `git.commit then: pr` never touch the network (instructions only);
   `then: push` does run `git push`.
+
+### Spec 09 / CI gaps and deviations
+
+- **Human decisions on licences (deny.toml):** `sqlcipher-src` (`blessing` for SQLite,
+  `WTFPL` for libtomcrypt) and `webpki-roots` (`CDLA-Permissive-2.0`, Mozilla CA data) are
+  allowed as crate-scoped exceptions pending legal/release-owner sign-off. Every other crate
+  (keyring, argon2, oauth2, zip, ring, ratatui, crossterm, reqwest…) is within the existing
+  allow list.
+- **Advisories ignored with reasons (review by 2027-02-01):** six `zip` 2.4 advisories
+  (RUSTSEC-2026-0367/0368/0369/0429/0545/0548) don't apply to genie-skills' use (central
+  directory reads, symlinks/encrypted entries rejected, no `extract()`, no AES feature), but
+  genie-skills should move to `zip` ≥ 9.0.5. `chrono` is unmaintained (RUSTSEC-2026-0543),
+  pulled in by `oauth2` 5.
+- **`unsafe` deviations from 08 §9:** `genie-client` (`win.rs`, `ensure.rs`), `genie-daemon`
+  (`listener.rs` peer check) and `genie-browser` (`transport.rs` pipe fds) hold small FFI
+  shims; `xtask check-unsafe` allows exactly those files. Moving them into `genie-process`
+  (or a `genie-sys` crate) closes this. `check-unsafe`, `check-headers` and `secret-scan`
+  run in `xtask ci`, not in `xtask check`.
+- **Needs secrets/accounts (nothing provisioned):** root key ceremony and the five online
+  feed keys; Apple Developer ID + notary API key; Azure Trusted Signing account/profile and
+  an OIDC federated credential; GPG key; Azure Storage + CDN; provider test keys; the GitHub
+  environments `release` and `provider-keys`; self-hosted perf-gate runners (SA-34). Full
+  list in `release/README.md`. `PINNED_KEYS_HEX` in genie-catalog/genie-skills stay empty
+  until the ceremony.
+- **Clients don't enforce feed expiry/rollback yet:** `genie-catalog` and `genie-skills`
+  verify signatures but ignore `issued_at`/`expires_at` and the key list; the rules are
+  implemented and tested in `xtask feed` as the reference. The engine owners should add them.
+- **Updater clients not built:** desktop `tauri-plugin-updater` integration (verify the feed
+  `.sig`, bucketing, restart badge, rollback), `genie update`, the daily TUI notice, daemon
+  drain-and-restart and `updates.*` policy keys live in apps/desktop, apps/cli and the
+  engine (other workstreams). Tauri's updater expects its own minisign signature
+  (`TAURI_SIGNING_PRIVATE_KEY`), separate from the Ed25519 feed key.
+- **Desktop packaging:** MSI/MSIX/ADMX, DMG + inside-out signing of the bundled `genie`,
+  AppImage, desktop .deb/.rpm (WebKitGTK 4.1, NVIDIA DMABUF launcher) are Tauri-bundler
+  work wired only through `dist --desktop` and the overlay; no per-OS desktop job yet.
+  Apt/yum repository publishing (signed metadata) is not scripted.
+- **install.ps1 checks SHA-256 + Authenticode**, not the Ed25519 signature (Windows
+  PowerShell has no Ed25519); install.sh needs OpenSSL ≥ 3 (macOS LibreSSL can't verify
+  Ed25519: Homebrew is the macOS path).
+- **Nightly suites not implemented:** hostile-artifact (D28), renderer perf gate, desktop
+  e2e, browser red-team, fuzzers (cargo-fuzz targets from 08 §9), live provider smoke
+  (conformance layer 4). `xtask nightly <suite>` fails loudly for them; the jobs are gated
+  on `apps/desktop`, `fuzz/`, a red-team fixture dir and `vars.GENIE_LIVE_SMOKE`.
+- **Crash-rate input is manual:** the rollout workflow takes crash-free rates as inputs until
+  the D39 crash service has an API; no scheduled automatic gate.
+- **SBOM** covers Rust crates reachable from `genie-cli` (normal + build deps, all
+  platforms); npm packages join once the pnpm workspace exists. Notices embed licence files
+  found in each crate's source; crates without one get the licence id only.
+- **Not run here:** the workflows themselves (local only), the OS matrix, signing, and
+  `dist` for non-host targets. Locally verified: `cargo xtask ci` (all steps), `dist` on
+  macOS arm64, `feed build`/`verify` round trip, rollback rejection and expiry.

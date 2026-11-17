@@ -1,0 +1,24 @@
+# Homebrew cask for the desktop app (spec/09 §1): universal, notarised DMG. Beta is the
+# `genie@beta` cask (release/channels/beta.json `macos.cask`).
+cask "@CASK@" do
+  version "@VERSION@"
+  sha256 "@DMG_SHA256@"
+
+  url "@DMG_URL@"
+  name "@APP_NAME@"
+  desc "Multi-provider AI harness"
+  homepage "https://genie.invalid"
+
+  auto_updates true # in-app updater (tauri-plugin-updater against the signed feed)
+  depends_on macos: ">= :monterey"
+
+  app "@APP_NAME@.app"
+  # The app bundles the same `genie` binary (D20); expose it on PATH.
+  binary "#{appdir}/@APP_NAME@.app/Contents/MacOS/genie"
+
+  zap trash: [
+    "~/.genie@DATA_DIR_SUFFIX@",
+    "~/Library/Application Support/@BUNDLE_ID@",
+    "~/Library/Caches/@BUNDLE_ID@",
+  ]
+end

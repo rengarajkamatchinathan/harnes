@@ -1,0 +1,30 @@
+# .deb + .rpm for the CLI-only package (spec/09 §1). Build with nfpm (https://nfpm.goreleaser.com):
+#   GENIE_VERSION=0.1.0 GENIE_ARCH=amd64 GENIE_PKG=genie GENIE_BIN=dist/genie-.../genie \
+#     nfpm package -f release/packaging/nfpm.yaml -p deb   (and -p rpm)
+# Packages are GPG-signed here (GPG_KEY_FILE / NFPM_PASSPHRASE) and served from the signed
+# apt/yum repos; the desktop .deb/.rpm come from the Tauri bundler instead (WebKitGTK 4.1).
+# Per channel, GENIE_PKG is release/channels/<channel>.json `linux.package`.
+name: ${GENIE_PKG}
+arch: ${GENIE_ARCH}
+platform: linux
+version: ${GENIE_VERSION}
+section: devel
+priority: optional
+maintainer: Synergech Technologies Pvt Ltd <genie-release@synergech.invalid>
+vendor: Synergech Technologies Pvt Ltd
+description: |
+  Genie CLI and engine daemon (one binary). Multi-provider AI harness.
+license: Proprietary
+contents:
+  - src: ${GENIE_BIN}
+    dst: /usr/bin/genie
+    file_info:
+      mode: 0755
+  - src: ${GENIE_NOTICES}
+    dst: /usr/share/doc/${GENIE_PKG}/THIRD-PARTY-NOTICES.md
+deb:
+  signature:
+    key_file: ${GPG_KEY_FILE}
+rpm:
+  signature:
+    key_file: ${GPG_KEY_FILE}

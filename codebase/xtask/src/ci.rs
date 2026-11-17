@@ -13,15 +13,36 @@ use crate::{checks, deps, schema, spawn};
 
 pub const STEPS: &[(&str, &str)] = &[
     ("fmt", "cargo fmt --all --check"),
-    ("clippy", "cargo clippy --workspace --all-targets --locked -D warnings"),
+    (
+        "clippy",
+        "cargo clippy --workspace --all-targets --locked -D warnings",
+    ),
     ("test", "cargo test --workspace --locked"),
-    ("check", "crate graph rules, no stray tokio::spawn, protocol schema drift + compatibility"),
-    ("unsafe", "unsafe only where 08 §9 allows, each with a SAFETY note"),
+    (
+        "check",
+        "crate graph rules, no stray tokio::spawn, protocol schema drift + compatibility",
+    ),
+    (
+        "unsafe",
+        "unsafe only where 08 §9 allows, each with a SAFETY note",
+    ),
     ("headers", "OpenCode-derived files carry the MIT notice"),
-    ("secrets", "no credentials in tracked files, fixtures or cassettes"),
-    ("feeds", "feed sources build, sign (throwaway keys) and verify"),
-    ("deny", "cargo deny check (licences, advisories, bans, sources)"),
-    ("frontend", "pnpm typecheck/lint/test + pnpm audit (when the pnpm workspace exists)"),
+    (
+        "secrets",
+        "no credentials in tracked files, fixtures or cassettes",
+    ),
+    (
+        "feeds",
+        "feed sources build, sign (throwaway keys) and verify",
+    ),
+    (
+        "deny",
+        "cargo deny check (licences, advisories, bans, sources)",
+    ),
+    (
+        "frontend",
+        "pnpm typecheck/lint/test + pnpm audit (when the pnpm workspace exists)",
+    ),
 ];
 
 pub fn run(root: &Path, args: &[String]) -> Result<String, Vec<String>> {
@@ -73,19 +94,35 @@ fn run_step(root: &Path, step: &str) -> Result<String, Vec<String>> {
         "clippy" => cmd(
             root,
             &cargo(),
-            &["clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"],
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--locked",
+                "--",
+                "-D",
+                "warnings",
+            ],
         ),
         "test" => cmd(root, &cargo(), &["test", "--workspace", "--locked"]),
         "check" => {
             let mut errs = vec![];
             let mut oks = vec![];
-            for r in [deps::check(root), spawn::check(root), schema::run(root, "check")] {
+            for r in [
+                deps::check(root),
+                spawn::check(root),
+                schema::run(root, "check"),
+            ] {
                 match r {
                     Ok(m) => oks.push(m),
                     Err(e) => errs.extend(e),
                 }
             }
-            if errs.is_empty() { Ok(oks.join("; ")) } else { Err(errs) }
+            if errs.is_empty() {
+                Ok(oks.join("; "))
+            } else {
+                Err(errs)
+            }
         }
         "unsafe" => checks::check_unsafe(root),
         "headers" => checks::check_headers(root),
@@ -106,7 +143,9 @@ fn run_step(root: &Path, step: &str) -> Result<String, Vec<String>> {
 
 fn frontend(root: &Path) -> Result<String, Vec<String>> {
     if !root.join("pnpm-workspace.yaml").is_file() {
-        return Ok("frontend: no pnpm workspace yet (apps/desktop, packages/ui pending), skipped".into());
+        return Ok(
+            "frontend: no pnpm workspace yet (apps/desktop, packages/ui pending), skipped".into(),
+        );
     }
     if !tool_exists("pnpm", &["--version"]) {
         return missing("pnpm", "corepack enable");

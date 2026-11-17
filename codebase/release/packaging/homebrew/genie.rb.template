@@ -1,0 +1,33 @@
+# Homebrew formula for the CLI-only install (spec/09 §1). Rendered per release into the
+# Synergech tap (synergech/homebrew-tap) from the stable update manifest; @...@ fields come
+# from `update-stable-darwin-universal.json` / `update-stable-linux-*.json`.
+class Genie < Formula
+  desc "Multi-provider AI harness: CLI and engine daemon"
+  homepage "https://genie.invalid"
+  version "@VERSION@"
+  license :cannot_represent
+
+  on_macos do
+    url "@DARWIN_UNIVERSAL_URL@"
+    sha256 "@DARWIN_UNIVERSAL_SHA256@"
+  end
+  on_linux do
+    on_intel do
+      url "@LINUX_X86_64_URL@"
+      sha256 "@LINUX_X86_64_SHA256@"
+    end
+    on_arm do
+      url "@LINUX_AARCH64_URL@"
+      sha256 "@LINUX_AARCH64_SHA256@"
+    end
+  end
+
+  def install
+    bin.install "genie"
+    doc.install "THIRD-PARTY-NOTICES.md"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/genie --version")
+  end
+end

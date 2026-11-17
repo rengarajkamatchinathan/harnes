@@ -23,6 +23,8 @@ const SWITCHES: &[&str] = &[
     "--force",
     "--list",
     "--next",
+    "--pem",
+    "--ephemeral",
 ];
 
 impl Opts {
@@ -65,7 +67,8 @@ impl Opts {
     }
 
     pub fn require(&self, flag: &str) -> Result<&str, String> {
-        self.get(flag).ok_or_else(|| format!("missing `{flag} <value>`"))
+        self.get(flag)
+            .ok_or_else(|| format!("missing `{flag} <value>`"))
     }
 
     pub fn pos(&self, i: usize, what: &str) -> Result<&str, String> {
@@ -83,8 +86,16 @@ mod tests {
     #[test]
     fn parses() {
         let o = Opts::parse(
-            ["a.json", "--pubkey", "k1", "--pubkey=k2", "--bump", "--now", "x"]
-                .map(String::from),
+            [
+                "a.json",
+                "--pubkey",
+                "k1",
+                "--pubkey=k2",
+                "--bump",
+                "--now",
+                "x",
+            ]
+            .map(String::from),
         )
         .unwrap();
         assert_eq!(o.positional, vec!["a.json"]);

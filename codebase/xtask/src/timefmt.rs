@@ -91,7 +91,10 @@ mod tests {
         assert_eq!(format(0), "1970-01-01T00:00:00Z");
         assert_eq!(parse("2026-11-17T12:34:56Z"), Ok(1_794_918_896));
         assert_eq!(format(1_794_918_896), "2026-11-17T12:34:56Z");
-        assert_eq!(parse("2024-02-29T00:00:00Z").map(format).as_deref(), Ok("2024-02-29T00:00:00Z"));
+        assert_eq!(
+            parse("2024-02-29T00:00:00Z").map(format).as_deref(),
+            Ok("2024-02-29T00:00:00Z")
+        );
         assert!(parse("2026-02-30T00:00:00Z").is_err());
         assert!(parse("2026-11-17 00:00:00Z").is_err());
         assert!(parse("2026-11-17T00:00:00+01:00").is_err());
