@@ -16,6 +16,10 @@ genie-providers.workspace = true
 genie-catalog.workspace = true
 genie-tools.workspace = true
 genie-secrets.workspace = true
+genie-config.workspace = true
+genie-permissions.workspace = true
+genie-mcp.workspace = true
+genie-audit.workspace = true
 
 async-trait.workspace = true
 http.workspace = true

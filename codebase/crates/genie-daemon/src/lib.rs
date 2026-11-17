@@ -14,6 +14,7 @@ mod lease;
 mod listener;
 mod registry;
 mod server;
+mod services;
 mod token;
 
 use std::fs::File;
@@ -23,15 +24,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use genie_client::Endpoint;
+use genie_core::config::ConfigHub;
 use genie_core::journal::StoreJournal;
+use genie_core::runtime::mcp::{McpHub, McpPorts};
 use genie_core::runtime::models::CatalogResolver;
+use genie_core::runtime::permissions::PermissionAuthorizer;
 use genie_core::runtime::{ConversationStore, ModelResolver, NoModels, RuntimeBuilder};
 use genie_core::{Engine, EngineBuilder, TaskScope};
 
 pub use keystore::PlaceholderKeyStore;
 
 pub use lease::LEASE_GRACE;
+pub use registry::Registry;
 pub use server::{DaemonState, ShutdownReason, serve_stream};
+pub use services::Services;
 
 /// Per-subscription outbound queue bound (02 §3.1, SA-10).
 pub const SUB_QUEUE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -126,14 +132,65 @@ pub fn open_store(ep: &Endpoint) -> Result<Arc<genie_store::Store>, genie_store:
     genie_store::Store::open_with_keystore(&opts, &keys).map(Arc::new)
 }
 
+/// The org audit stream (08 §6): local rotating JSONL in `<data dir>/audit/` (or the
+/// policy's `audit.jsonl.dir`), content only with `audit.includeContent`.
+fn build_auditor(
+    ep: &Endpoint,
+    policy: &genie_config::EffectivePolicy,
+) -> Option<Arc<genie_audit::Auditor>> {
+    let dir = policy
+        .get("audit.jsonl.dir")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| ep.data_dir.join("audit"));
+    let sink = match genie_audit::JsonlSink::open(
+        &dir,
+        genie_audit::audit::AUDIT_FILES,
+        genie_audit::audit::AUDIT_FILE_BYTES,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "audit log unavailable");
+            return None;
+        }
+    };
+    Some(Arc::new(
+        genie_audit::Auditor::new(genie_audit::AuditContext {
+            install_id: install_id(ep),
+            user: genie_audit::AuditContext::os_user(),
+            org: policy.org_name().map(String::from),
+            include_content: policy.include_content(),
+        })
+        .with_sink(Arc::new(sink)),
+    ))
+}
+
+/// A random id per install, kept in `<data dir>/install_id`.
+fn install_id(ep: &Endpoint) -> String {
+    let path = ep.data_dir.join("install_id");
+    if let Ok(s) = std::fs::read_to_string(&path)
+        && !s.trim().is_empty()
+    {
+        return s.trim().to_string();
+    }
+    let mut b = [0u8; 16];
+    let id = match getrandom::fill(&mut b) {
+        Ok(()) => hex::encode(b),
+        Err(_) => "unknown".into(),
+    };
+    let _ = std::fs::write(&path, &id);
+    id
+}
+
 /// Wire the engine (01 §3): store journal + the agent runtime (06) with the session
-/// registry as its settings source. Falls back to in-memory state if the store can't
-/// be opened, so the daemon still serves clients and reports the problem.
+/// registry as its settings source, the settings/policy/trust hub, the permission
+/// evaluator, MCP and audit. Falls back to in-memory state if the store can't be
+/// opened, so the daemon still serves clients and reports the problem.
 fn build_engine(
     ep: &Endpoint,
     root: &TaskScope,
     registry: Arc<registry::Registry>,
-) -> (Engine, Option<Arc<dyn ConversationStore>>) {
+) -> (Engine, Option<Arc<dyn ConversationStore>>, Services) {
     let models: Arc<dyn ModelResolver> = match CatalogResolver::live() {
         Ok(r) => Arc::new(r),
         Err(e) => {
@@ -141,20 +198,77 @@ fn build_engine(
             Arc::new(NoModels)
         }
     };
-    let mut rb = RuntimeBuilder::new(registry, models);
-    let mut eb = EngineBuilder::new();
-    match open_store(ep) {
-        Ok(store) => {
-            rb = rb.store(store.clone());
-            eb = eb.journal(Arc::new(StoreJournal::new(store)));
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
+    let mut services = Services::default();
+    let hub = match ConfigHub::new(
+        ep.config_dir.clone(),
+        ep.config_dir.join("trust.json"),
+        home,
+    ) {
+        Ok(h) => Some(Arc::new(h)),
+        Err(e) => {
+            tracing::error!(error = %e, "settings hub unavailable");
+            None
         }
-        Err(e) => tracing::error!(error = %e, "store unavailable; sessions are not persisted"),
+    };
+    if let Some(hub) = &hub {
+        let mut pm = genie_config::PolicyManager::new(vec![Box::new(
+            genie_config::FilePolicySource::system(),
+        )])
+        .with_remote_cache(ep.data_dir.join("policy-remote.json"));
+        pm.refresh_local();
+        pm.load_remote_cache();
+        hub.set_policy(pm.effective());
+        services.audit = build_auditor(ep, &hub.policy());
+        services.policy = Some(std::sync::Mutex::new(pm));
     }
+    let store = match open_store(ep) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::error!(error = %e, "store unavailable; sessions are not persisted");
+            None
+        }
+    };
+    let turns = Arc::new(genie_core::runtime::active::ActiveTurns::new());
+    let mut rb = RuntimeBuilder::new(registry.clone(), models.clone()).turns(turns.clone());
+    let mut eb = EngineBuilder::new();
+    if let Some(store) = &store {
+        rb = rb.store(store.clone());
+        eb = eb.journal(Arc::new(StoreJournal::new(store.clone())));
+    }
+    if let Some(hub) = &hub {
+        let mut authz = PermissionAuthorizer::new(hub.clone(), registry.clone());
+        if let Some(a) = &services.audit {
+            authz = authz.with_audit(a.clone());
+        }
+        rb = rb.authorizer(Arc::new(authz));
+        match McpPorts::default_ports() {
+            Ok(ports) => {
+                let mcp = McpHub::new(
+                    hub.clone(),
+                    root.child("mcp"),
+                    ports,
+                    registry.clone(),
+                    Some(models),
+                    turns,
+                    store.clone(),
+                );
+                rb = rb.tool_provider(mcp.clone());
+                services.mcp = Some(mcp);
+            }
+            Err(e) => tracing::error!(error = %e, "MCP unavailable"),
+        }
+    }
+    services.hub = hub;
     let runner = rb.build();
     let conversation = runner.conversation();
+    services.runtime = Some(runner.runtime().clone());
     (
         eb.turn_runner(Arc::new(runner)).build(root),
         Some(conversation),
+        services,
     )
 }
 
@@ -175,21 +289,24 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
 
     let root = TaskScope::root();
     let registry = Arc::new(registry::Registry::default());
-    let (engine, conversation) = build_engine(&ep, &root, registry.clone());
+    let (engine, conversation, services) = build_engine(&ep, &root, registry.clone());
+    let services = Arc::new(services);
     match engine.recover_on_start() {
         Ok(n) if n > 0 => tracing::info!(interrupted = n, "marked crashed turns interrupted"),
         Ok(_) => {}
         Err(d) => tracing::error!(incident_id = %d.incident_id, "crash recovery failed"),
     }
 
-    let state = Arc::new(DaemonState::with_runtime(
+    let state = Arc::new(DaemonState::with_services(
         cfg.clone(),
         engine.clone(),
         token,
         root.clone(),
         registry,
         conversation,
+        Some(services.clone()),
     ));
+    state.start_background();
     let listener = listener::bind(&ep.address)?;
     tracing::info!(
         address = %ep.address, version = %cfg.engine_version, channel = %ep.channel,
@@ -237,6 +354,9 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     accept_scope.cancel();
     state.broadcast_restarting(reason);
     engine.shutdown();
+    if let Some(m) = &services.mcp {
+        m.shutdown();
+    }
     root.cancel();
     if !root.close_and_wait(SHUTDOWN_GRACE).await {
         tracing::warn!(

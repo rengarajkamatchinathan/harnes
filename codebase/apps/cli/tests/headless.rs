@@ -522,7 +522,7 @@ async fn chat_list_sessions_and_unimplemented_methods() {
             agent: None,
             mode: None,
             incognito: false,
-            worktree: None,
+            ..Default::default()
         })
         .await
         .unwrap();

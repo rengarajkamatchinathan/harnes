@@ -11,11 +11,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use genie_protocol::ask::{Ask, AskKind, Preview, SaveSuggestion};
+use futures::future::BoxFuture;
+use genie_protocol::api::session::ToolSource;
+use genie_protocol::ask::{Ask, AskAnswer, AskKind, Preview, SaveSuggestion};
 use genie_protocol::common::{Mode, SessionKind};
 use genie_providers::executor::LlmClient;
 use genie_providers::route::Route;
-use genie_tools::ToolKind;
+use genie_tools::{Tool, ToolKind};
+
+use crate::error::BlockSource;
 
 use crate::runtime::context::{EnvInfo, InstructionSource, utc_day};
 
@@ -33,6 +37,20 @@ pub struct SessionSettings {
     pub title: Option<String>,
     /// Code sessions: the workspace root.
     pub workspace: Option<PathBuf>,
+    /// Session-only settings (CLI layer: `--allow`/`--deny`, `--settings`, `--add-dir`).
+    pub overlay: Option<SessionOverlay>,
+}
+
+/// The session-only CLI layer (D23 layer 2), already read from `--settings <file>` and
+/// merged with `--allow`/`--deny`/`--add-dir` by the daemon.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionOverlay {
+    pub allow: Vec<String>,
+    pub ask: Vec<String>,
+    pub deny: Vec<String>,
+    pub add_dirs: Vec<String>,
+    /// `permissions.defaultMode` from the settings file, if any.
+    pub default_mode: Option<Mode>,
 }
 
 pub trait SettingsSource: Send + Sync {
@@ -114,22 +132,78 @@ pub struct AuthzRequest {
     pub preview: Option<Preview>,
     pub save_suggestions: Vec<SaveSuggestion>,
     pub mode: Mode,
+    /// Untrusted content seen earlier in this turn (SA-29): "This step follows content
+    /// from <source>". Set from tool results (MCP, web fetch).
+    pub taint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthzDecision {
     Allow,
     Deny {
-        reason: String,
+        /// The rule text (or the engine limit) that blocked the call.
+        rule: String,
+        source: BlockSource,
+        /// User-facing text, e.g. "Blocked by Acme policy (Bash(rm:*))" (08 §5.3).
+        message: String,
     },
     /// Ask the user; the loop sends it with `TurnCtx::ask_with`.
     Ask(Box<Ask>),
 }
 
-/// The permission decision for a tool call (06 §5). Swapped for the `genie-permissions`
-/// evaluator when it lands.
+/// The permission decision for a tool call (06 §5). The daemon uses
+/// [`crate::runtime::permissions::PermissionAuthorizer`] (`genie-permissions` rules).
 pub trait ToolAuthorizer: Send + Sync {
     fn authorize(&self, req: &AuthzRequest) -> AuthzDecision;
+
+    /// The ask for `req` was published with `ask_id`.
+    fn asked(&self, _req: &AuthzRequest, _ask_id: &str, _ask: &Ask) {}
+
+    /// The ask was answered (or cancelled). For an `always`, remember and persist the
+    /// rule and return the ids of other pending asks of this session that the new rule
+    /// now allows; the caller releases them (02 §7 step 6).
+    fn answered(&self, _req: &AuthzRequest, _ask_id: &str, _answer: &AskAnswer) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// The rule an `always` answer saves: the first save suggestion, in the scope the user
+/// picked (default: the suggestion's own scope). `None` when the ask had no suggestion.
+pub fn saved_rule(ask: &Ask, answer: &AskAnswer) -> Option<SaveSuggestion> {
+    let s = ask.save_suggestions.first()?;
+    Some(SaveSuggestion {
+        rule: s.rule.clone(),
+        scope: answer
+            .scope
+            .filter(|s| *s != genie_protocol::common::RuleScope::Unknown)
+            .unwrap_or(s.scope),
+    })
+}
+
+/// A tool contributed at turn start by a dynamic source (MCP servers, extensions).
+#[derive(Clone)]
+pub struct ProvidedTool {
+    pub tool: Arc<dyn Tool>,
+    pub source: ToolSource,
+    /// The MCP server, for `source: mcp`.
+    pub server: Option<String>,
+}
+
+/// Dynamic tools (06 §4, §7): asked for the session's tools at every turn start, so
+/// `list_changed` reloads show up on the next turn.
+pub trait ToolProvider: Send + Sync {
+    fn tools(&self, session_id: &str, settings: &SessionSettings) -> Vec<ProvidedTool>;
+
+    /// Wait for slow sources before the first model call (MCP: 2 s grace).
+    fn ready(&self, _settings: &SessionSettings) -> BoxFuture<'static, ()> {
+        Box::pin(async {})
+    }
+
+    /// Whether a successful result of `tool` taints the turn (SA-29). `None`: not one of
+    /// this provider's tools; `Some(None)`: trusted output; `Some(Some(source))`: tainted.
+    fn taint(&self, _tool: &str) -> Option<Option<String>> {
+        None
+    }
 }
 
 /// Until rules exist: read-only tools run; everything else asks once per call.

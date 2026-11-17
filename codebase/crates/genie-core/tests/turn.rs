@@ -196,6 +196,24 @@ fn harness(
     tools: Vec<Arc<dyn Tool>>,
     window: Option<u64>,
 ) -> H {
+    harness_with(
+        responses,
+        tweak,
+        tools,
+        window,
+        Arc::new(Settings),
+        |b, _| b,
+    )
+}
+
+fn harness_with(
+    responses: Vec<RecordedResponse>,
+    tweak: impl FnOnce(&mut RuntimeConfig),
+    tools: Vec<Arc<dyn Tool>>,
+    window: Option<u64>,
+    settings: Arc<dyn SettingsSource>,
+    extra: impl FnOnce(RuntimeBuilder, &TaskScope) -> RuntimeBuilder,
+) -> H {
     let (resolver, t) = resolver(responses, window);
     let mut cfg = RuntimeConfig {
         titles: false,
@@ -207,12 +225,13 @@ fn harness(
     for tool in tools {
         reg.register(tool);
     }
-    let runner = RuntimeBuilder::new(Arc::new(Settings), resolver)
+    let root = TaskScope::root();
+    let b = RuntimeBuilder::new(settings, resolver)
         .config(cfg)
         .conversation(conv.clone())
-        .chat_tools(reg)
-        .build();
-    let root = TaskScope::root();
+        .chat_tools(reg.clone())
+        .code_tools(reg);
+    let runner = extra(b, &root).build();
     let engine = EngineBuilder::new()
         .turn_runner(Arc::new(runner))
         .build(&root);
@@ -1118,4 +1137,296 @@ async fn store_backed_turn_persists_messages_memory_and_usage() {
         .read(|c| genie_store::search::chat_search(c, "tea", &genie_store::search::Scope::All, 10))
         .unwrap();
     assert!(!hits.is_empty(), "parts are indexed for chat search");
+}
+
+// ------------------------------------------------------------------ permissions + MCP wiring
+
+mod wiring {
+    use super::*;
+    use genie_core::config::ConfigHub;
+    use genie_core::runtime::FixedSettings;
+    use genie_core::runtime::active::ActiveTurns;
+    use genie_core::runtime::mcp::{McpHub, McpPorts};
+    use genie_core::runtime::permissions::PermissionAuthorizer;
+    use genie_mcp::transport::{ConnectEnv, Connector, TransportPair, stdio};
+    use genie_protocol::ask::{AutoResolver, ResolvedBy};
+    use genie_protocol::common::{Mode, RuleScope, SessionKind};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    fn hub(dir: &std::path::Path) -> Arc<ConfigHub> {
+        Arc::new(ConfigHub::new(dir.join(".genie"), dir.join(".genie/trust.json"), None).unwrap())
+    }
+
+    fn policy(values: Value) -> genie_config::EffectivePolicy {
+        let v: genie_config::policy::PolicyValues = serde_json::from_value(values).unwrap();
+        genie_config::policy::merge(&[(genie_config::PolicySourceKind::File, &v)])
+    }
+
+    fn code_settings(ws: &std::path::Path) -> Arc<dyn SettingsSource> {
+        Arc::new(FixedSettings(SessionSettings {
+            kind: SessionKind::Code,
+            model: "anthropic/claude-test".into(),
+            mode: Mode::Default,
+            workspace: Some(ws.to_path_buf()),
+            ..SessionSettings::default()
+        }))
+    }
+
+    fn ended(ev: &[SessionEvent]) -> Vec<&genie_protocol::event::ToolEnded> {
+        ev.iter()
+            .filter_map(|e| match e {
+                SessionEvent::ToolEnded(t) => Some(t),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn policy_deny_blocks_the_call_as_policy_blocked() {
+        let d = tempfile::tempdir().unwrap();
+        let h = hub(d.path());
+        h.set_policy(policy(
+            json!({"org.name": "Acme", "permissions.deny": ["note"]}),
+        ));
+        let settings = code_settings(d.path());
+        let mut t = harness_with(
+            vec![
+                reply(
+                    &[tool_block(0, "toolu_a", "note", json!({"text": "x"}))],
+                    "tool_use",
+                ),
+                text(&["ok"]),
+            ],
+            |_| {},
+            vec![Arc::new(Note)],
+            None,
+            settings.clone(),
+            |b, _| {
+                b.authorizer(Arc::new(PermissionAuthorizer::new(
+                    h.clone(),
+                    settings.clone(),
+                )))
+            },
+        );
+        t.s.prompt("save", Delivery::Steer).unwrap();
+        let ev = t.settle().await;
+        let e = ended(&ev);
+        assert_eq!(e[0].outcome, ToolOutcome::Blocked);
+        let err = e[0].error.as_ref().unwrap();
+        assert_eq!(err.code, "policy_blocked");
+        assert_eq!(err.message, "Blocked by Acme policy (note)");
+        let bodies = t.bodies();
+        let res = &bodies[1]["messages"].as_array().unwrap()[2]["content"][0];
+        assert_eq!(res["content"], "Blocked by Acme policy (note).");
+    }
+
+    #[tokio::test]
+    async fn always_saves_the_rule_and_releases_other_pending_asks() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = d.path().join("proj");
+        std::fs::create_dir_all(&ws).unwrap();
+        let h = hub(d.path());
+        h.trust_set(
+            &ws.display().to_string(),
+            genie_protocol::api::config::TrustDecision::Trust,
+        )
+        .unwrap();
+        let settings = code_settings(&ws);
+        let mut t = harness_with(
+            vec![
+                reply(
+                    &[
+                        tool_block(0, "toolu_a", "note", json!({"text": "x"})),
+                        tool_block(1, "toolu_b", "note", json!({"text": "y"})),
+                    ],
+                    "tool_use",
+                ),
+                text(&["ok"]),
+            ],
+            |_| {},
+            vec![Arc::new(Note)],
+            None,
+            settings.clone(),
+            |b, _| {
+                b.authorizer(Arc::new(PermissionAuthorizer::new(
+                    h.clone(),
+                    settings.clone(),
+                )))
+            },
+        );
+        let _attached = t.s.attach();
+        t.s.prompt("save", Delivery::Steer).unwrap();
+        let mut asks = vec![];
+        while asks.len() < 2 {
+            let ev = t
+                .until(|e| matches!(e, SessionEvent::PermissionAsked(_)))
+                .await;
+            let SessionEvent::PermissionAsked(a) = ev.last().unwrap() else {
+                unreachable!()
+            };
+            asks.push(a.ask.clone());
+        }
+        assert_eq!(asks[0].save_suggestions[0].rule, "note");
+        let mut ans = AskAnswer::decision(Decision::Always);
+        ans.scope = Some(RuleScope::Local);
+        t.s.answer_ask(&asks[0].id, serde_json::to_value(ans).unwrap())
+            .unwrap();
+        let ev = t.settle().await;
+        let resolved: Vec<_> = ev
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::PermissionResolved(r) => Some(r.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(resolved[0].saved_rule.as_deref(), Some("note"));
+        assert_eq!(resolved[1].ask_id, asks[1].id);
+        assert_eq!(resolved[1].by, ResolvedBy::Auto(AutoResolver::Rule));
+        assert!(ended(&ev).iter().all(|e| e.outcome == ToolOutcome::Ok));
+        let local = std::fs::read_to_string(ws.join(".genie/settings.local.json")).unwrap();
+        assert!(local.contains("\"note\""), "{local}");
+    }
+
+    /// A minimal MCP server over an in-memory pipe: one `echo` tool.
+    struct FakeMcp;
+
+    #[async_trait]
+    impl Connector for FakeMcp {
+        async fn connect(
+            &self,
+            _cfg: &genie_mcp::ServerConfig,
+            env: &ConnectEnv,
+        ) -> Result<TransportPair, genie_mcp::McpError> {
+            let (client, server) = tokio::io::duplex(1 << 16);
+            let (sr, mut sw) = tokio::io::split(server);
+            env.tasks.spawn(async move {
+                let mut lines = BufReader::new(sr).lines();
+                while let Ok(Some(l)) = lines.next_line().await {
+                    let v: Value = serde_json::from_str(&l).unwrap();
+                    let Some(id) = v.get("id").cloned() else { continue };
+                    let result = match v["method"].as_str().unwrap_or("") {
+                        "initialize" => json!({"protocolVersion": "2025-06-18",
+                            "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "1"}}),
+                        "tools/list" => json!({"tools": [{"name": "echo", "description": "Echo text",
+                            "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}}]}),
+                        "tools/call" => json!({"content": [{"type": "text",
+                            "text": format!("echo: {}", v["params"]["arguments"]["text"].as_str().unwrap_or(""))}]}),
+                        _ => json!({}),
+                    };
+                    let msg = json!({"jsonrpc": "2.0", "id": id, "result": result});
+                    if sw.write_all(format!("{msg}\n").as_bytes()).await.is_err() {
+                        break;
+                    }
+                }
+            });
+            let (cr, cw) = tokio::io::split(client);
+            Ok(stdio::from_streams(
+                cr,
+                cw,
+                &env.tasks,
+                env.logs.clone(),
+                env.parent.child_token(),
+                None,
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_run_through_the_gate_and_taint_the_turn() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".genie")).unwrap();
+        std::fs::write(
+            d.path().join(".genie/settings.json"),
+            r#"{"mcpServers": {"fake": {"command": "fake"}}, "permissions": {"allow": ["mcp__fake__echo"]}}"#,
+        )
+        .unwrap();
+        let h = hub(d.path());
+        let settings: Arc<dyn SettingsSource> = Arc::new(Settings);
+        let turns = Arc::new(ActiveTurns::new());
+        let mcp_slot: Arc<std::sync::Mutex<Option<Arc<McpHub>>>> = Arc::default();
+        let slot = mcp_slot.clone();
+        let mut t = harness_with(
+            vec![
+                reply(
+                    &[tool_block(
+                        0,
+                        "toolu_a",
+                        "mcp__fake__echo",
+                        json!({"text": "hi"}),
+                    )],
+                    "tool_use",
+                ),
+                reply(
+                    &[tool_block(
+                        0,
+                        "toolu_b",
+                        "mcp__fake__echo",
+                        json!({"text": "again"}),
+                    )],
+                    "tool_use",
+                ),
+                text(&["done"]),
+            ],
+            |_| {},
+            vec![],
+            None,
+            settings.clone(),
+            |b, root| {
+                let mcp = McpHub::new(
+                    h.clone(),
+                    root.child("mcp"),
+                    McpPorts {
+                        connector: Arc::new(FakeMcp),
+                        auth: Arc::new(genie_mcp::auth::NoAuth),
+                        secrets: Arc::new(genie_mcp::config::LiteralSecrets),
+                    },
+                    settings.clone(),
+                    None,
+                    turns.clone(),
+                    None,
+                );
+                *slot.lock().unwrap() = Some(mcp.clone());
+                b.turns(turns.clone())
+                    .tool_provider(mcp)
+                    .authorizer(Arc::new(PermissionAuthorizer::new(
+                        h.clone(),
+                        settings.clone(),
+                    )))
+            },
+        );
+        let mcp = mcp_slot.lock().unwrap().clone().unwrap();
+        let _attached = t.s.attach();
+        t.s.prompt("echo please", Delivery::Steer).unwrap();
+        // The first call is allowed by the user rule; the second follows untrusted MCP
+        // output, so the allow is downgraded to an ask (SA-29).
+        let ev = t
+            .until(|e| matches!(e, SessionEvent::PermissionAsked(_)))
+            .await;
+        assert_eq!(ended(&ev)[0].outcome, ToolOutcome::Ok);
+        let SessionEvent::PermissionAsked(a) = ev.last().unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(a.ask.tool.as_deref(), Some("mcp__fake__echo"));
+        t.s.answer_ask(
+            &a.ask.id,
+            serde_json::to_value(AskAnswer::decision(Decision::Once)).unwrap(),
+        )
+        .unwrap();
+        let ev = t.settle().await;
+        assert_eq!(ended(&ev)[0].outcome, ToolOutcome::Ok);
+        let bodies = t.bodies();
+        let tools: Vec<&str> = bodies[0]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|x| x["name"].as_str())
+            .collect();
+        assert!(tools.contains(&"mcp__fake__echo"), "{tools:?}");
+        let res = &bodies[1]["messages"].as_array().unwrap()[2]["content"][0];
+        assert_eq!(res["content"], "echo: hi");
+        let list = mcp.list(None);
+        assert_eq!(list[0].name, "fake");
+        assert_eq!(list[0].status, genie_mcp::McpStatus::Connected);
+        assert_eq!(list[0].tools, 1);
+    }
 }

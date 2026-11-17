@@ -9,18 +9,25 @@
 //! | [`SettingsSource`] | — (required) | daemon session registry |
 //! | [`ModelResolver`] | — (required) | [`models::CatalogResolver`] |
 //! | [`ConversationStore`] | [`MemoryConversation`] | [`StoreConversation`] |
-//! | [`ToolAuthorizer`] | [`DefaultAuthorizer`] | `genie-permissions` (06 §5, spec 08) |
+//! | [`ToolAuthorizer`] | [`DefaultAuthorizer`] | [`permissions::PermissionAuthorizer`] (06 §5) |
 //! | [`InstructionProvider`] | [`BasicInstructions`] | + config, memory, skills, MCP |
 //! | spill / memory | in-memory spill, none | [`bridge::BlobSpill`], [`bridge::StoreMemory`] |
+//! | [`ToolProvider`]s | none | [`mcp::McpTools`] (06 §7) |
 //!
-//! Extension points left typed for other specs: code tools, shell, MCP (`mcp__*`, deferred
-//! behind `tool_search`), web, browser, skills, subagents (`finish = stop` with children
-//! running), hooks (`turn.end` continue), checkpoints, native compaction.
+//! Extra built-in tools (shell, web, browser …) are registered with
+//! [`RuntimeBuilder::tools`] / [`RuntimeBuilder::chat_tool`] / [`RuntimeBuilder::code_tool`].
+//!
+//! Extension points left typed for other specs: code tools, shell, `tool_search` deferral,
+//! web, browser, skills, subagents (`finish = stop` with children running), hooks
+//! (`turn.end` continue), checkpoints, native compaction.
 
+pub mod active;
 pub mod bridge;
 pub mod context;
 pub mod conversation;
+pub mod mcp;
 pub mod models;
+pub mod permissions;
 pub mod ports;
 pub mod prompts;
 mod turn;
@@ -29,14 +36,19 @@ pub mod wire;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use genie_tools::{MemoryPort, MemorySpill, OutputLimits, SpillStore, ToolRegistry};
+use genie_protocol::api::session::{ToolInfo, ToolSource};
+use genie_tools::{
+    MemoryPort, MemorySpill, OutputLimits, SpillStore, Tool, ToolKind, ToolRegistry,
+};
 
 pub use conversation::{ConversationStore, MemoryConversation, StoreConversation};
 pub use ports::{
     AllowAllAuthorizer, AuthzDecision, AuthzRequest, BasicInstructions, DefaultAuthorizer,
-    FixedSettings, InstructionProvider, ModelResolver, NoModels, ResolveError, ResolvedModel,
-    SessionSettings, SettingsSource, ToolAuthorizer,
+    FixedSettings, InstructionProvider, ModelResolver, NoModels, ProvidedTool, ResolveError,
+    ResolvedModel, SessionOverlay, SessionSettings, SettingsSource, ToolAuthorizer, ToolProvider,
 };
+
+use crate::runtime::active::ActiveTurns;
 
 use crate::error::TurnError;
 use crate::session::{TurnCtx, TurnRunner};
@@ -89,6 +101,67 @@ pub struct AgentRuntime {
     pub code_tools: ToolRegistry,
     pub spill: Option<Arc<dyn SpillStore>>,
     pub memory: Option<Arc<dyn MemoryPort>>,
+    /// Dynamic tools asked for at each turn start (MCP).
+    pub tool_providers: Vec<Arc<dyn ToolProvider>>,
+    /// The running turn per session (MCP elicitation/sampling → asks).
+    pub turns: Arc<ActiveTurns>,
+}
+
+impl AgentRuntime {
+    /// The session's registry: the static tools of its kind plus provider tools.
+    pub fn registry_for(&self, session_id: &str, settings: &SessionSettings) -> ToolRegistry {
+        let mut r = match settings.kind {
+            genie_protocol::common::SessionKind::Code => self.code_tools.clone(),
+            _ => self.chat_tools.clone(),
+        };
+        for p in &self.tool_providers {
+            for t in p.tools(session_id, settings) {
+                r.register(t.tool);
+            }
+        }
+        r
+    }
+
+    /// The taint a successful result of `tool` adds to the turn (SA-29): the provider's
+    /// answer for its own tools, else every `External` tool (web fetch …) taints.
+    pub fn taint_source(&self, tool: &str, kind: ToolKind) -> Option<String> {
+        for p in &self.tool_providers {
+            if let Some(t) = p.taint(tool) {
+                return t;
+            }
+        }
+        (kind == ToolKind::External).then(|| format!("the `{tool}` tool"))
+    }
+
+    /// `tools.list`: what the session's model sees, with each tool's source.
+    pub fn tool_list(&self, session_id: &str) -> Option<Vec<ToolInfo>> {
+        let settings = self.settings.settings(session_id)?;
+        let env = turn::tool_env(self, session_id, &settings);
+        let mut provided: std::collections::HashMap<String, (ToolSource, Option<String>)> =
+            std::collections::HashMap::new();
+        for p in &self.tool_providers {
+            for t in p.tools(session_id, &settings) {
+                provided.insert(t.tool.name().to_string(), (t.source, t.server.clone()));
+            }
+        }
+        let reg = self.registry_for(session_id, &settings);
+        Some(
+            reg.specs(&env)
+                .into_iter()
+                .map(|s| {
+                    let (source, server) = provided
+                        .remove(&s.name)
+                        .unwrap_or((ToolSource::Builtin, None));
+                    ToolInfo {
+                        name: s.name,
+                        description: s.description,
+                        source,
+                        server,
+                    }
+                })
+                .collect(),
+        )
+    }
 }
 
 /// Builds an [`AgentRuntime`].
@@ -111,6 +184,8 @@ impl RuntimeBuilder {
                 chat_tools: chat,
                 spill: Some(Arc::new(MemorySpill::new())),
                 memory: None,
+                tool_providers: Vec::new(),
+                turns: Arc::new(ActiveTurns::new()),
             },
         }
     }
@@ -142,6 +217,38 @@ impl RuntimeBuilder {
 
     pub fn code_tools(mut self, r: ToolRegistry) -> Self {
         self.rt.code_tools = r;
+        self
+    }
+
+    /// Register extra built-in tools for both Chat and Code (each tool's
+    /// `availability` decides where it shows).
+    pub fn tools(mut self, tools: impl IntoIterator<Item = Arc<dyn Tool>>) -> Self {
+        for t in tools {
+            self.rt.chat_tools.register(t.clone());
+            self.rt.code_tools.register(t);
+        }
+        self
+    }
+
+    pub fn chat_tool(mut self, t: Arc<dyn Tool>) -> Self {
+        self.rt.chat_tools.register(t);
+        self
+    }
+
+    pub fn code_tool(mut self, t: Arc<dyn Tool>) -> Self {
+        self.rt.code_tools.register(t);
+        self
+    }
+
+    /// Add a dynamic tool source (MCP).
+    pub fn tool_provider(mut self, p: Arc<dyn ToolProvider>) -> Self {
+        self.rt.tool_providers.push(p);
+        self
+    }
+
+    /// Share the active-turn index (the MCP handler resolves asks through it).
+    pub fn turns(mut self, t: Arc<ActiveTurns>) -> Self {
+        self.rt.turns = t;
         self
     }
 

@@ -6,8 +6,8 @@ use anyhow::{Result, anyhow};
 use genie_client::{ClientError, Connection};
 use genie_protocol::ErrorKind;
 use genie_protocol::api::session::{
-    CreateParams, GetParams, ListParams, SessionIdParams, SubscribeParams, SubscribeResult,
-    UpdateParams, WorktreeChoice,
+    CreateParams, GetParams, ListParams, SessionIdParams, SessionSettingsOverlay, SubscribeParams,
+    SubscribeResult, UpdateParams, WorktreeChoice,
 };
 use genie_protocol::common::{Mode, SessionKind};
 use genie_protocol::message::SessionInfo;
@@ -34,8 +34,10 @@ pub struct Spec {
     pub effort: Option<String>,
     pub agent: Option<String>,
     pub mode: Option<Mode>,
-    /// `--worktree [name]`; the name is not on the wire yet.
+    /// `--worktree [name]` (`worktree_name` on the wire).
     pub worktree: Option<String>,
+    /// Session-only settings: `--allow`/`--deny`, `--settings`, `--add-dir`.
+    pub overlay: Option<SessionSettingsOverlay>,
 }
 
 impl Spec {
@@ -47,6 +49,7 @@ impl Spec {
             agent: None,
             mode: None,
             worktree: None,
+            overlay: None,
         }
     }
 }
@@ -93,6 +96,8 @@ pub async fn open(conn: &Connection, target: &Target, spec: &Spec, cwd: &Path) -
                     mode: spec.mode,
                     incognito: false,
                     worktree: spec.worktree.as_ref().map(|_| WorktreeChoice::New),
+                    worktree_name: spec.worktree.clone().filter(|w| !w.is_empty()),
+                    settings: spec.overlay.clone(),
                 })
                 .await
                 .map_err(|e| anyhow!("creating a session: {}", errors::describe(&e)))?;

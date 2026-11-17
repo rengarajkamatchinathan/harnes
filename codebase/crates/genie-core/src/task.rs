@@ -98,6 +98,12 @@ impl TaskScope {
             .is_ok()
     }
 
+    /// The shared tracker, for subsystems below core that spawn on a `TaskTracker`
+    /// (e.g. `genie-mcp`'s `Runtime`).
+    pub fn tracker(&self) -> TaskTracker {
+        self.tracker.clone()
+    }
+
     pub fn task_count(&self) -> usize {
         self.tracker.len()
     }

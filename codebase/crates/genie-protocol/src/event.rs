@@ -304,6 +304,10 @@ pub struct ToolEnded {
     pub result_part_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spill_ref: Option<String>,
+    /// Why a `blocked` call was blocked: `code` is `policy_blocked` for managed policy
+    /// (with "Blocked by <org> policy (rule)"), `GENIE-TOOL-BLOCKED` for a deny rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

@@ -424,22 +424,7 @@ impl SessionHandle {
         decision: Option<Decision>,
         by: Option<ResolvedBy>,
     ) -> Result<(), CoreError> {
-        let pending = self.sh.lock().asks.remove(ask_id);
-        let Some(p) = pending else {
-            return Err(CoreError::NotFound(format!("ask {ask_id}")));
-        };
-        if p.tx.send(answer).is_err() {
-            return Err(CoreError::Conflict(format!(
-                "ask {ask_id} is no longer waiting"
-            )));
-        }
-        self.sh.publish(CoreEvent::AskResolved {
-            ask_id: ask_id.to_string(),
-            outcome: AskOutcome::Answered,
-            decision,
-            by,
-        })?;
-        Ok(())
+        resolve_ask(&self.sh, ask_id, answer, decision, by)
     }
 
     /// Asks waiting for an answer, oldest first (`permission.pending`).
@@ -722,7 +707,45 @@ fn cancelled_ask(ask_id: AskId) -> CoreEvent {
         outcome: AskOutcome::Cancelled,
         decision: Some(Decision::Cancel),
         by: Some(ResolvedBy::Auto(AutoResolver::System)),
+        saved_rule: None,
     }
+}
+
+/// Resolve a pending ask: hand the answer to the waiting turn, then publish
+/// `permission.resolved` (with the saved rule for an `always`, 06 §5.4).
+fn resolve_ask(
+    sh: &Shared,
+    ask_id: &str,
+    answer: Value,
+    decision: Option<Decision>,
+    by: Option<ResolvedBy>,
+) -> Result<(), CoreError> {
+    let pending = sh.lock().asks.remove(ask_id);
+    let Some(p) = pending else {
+        return Err(CoreError::NotFound(format!("ask {ask_id}")));
+    };
+    let saved_rule = match (
+        decision,
+        serde_json::from_value::<AskAnswer>(answer.clone()),
+    ) {
+        (Some(Decision::Always), Ok(a)) => {
+            crate::runtime::ports::saved_rule(&p.ask, &a).map(|s| s.rule)
+        }
+        _ => None,
+    };
+    if p.tx.send(answer).is_err() {
+        return Err(CoreError::Conflict(format!(
+            "ask {ask_id} is no longer waiting"
+        )));
+    }
+    sh.publish(CoreEvent::AskResolved {
+        ask_id: ask_id.to_string(),
+        outcome: AskOutcome::Answered,
+        decision,
+        by,
+        saved_rule,
+    })?;
+    Ok(())
 }
 
 /// What a [`TurnRunner`] gets for one turn.
@@ -829,6 +852,20 @@ impl TurnCtx {
     /// raised; the ask can be answered later from any client.
     pub async fn ask(&self, kind: AskKind) -> Result<Value, TurnError> {
         self.ask_with(Ask::new("", "", kind, "")).await
+    }
+
+    /// Resolve another pending ask of this session (an `always` released it, 02 §7
+    /// step 6). `by` is usually `auto: rule`.
+    pub fn resolve_ask(
+        &self,
+        ask_id: &str,
+        answer: AskAnswer,
+        by: ResolvedBy,
+    ) -> Result<(), CoreError> {
+        let decision = answer.decision;
+        let v = serde_json::to_value(&answer)
+            .map_err(|e| CoreError::Internal(crate::error::Defect::new(e.to_string())))?;
+        resolve_ask(&self.sh, ask_id, v, Some(decision), Some(by))
     }
 
     /// Ask with a full [`Ask`] (tool, preview, form …). `id`, `session_id`, `turn_id`

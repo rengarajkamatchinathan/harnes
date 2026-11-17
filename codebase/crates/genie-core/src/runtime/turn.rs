@@ -14,7 +14,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 use genie_protocol::common::{Cost, SessionKind};
@@ -95,10 +95,14 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
     let path = rt.conversation.path(&sid)?;
     let first_reply = !path.iter().any(|m| m.message.role == Role::Assistant);
     let env = Arc::new(tool_env(&rt, &sid, &settings));
-    let registry = match settings.kind {
-        SessionKind::Code => rt.code_tools.clone(),
-        _ => rt.chat_tools.clone(),
-    };
+    // Dynamic tools (MCP) join the static registry at turn start (06 §7: 2 s grace for
+    // servers still starting before the first model call).
+    for p in &rt.tool_providers {
+        p.ready(&settings).await;
+    }
+    let registry = rt.registry_for(&sid, &settings);
+    let turns = rt.turns.clone();
+    let _active = turns.enter(&turn);
     let mut r = Run {
         leaf: path.last().map(|m| m.id().to_string()),
         rt,
@@ -109,6 +113,7 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
         meta,
         env,
         registry,
+        taint: Arc::new(Mutex::new(None)),
     };
     let res = r.go().await;
     if let Err(e) = r.save_meta() {
@@ -121,7 +126,7 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
     Ok(())
 }
 
-fn tool_env(rt: &AgentRuntime, sid: &str, s: &SessionSettings) -> ToolEnv {
+pub(crate) fn tool_env(rt: &AgentRuntime, sid: &str, s: &SessionSettings) -> ToolEnv {
     ToolEnv {
         session_id: sid.to_string(),
         kind: s.kind,
@@ -175,6 +180,8 @@ struct Run {
     env: Arc<ToolEnv>,
     registry: ToolRegistry,
     leaf: Option<String>,
+    /// Untrusted content seen in this turn (SA-29): the source label.
+    taint: Arc<Mutex<Option<String>>>,
 }
 
 impl Run {
@@ -565,7 +572,7 @@ impl Run {
         }
         let name = tool.name().to_string();
         let kind = tool.kind();
-        let started = Started::new(self.turn.clone(), call.id.0.clone(), name.clone());
+        let started = Started::new(self.turn.clone(), call.id.0.clone(), name.clone(), kind);
         if !tool.authorizes() {
             started.mark(None);
         }
@@ -583,6 +590,7 @@ impl Run {
                 kind,
                 mode: self.settings.mode,
                 started: started.clone(),
+                taint: self.taint.clone(),
             }),
             events: Arc::new(TurnEvents(self.turn.clone())),
         };
@@ -907,8 +915,17 @@ impl Run {
             {
                 s.mark(None);
             }
+            let mut error_info = None;
             let (content, is_error, oc, spill_ref) = match outcome {
                 Ok(o) => {
+                    if let Some(s) = &c.started
+                        && let Some(src) = self.rt.taint_source(&s.name, s.kind)
+                    {
+                        let mut t = self.taint.lock().unwrap_or_else(|e| e.into_inner());
+                        if t.is_none() {
+                            *t = Some(src);
+                        }
+                    }
                     let lim = apply_limits(
                         o.to_text(),
                         self.env.output_limits,
@@ -924,7 +941,26 @@ impl Run {
                         _ if was_cancelled => ToolOutcome::Cancelled,
                         _ => ToolOutcome::Error,
                     };
-                    (e.model_text(), true, oc, None)
+                    let mut text = e.model_text();
+                    if let ToolError::Blocked { origin, .. } = &e {
+                        let info =
+                            c.started
+                                .as_ref()
+                                .and_then(|s| s.blocked())
+                                .unwrap_or_else(|| genie_protocol::event::ErrorInfo {
+                                    code: match origin {
+                                        crate::error::BlockSource::Policy => {
+                                            "policy_blocked".into()
+                                        }
+                                        crate::error::BlockSource::Rule => e.code().into(),
+                                    },
+                                    message: text.clone(),
+                                    link: None,
+                                });
+                        text = format!("{}.", info.message.trim_end_matches('.'));
+                        error_info = Some(info);
+                    }
+                    (text, true, oc, None)
                 }
             };
             let pid = part_id(&tool_msg, i);
@@ -949,6 +985,7 @@ impl Run {
                 outcome: oc,
                 result_part_id: pid,
                 spill_ref,
+                error: error_info,
             });
             results.push(p);
         }

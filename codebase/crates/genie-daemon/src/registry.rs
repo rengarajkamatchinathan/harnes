@@ -4,19 +4,30 @@
 //! the wire `SessionInfo` so the swap is local to this module.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use genie_core::bus::now_ms;
-use genie_core::runtime::{SessionSettings, SettingsSource};
+use genie_core::runtime::{SessionOverlay, SessionSettings, SettingsSource};
 use genie_protocol::api::session::{CreateParams, ListParams, UpdateParams};
 use genie_protocol::common::Mode;
 use genie_protocol::message::{SessionInfo, SessionSummary};
 use genie_protocol::rfc3339_ms;
 use genie_protocol::session::LiveStatus;
 
+/// Engine-side facts that are not on `SessionInfo`.
+#[derive(Debug, Clone, Default)]
+pub struct Extra {
+    pub workspace: Option<PathBuf>,
+    pub overlay: Option<SessionOverlay>,
+    /// `--worktree <name>` (kept until the worktree subsystem lands).
+    pub worktree_name: Option<String>,
+}
+
 #[derive(Default)]
 pub struct Registry {
     map: Mutex<HashMap<String, SessionInfo>>,
+    extra: Mutex<HashMap<String, Extra>>,
 }
 
 impl Registry {
@@ -25,6 +36,20 @@ impl Registry {
     }
 
     pub fn create(&self, id: &str, p: &CreateParams, parent: Option<String>) -> SessionInfo {
+        self.create_with(id, p, parent, Extra::default())
+    }
+
+    pub fn create_with(
+        &self,
+        id: &str,
+        p: &CreateParams,
+        parent: Option<String>,
+        extra: Extra,
+    ) -> SessionInfo {
+        self.extra
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_string(), extra);
         let now = rfc3339_ms(now_ms());
         let info = SessionInfo {
             summary: SessionSummary {
@@ -97,7 +122,20 @@ impl Registry {
     }
 
     pub fn remove(&self, id: &str) -> Option<SessionInfo> {
+        self.extra
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
         self.lock().remove(id)
+    }
+
+    pub fn extra(&self, id: &str) -> Extra {
+        self.extra
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Newest first. Incognito sessions are never listed (D24).
@@ -138,6 +176,7 @@ impl Registry {
 impl SettingsSource for Registry {
     fn settings(&self, session_id: &str) -> Option<SessionSettings> {
         let s = self.get(session_id)?;
+        let x = self.extra(session_id);
         Some(SessionSettings {
             kind: s.summary.kind,
             model: s.model,
@@ -147,7 +186,8 @@ impl SettingsSource for Registry {
             project_id: s.summary.project_id,
             incognito: s.incognito,
             title: s.summary.title,
-            workspace: None,
+            workspace: x.workspace,
+            overlay: x.overlay,
         })
     }
 
