@@ -1,5 +1,8 @@
-# cargo-deny: licences and advisories (spec/01-architecture.md §2.1 rule 4).
-# Run: cargo deny check
+# cargo-deny: licences, advisories, bans, sources (01 §2.1 rule 4; 09 §5.1; 08 §9).
+# Run: cargo deny check        (also part of `cargo xtask ci`)
+#
+# Every exception and ignore below names the crate, the reason and who must review it.
+# The open human decisions are listed in README.md "Known gaps" (09 / CI section).
 
 [graph]
 all-features = true
@@ -7,9 +10,26 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # zip 2.4 advisories. All concern `ZipArchive::extract`, `ZipStreamReader`, AES entries or
+  # Unix permission bits. genie-skills (the only user) opens archives with
+  # `ZipArchive::by_index` only (central directory), has no `aes-crypto` feature, rejects
+  # encrypted and symlink entries and writes files with `File::create` (no mode bits).
+  # Still: upgrade to zip >= 9.0.5 (genie-skills owner). Review by 2027-02-01.
+  { id = "RUSTSEC-2026-0367", reason = "no zip extract(); mode bits never applied (genie-skills::package)" },
+  { id = "RUSTSEC-2026-0368", reason = "symlink entries rejected before extraction (genie-skills::package)" },
+  { id = "RUSTSEC-2026-0369", reason = "no zip extract()/ZipStreamReader; symlinks rejected" },
+  { id = "RUSTSEC-2026-0429", reason = "no zip extract(); symlink entries rejected" },
+  { id = "RUSTSEC-2026-0545", reason = "aes-crypto feature not enabled; encrypted entries rejected" },
+  { id = "RUSTSEC-2026-0548", reason = "ZipStreamReader not used; ZipArchive reads the central directory" },
+  # chrono is unmaintained (no patched version). Pulled in by oauth2 5 (genie-providers);
+  # nothing of ours calls it. Revisit when oauth2 drops it. Review by 2027-02-01.
+  { id = "RUSTSEC-2026-0543", reason = "transitive via oauth2; unmaintained, not vulnerable" },
+]
 
 [licenses]
 version = 2
+confidence-threshold = 0.9
 allow = [
   "MIT",
   "Apache-2.0",
@@ -20,17 +40,35 @@ allow = [
   "Unicode-3.0",
   "Zlib",
 ]
-# Our own crates.
-[[licenses.exceptions]]
-allow = ["LicenseRef-Synergech-Proprietary"]
-crate = "genie-*"
 
+# Crate-scoped exceptions. HUMAN DECISION PENDING (legal / release owner, 09 §6) for each;
+# they are scoped so a new crate with the same licence still fails.
+[[licenses.exceptions]]
+# Bundled SQLCipher + SQLite + libtomcrypt sources (04 §2). SQLite is public domain with
+# the "blessing"; libtomcrypt is dual public-domain/WTFPL.
+crate = "sqlcipher-src"
+allow = ["blessing", "WTFPL"]
+
+[[licenses.exceptions]]
+# Mozilla's CA root list as data (rustls via reqwest/oauth2).
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
+# Our own crates are `publish = false` with LicenseRef-Synergech-Proprietary.
 [licenses.private]
 ignore = true
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal `path` dependencies have no version; allowed because every crate is publish = false.
+allow-wildcard-paths = true
+deny = [
+  # rustls only (03 §3): never native-tls / OpenSSL for HTTP. (SQLCipher's vendored OpenSSL
+  # is a build-time crypto backend, not a TLS stack.)
+  { name = "native-tls" },
+  { name = "hyper-tls" },
+]
 
 [sources]
 unknown-registry = "deny"
