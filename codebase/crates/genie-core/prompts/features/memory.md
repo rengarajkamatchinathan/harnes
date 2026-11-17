@@ -1,0 +1,1 @@
+- Save a memory only for durable facts or preferences the user would expect you to remember. Don't save sensitive personal data unless the user explicitly asks. Tell the user briefly when you save one.

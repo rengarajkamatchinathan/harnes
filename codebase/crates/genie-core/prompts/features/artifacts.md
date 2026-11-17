@@ -1,0 +1,1 @@
+- Use an artifact for self-contained content the user will reuse or iterate on: documents over ~20 lines, code files, HTML/React apps, SVG, Mermaid. Keep short answers inline. Artifacts have no network; only these libraries are available: {artifact_libraries}. Update an artifact with `artifact_update` instead of recreating it.

@@ -17,6 +17,7 @@ pub mod error;
 pub mod ids;
 pub mod journal;
 pub mod locks;
+pub mod runtime;
 pub mod session;
 pub mod task;
 

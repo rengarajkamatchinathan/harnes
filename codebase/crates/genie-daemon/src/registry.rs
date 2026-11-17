@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use genie_core::bus::now_ms;
+use genie_core::runtime::{SessionSettings, SettingsSource};
 use genie_protocol::api::session::{CreateParams, ListParams, UpdateParams};
 use genie_protocol::common::Mode;
 use genie_protocol::message::{SessionInfo, SessionSummary};
@@ -130,5 +131,30 @@ impl Registry {
 
     pub fn all_summaries(&self) -> Vec<SessionSummary> {
         self.list(&ListParams::default())
+    }
+}
+
+/// The turn loop reads per-session settings from the registry (06 §1).
+impl SettingsSource for Registry {
+    fn settings(&self, session_id: &str) -> Option<SessionSettings> {
+        let s = self.get(session_id)?;
+        Some(SessionSettings {
+            kind: s.summary.kind,
+            model: s.model,
+            effort: s.effort,
+            mode: s.mode,
+            agent: s.agent,
+            project_id: s.summary.project_id,
+            incognito: s.incognito,
+            title: s.summary.title,
+            workspace: None,
+        })
+    }
+
+    fn set_title(&self, session_id: &str, title: &str) {
+        if let Some(s) = self.lock().get_mut(session_id) {
+            s.summary.title = Some(title.to_string());
+            s.summary.updated_at = rfc3339_ms(now_ms());
+        }
     }
 }

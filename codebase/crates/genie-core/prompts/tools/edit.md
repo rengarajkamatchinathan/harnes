@@ -1,0 +1,1 @@
+- Read a file before editing it; keep `old` text exact and unique; prefer edits over full rewrites.

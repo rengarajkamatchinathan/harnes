@@ -12,6 +12,13 @@ genie-protocol.workspace = true
 # Subsystem crates (01 §2 graph) are added here as the engine starts using them;
 # `cargo xtask check-deps` enforces the allowed directions.
 genie-store.workspace = true
+genie-providers.workspace = true
+genie-catalog.workspace = true
+genie-tools.workspace = true
+genie-secrets.workspace = true
+
+async-trait.workspace = true
+http.workspace = true
 
 futures.workspace = true
 serde.workspace = true
@@ -24,6 +31,8 @@ ulid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+schemars.workspace = true
 
 [lints]
 workspace = true

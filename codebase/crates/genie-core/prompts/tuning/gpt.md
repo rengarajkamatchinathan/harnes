@@ -1,0 +1,1 @@
+- When several tool calls are independent, make them in parallel in one step. When the task is done, stop and answer; don't call tools you don't need.

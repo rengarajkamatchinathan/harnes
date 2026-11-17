@@ -56,7 +56,11 @@ pub fn describe(e: &ClientError) -> String {
 
 /// `true` when the error code means no model provider is set up.
 pub fn is_no_provider(code: &str) -> bool {
-    code == "no_provider_configured" || code == "GENIE-PROV:no_provider_configured"
+    // The class arrives as a bare code, as `GENIE-PROV:<class>`, or inside the turn's
+    // error message (`provider error: no_provider_configured`).
+    code == "no_provider_configured"
+        || code == "GENIE-PROV:no_provider_configured"
+        || code.ends_with(": no_provider_configured")
 }
 
 /// A settled turn's error, worded for people (no_provider_configured gets a fix).
@@ -68,8 +72,8 @@ pub fn turn_error(err: &ErrorInfo) -> String {
             .into();
     }
     match code {
-        // Today's core reports every provider failure as bare `GENIE-PROV` (the class is
-        // not on the wire yet), and with no provider set up that is the usual cause.
+        // An older engine sends bare `GENIE-PROV` with no class; with no provider set up
+        // that is the usual cause.
         "GENIE-PROV" if err.message == err.code => "The model provider failed. If none is \
              configured yet, add one with `genie login <provider>` or in the desktop app \
              under Settings → Providers."

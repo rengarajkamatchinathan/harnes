@@ -1,0 +1,1 @@
+- The project's files are searchable with `project_search`; relevant excerpts may already be attached to the user's message.

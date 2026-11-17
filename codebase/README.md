@@ -14,7 +14,9 @@ crates/
   genie-protocol   wire types: JSON-RPC envelope, handshake, events, asks, method table (§6),
                    error kinds/codes, version skew table, JSON Schema export
   genie-core       TaskScope (cancellation tree), EngineBuilder, session actor + inbox,
-                   bus (seq, journal, resync), error taxonomy, path locks, DirContexts
+                   bus (seq, journal, resync), error taxonomy, path locks, DirContexts;
+                   `runtime`: turn loop, context assembly, prompts (`prompts/`), compaction,
+                   tool wiring, catalog → provider resolver (spec 06 §1–§4)
   genie-daemon     socket/pipe listener + peer check, token, spawn lock, handshake,
                    skew handling, idle exit, clean shutdown, standalone lease
   genie-client     endpoint layout, NDJSON framing, Connection, ensure (spawn / wait / retry)
@@ -34,7 +36,9 @@ crates/
                    modes + policy floor, taint, "always" saving, read-only/arity tables (06 §5)
   genie-mcp        MCP client: stdio + Streamable HTTP, lifecycle/status machine, tools/resources/
                    prompts, progress, cancellation, elicitation/sampling/OAuth ports (06 §7)
-  genie-{tools,skills,sandbox,browser,markdown}
+  genie-tools      Tool trait + ports, registry, input repair/validation, output limits + spill,
+                   v1 chat tools (`tool_output_read`, `memory_*`) (spec 06 §2.4, §4)
+  genie-{skills,sandbox,browser,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
                    `genie chat`, importer, `hook-adapter`; also runs `genie daemon`
@@ -274,6 +278,28 @@ session expiry → reconnect, 401 → `needs_auth` → restart, 401 → refresh.
 | Error split | `SpawnError` / `RunError::Spawn` = couldn't start, safe to retry; `RunError::Io` = may have run | `pipe` |
 | Spawn hook | `SpawnHook::wrap(&mut PipeSpec)` for the v2 sandbox (D44) | `pipe::SpawnHook` |
 
+### Spec 06 (turn loop, context, compaction, tools)
+
+| 06 § | What | Where |
+|---|---|---|
+| 1 | turn loop: admit → steps → settle; deltas as ephemeral `part.delta`; `step.started/ended`, `part.started/ended` (part ids `{message_id}.p{n}`), `tool.started/ended`, `retry.scheduled` (+ `status` activity `retrying`), `usage.updated`; tool calls dispatched as their input ends (D20) and joined at step end; steer injected at the boundary; `finish=length` → `continue_smaller` (≤ 2 in a row); `maxSteps` (SA-07: 50 chat / 200 code) → final step with `tool_choice: none` + `max_steps` note; interrupt keeps partial text and cancels tool calls; resume fails unsettled calls + `interrupted_resume`; regenerate branches from the user message (D24); title after the first reply (D27); usage per step + session totals + `usage_daily` with catalog cost | `genie-core::runtime::{turn, mod}` |
+| 2.1 | layout: tools → system 1 (base prompt + tuning) → system 2 (frozen baseline) → conversation; `prompt_cache_key` = session; `baseline_long_ttl` with project knowledge | `runtime::turn::assemble` |
+| 2.2 | `InstructionSource {key, rank, hash, text}`, most-shared-first (SA-42), frozen baseline, changes as frozen `<system-update>` messages (date → "Today's date is now …"), rebuilt by compaction | `runtime::context`, `runtime::ports::InstructionProvider` |
+| 2.3 | measured usage from the last same-model step + 4 chars/token + 15 % estimate; `max_tokens` fitted to the remaining room; context meter in `usage.updated` | `runtime::context`, `turn::assemble` |
+| 2.4 | 2,000 lines / 50 KiB truncation, full output spilled (store blob), marker `[showing 1–N of M; full output: <ref>]`, `tool.ended.spill_ref` | `genie-tools::output`, `runtime::bridge::BlobSpill` |
+| 2.6 | prompt fragments as versioned files (`crates/genie-core/prompts/`), template engine, base prompt per session kind, per-tool/feature guidance only when available, per-model tuning appendix (SA-43), all §2.6.4 source formats, all §2.6.7 hidden prompts, `<system-update>` lowering per protocol (SA-45), golden snapshots | `runtime::prompts`, `runtime::context`, `tests/prompts.rs` + `tests/golden/prompts/` |
+| 3 | auto threshold `window − max(15 %, 16k)` (`compaction.buffer`), overflow → compact with tail 85/70/50/35 % → retry step, manual `session.compact {focus}`; same model + cached prefix + template; one retry on template failure; ~15k-token verbatim tail of whole messages never starting at a tool result; `compaction` message + `session.compacted` + usage line `compaction`; branches from before a compaction see the full history | `runtime::turn::compact`, `runtime::context::effective_history` |
+| 4 | `Tool` trait (name, description(env), schema via schemars, kind, availability, `authorizes`, execute), ports (`PermissionGate`, `SpillStore`, `MemoryPort`, `EventSink`), registry hides unavailable tools, alias + camelCase repair, ≤ 5 input issues, `Declined` → only the user's words; `ToolAuthorizer` port (allow / deny / ask) with `DefaultAuthorizer` (asks for non-read-only tools) | `genie-tools`, `runtime::ports`, `runtime::bridge::CallGate` |
+| 4.1 | `tool_output_read` (SA-39), `memory_save/update/delete/search` (store-backed, `memory.changed`, off when incognito) | `genie-tools::chat` |
+| 01 §5 / 02 §6.2 | `session.compact`, `session.regenerate` (queued as their own turns), `session.get` returns the active path | `genie-core::session::{compact, regenerate}`, `genie-daemon::server` |
+
+Tests (`crates/genie-core/tests/turn.rs`, cassettes only, real engine/bus/Executor/Anthropic
+adapter): streamed text turn with usage and cost; tool call → result → second step; ask for a
+mutating tool, decline fed back to the model; steer injected mid-turn; retry →
+`retry.scheduled`; non-retryable error with fix link; spill; manual, auto and overflow
+compaction; `length` continuation; max steps; interrupt; regenerate; title; baseline
+`<system-update>`; store-backed turn (messages, memory, `usage_daily`, FTS).
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -282,9 +308,11 @@ session expiry → reconnect, 401 → `needs_auth` → restart, 401 → refresh.
 - **Subsystem edges are not declared yet.** Cargo 1.99 warns on unused dependencies, so
   `genie-core` gains each subsystem dependency when it first uses it; `xtask check-deps`
   enforces the directions in the meantime.
-- **Durable storage is not wired into the daemon yet.** `genie-core::journal::StoreJournal`
-  implements the `Journal` port on `genie-store`; the daemon still builds `MemoryJournal` until
-  `EngineBuilder` gets the store and a keychain-backed `KeyStore` (spec 08).
+- **Durable storage is wired with a placeholder keychain.** The daemon opens
+  `genie{-channel}.db` in the channel data dir with `StoreJournal` and the store-backed
+  conversation, but the data key sits in `keystore.placeholder.json` (0600) via
+  `genie-daemon::PlaceholderKeyStore` — **TODO spec 08**: OS keychain / `secrets.enc`. If the
+  store can't be opened the daemon logs it and runs in memory.
 - **Windows Job Object race:** a child is assigned to its job right after `spawn`, so anything it
   starts in that gap escapes. Closing it needs a raw `CreateProcessW` with `CREATE_SUSPENDED`
   (planned with the `opencode-pty` port, D45).
@@ -321,11 +349,11 @@ session expiry → reconnect, 401 → `needs_auth` → restart, 401 → refresh.
 ### Spec 02 gaps and deviations
 
 - **Methods owned by other specs** (config, providers, browser, terminal, MCP, projects, blobs,
-  Code mode, `session.regenerate/compact/export/search`) are typed in the table and generated
+  Code mode, `session.export/search`) are typed in the table and generated
   into TS, but the daemon answers `method_not_found` with `data.reason = "not_implemented"`
   until their subsystem lands.
-- **Session metadata is in memory** (`genie-daemon::registry`) and `session.get` returns an
-  empty `path`: the message tree is projected by the store (spec 04). `session.fork` creates an
+- **Session metadata is in memory** (`genie-daemon::registry`); `session.get` returns the
+  active path from the runtime's conversation store (no `siblings` yet). `session.fork` creates an
   empty child with the same settings; `prompt` with `parent_id` (edit → branch) is refused.
 - **`status` event:** `{state, activity?}`. `state` is the session state machine (01 §5.1);
   `activity` carries the spec's `thinking|retrying|compacting|…` values.
@@ -336,6 +364,42 @@ session expiry → reconnect, 401 → `needs_auth` → restart, 401 → refresh.
   check; no `lease.changed {driver: null}` is published for a lapse.
 - **No native notifier yet:** with no desktop on the workspace feed, a paused ask is only logged.
 - **`genie -p --output-format stream-json`** (02 §10 `system/init` line) belongs to spec 07.
+
+### Spec 06 gaps and deviations
+
+- **Out of scope here (typed extension points only):** shell and code tools (§4.2, §13),
+  MCP + `tool_search` (§7), web search/fetch (§8), skills (§9), browser (§10), subagents (§11:
+  `finish = stop` with running children), hooks (§12: `turn.end` continue, `compact.before/after`),
+  checkpoints (D49), artifacts (D28), `chat_search` / `project_search` tools.
+- **Permissions:** `ToolAuthorizer` is the seam for `genie-permissions`; no rules, modes or
+  "always" saving are evaluated here. `DefaultAuthorizer` asks per call for every tool that
+  authorizes (non-read-only, except memory which §4.1 always allows).
+- **Native compaction** (`capabilities.native_compaction`) is not used; we always write our own
+  summary. Re-injection after compaction covers the rebuilt baseline only (skills, artifact
+  refs, read-state, grants, todo, MCP resources come with their subsystems). If the summary
+  still fails the template after one retry it is accepted as long as it is non-empty.
+- **Overflow tail percentages** scale the ~15k verbatim tail (our reading of "tail 85 → 70 →
+  50 → 35 %").
+- **`<system-update>` lowering** is done in `genie-core` at assembly (system/developer
+  message for Responses and Chat with `mid_conversation_system`, appended to the next user turn
+  otherwise), not in the adapters; updates are only computed at turn start.
+- **Per-model tuning table** lives in `genie-core/prompts/tuning/` (not `genie-providers`) so
+  all prompt text is in one versioned place. Eval set (§2.6.8) not built (needs live layer).
+- **Attachments (§2.5)**, MCP resources, skills and file refs in prompts become text
+  placeholders; no image budget yet. `UsageLine` web-search fees are not counted.
+- **Wire records** for byte-exact replay are cached in memory per daemon run (the store's
+  `wire_record` table stores request/response blobs, not compiled items).
+- **Parallel tools:** all calls of a step run concurrently; per-path serialisation of mutating
+  file tools arrives with the code tools (`PathLocks` exists).
+- **`session.get`** returns the active path but no `siblings`; `prompt` with `parent_id` (edit →
+  branch) is still refused. Session metadata stays in the daemon's in-memory registry.
+- **Model resolution in the daemon:** bundled catalog + preset routes + credentials from the
+  environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, …); provider settings,
+  Azure/Vertex/custom endpoints and the catalog refresh loop are not wired.
+- **Engine-side ToolError:** `genie-tools` mirrors `genie_core::ToolError` (rule 3) and adds
+  `Cancelled`; core converts.
+- `turn.settled.error.message` now carries the engine error text and `link` the fix link
+  (`CoreEvent::TurnSettled` gained two optional fields).
 
 ### Spec 04 (storage) gaps and deviations
 

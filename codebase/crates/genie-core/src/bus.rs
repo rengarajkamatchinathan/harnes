@@ -77,6 +77,12 @@ pub enum CoreEvent {
         turn_id: String,
         finish: TurnFinish,
         error_code: Option<String>,
+        /// User-facing message for `error_code` (defaults to the code).
+        #[serde(default)]
+        error_message: Option<String>,
+        /// Fix link (e.g. `genie://settings/providers`, 01 §7).
+        #[serde(default)]
+        error_link: Option<String>,
     },
     TurnInterrupted {
         turn_id: String,
@@ -204,6 +210,8 @@ impl CoreEvent {
                 turn_id,
                 finish,
                 error_code,
+                error_message,
+                error_link,
             } => {
                 let status = match finish {
                     TurnFinish::Completed => TurnStatus::Completed,
@@ -213,8 +221,8 @@ impl CoreEvent {
                 let error = match (finish, error_code) {
                     (_, Some(code)) => Some(wire::ErrorInfo {
                         code: code.clone(),
-                        message: code.clone(),
-                        link: None,
+                        message: error_message.clone().unwrap_or_else(|| code.clone()),
+                        link: error_link.clone(),
                     }),
                     (TurnFinish::Interrupted, None) => Some(wire::ErrorInfo {
                         code: "interrupted".into(),

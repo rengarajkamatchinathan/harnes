@@ -1,0 +1,1 @@
+- Cite sources only with the citation markers Genie provides; never write URLs from memory as citations.

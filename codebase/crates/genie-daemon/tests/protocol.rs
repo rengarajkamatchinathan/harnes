@@ -606,3 +606,37 @@ async fn overflow_sends_resync_not_loss() {
     }
     assert!(resyncs >= 1);
 }
+
+#[tokio::test]
+async fn compact_and_regenerate_run_as_queued_turns() {
+    use genie_protocol::api::session::{CompactParams, RegenerateParams};
+    let mem = mem_daemon(|_| {});
+    let mut a = connect(&mem, "cli_1", ClientKind::Cli).await;
+    let s = a.create().await;
+    a.subscribe(&s, None).await;
+    a.conn
+        .call::<m::SessionCompact>(CompactParams {
+            session_id: s.clone(),
+            focus: Some("the plan".into()),
+        })
+        .await
+        .unwrap();
+    a.event(|e| matches!(e, SessionEvent::TurnSettled(_))).await;
+    a.conn
+        .call::<m::SessionRegenerate>(RegenerateParams {
+            session_id: s.clone(),
+            message_id: "msg_x".into(),
+        })
+        .await
+        .unwrap();
+    a.event(|e| matches!(e, SessionEvent::TurnSettled(_))).await;
+    let e = a
+        .conn
+        .call::<m::SessionCompact>(CompactParams {
+            session_id: "ses_nope".into(),
+            focus: None,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(kind(e), ErrorKind::NotFound);
+}

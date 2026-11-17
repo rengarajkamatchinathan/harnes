@@ -22,6 +22,9 @@ genie-client = { path = "crates/genie-client" }
 genie-testkit = { path = "crates/genie-testkit" }
 genie-store = { path = "crates/genie-store" }
 genie-secrets = { path = "crates/genie-secrets" }
+genie-providers = { path = "crates/genie-providers" }
+genie-catalog = { path = "crates/genie-catalog" }
+genie-tools = { path = "crates/genie-tools" }
 # external
 anyhow = "1"
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }

@@ -36,6 +36,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc, watch};
 
+use genie_core::runtime::ConversationStore;
+
 use crate::DaemonConfig;
 use crate::lease::{LeaseCheck, Leases};
 use crate::registry::Registry;
@@ -77,7 +79,10 @@ pub struct DaemonState {
     shutdown: watch::Sender<Option<ShutdownReason>>,
     restarting: broadcast::Sender<ShutdownReason>,
     leases: Leases,
-    registry: Registry,
+    registry: Arc<Registry>,
+    /// The message tree (`session.get` path, `session.regenerate` checks). `None` with a
+    /// fake runner in tests.
+    conversation: Option<Arc<dyn ConversationStore>>,
     prompts: Mutex<HashMap<(String, String), PromptResult>>,
     workspace: broadcast::Sender<Arc<str>>,
     pump_started: AtomicBool,
@@ -88,6 +93,25 @@ const INIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl DaemonState {
     pub fn new(cfg: DaemonConfig, engine: Engine, token: String, root: TaskScope) -> Self {
+        Self::with_runtime(
+            cfg,
+            engine,
+            token,
+            root,
+            Arc::new(Registry::default()),
+            None,
+        )
+    }
+
+    /// With the session registry the turn loop reads settings from, and the message tree.
+    pub fn with_runtime(
+        cfg: DaemonConfig,
+        engine: Engine,
+        token: String,
+        root: TaskScope,
+        registry: Arc<Registry>,
+        conversation: Option<Arc<dyn ConversationStore>>,
+    ) -> Self {
         let leases = Leases::new(cfg.lease_grace);
         DaemonState {
             cfg,
@@ -101,7 +125,8 @@ impl DaemonState {
             shutdown: watch::channel(None).0,
             restarting: broadcast::channel(4).0,
             leases,
-            registry: Registry::default(),
+            registry,
+            conversation,
             prompts: Mutex::new(HashMap::new()),
             workspace: broadcast::channel(1024).0,
             pump_started: AtomicBool::new(false),
@@ -768,6 +793,15 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
             h.resume().map_err(|e| e.to_rpc())?;
             empty()
         }),
+        n if n == m::SessionCompact::NAME => params::<m::SessionCompact>(&r).and_then(|p| {
+            let h = leased_handle(state, conn, &p.session_id)?;
+            h.compact(p.focus.filter(|f| !f.trim().is_empty()))
+                .map_err(|e| e.to_rpc())?;
+            empty()
+        }),
+        n if n == m::SessionRegenerate::NAME => {
+            params::<m::SessionRegenerate>(&r).and_then(|p| session_regenerate(state, conn, &p))
+        }
         n if n == m::SessionInboxRemove::NAME => {
             params::<m::SessionInboxRemove>(&r).and_then(|p| {
                 let h = leased_handle(state, conn, &p.session_id)?;
@@ -969,12 +1003,43 @@ fn session_get(state: &DaemonState, id: &str) -> Result<Value, RpcError> {
     }
     info.driver = state.leases.driver(id);
     info.head_seq = state.engine.bus().head_seq(id).map_err(|d| d.to_rpc())?;
-    // The message tree is projected by the store (spec 04); until then `path` is empty.
+    // The active branch (D24). Sibling lists need the store's tree queries (gap).
+    let path = match &state.conversation {
+        Some(c) => c
+            .path(id)
+            .map_err(|d| d.to_rpc())?
+            .iter()
+            .map(genie_core::runtime::wire::message)
+            .collect(),
+        None => Vec::new(),
+    };
     to_result(&sp::GetResult {
         session: info,
-        path: Vec::new(),
+        path,
         siblings: Default::default(),
     })
+}
+
+/// `session.regenerate` (D24): a sibling reply, queued like a prompt.
+fn session_regenerate(
+    state: &Arc<DaemonState>,
+    conn: &Arc<Conn>,
+    p: &sp::RegenerateParams,
+) -> Result<Value, RpcError> {
+    let h = leased_handle(state, conn, &p.session_id)?;
+    if let Some(c) = &state.conversation {
+        let m = c
+            .get(&p.session_id, &p.message_id)
+            .map_err(|d| d.to_rpc())?
+            .ok_or_else(|| not_found("message"))?;
+        if !m.is_assistant() {
+            return Err(RpcError::invalid_params(
+                "message_id must be an assistant message",
+            ));
+        }
+    }
+    h.regenerate(p.message_id.clone()).map_err(|e| e.to_rpc())?;
+    empty()
 }
 
 fn session_update(
