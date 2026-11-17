@@ -154,6 +154,22 @@ fn host_save_file(
         .map_err(|e| e.to_string())
 }
 
+/// "Install `genie` command in PATH" (05 §4 General, D40): link/shim the bundled CLI.
+#[tauri::command]
+fn host_install_cli() -> Result<host::CliInstall, String> {
+    let target = host::daemon_exe().ok_or("the genie binary was not found next to the app")?;
+    let target = std::fs::canonicalize(&target).unwrap_or(target);
+    let dir = host::cli_bin_dir().ok_or("no home folder")?;
+    host::install_cli(&target, &dir).map_err(|e| e.to_string())
+}
+
+/// Third-party licences (05 §4 Account & licence).
+#[tauri::command]
+fn host_notices(app: AppHandle) -> Option<String> {
+    let resources = app.path().resource_dir().ok();
+    host::notices_text(resources.as_deref())
+}
+
 #[tauri::command]
 fn host_log(level: String, message: String) {
     match level.as_str() {
@@ -332,6 +348,8 @@ pub fn run() -> Result<(), String> {
     let scheme_app = app.clone();
 
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(app)
         .register_asynchronous_uri_scheme_protocol(
             "genie-artifact",
@@ -354,6 +372,8 @@ pub fn run() -> Result<(), String> {
             host_state_load,
             host_state_save,
             host_save_file,
+            host_install_cli,
+            host_notices,
             host_log
         ])
         .setup(move |app| {

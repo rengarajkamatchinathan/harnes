@@ -17,6 +17,8 @@
     "@genie/ui": "workspace:*",
     "@tanstack/react-virtual": "^3.14.26",
     "@tauri-apps/api": "^2.12.5",
+    "@tauri-apps/plugin-dialog": "~2.7.3",
+    "@tauri-apps/plugin-notification": "~2.4.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",

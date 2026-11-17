@@ -8,6 +8,7 @@ import { formatCost, formatTokens, t } from "../../i18n";
 import { formatBytes, guessMime, rejectReason, uploadBlob, type Attachment } from "../../state/attachments";
 import type { SessionStore } from "../../state/session";
 import { useApp } from "../context";
+import { McpPromptPicker, McpResourcePicker, type McpResource } from "./McpPickers";
 
 export interface ComposerProps {
   store: SessionStore | null;
@@ -38,6 +39,18 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
   const [sending, setSending] = useState(false);
   const [connectors, setConnectors] = useState(false);
   const [skillPick, setSkillPick] = useState(false);
+  const [mcpPick, setMcpPick] = useState<"resource" | "prompt" | null>(null);
+
+  /** An MCP resource attaches like a file: the daemon reads it into a blob. */
+  const attachResource = async (r: McpResource) => {
+    try {
+      const got = await app.client.mcp.resource.read({ name: r.server, uri: r.uri });
+      setAtts((x) => [...x, { key: `mcp${++keySeq}`, name: r.name, mime: got.mime || r.mime || "text/plain", size: 0, state: "ready", progress: 1, blobId: got.blob_id }]);
+      setMcpPick(null);
+    } catch (e) {
+      app.toast({ title: app.describeError(e), tone: "danger" });
+    }
+  };
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const model = store?.model;
@@ -159,7 +172,7 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
               onRemove={() => setAtts((x) => x.filter((y) => y.key !== a.key))}
               removeLabel={t("common.delete")}
             >
-              {a.name} · {a.state === "uploading" ? `${Math.round(a.progress * 100)}%` : formatBytes(a.size)}
+              {a.name} · {a.state === "uploading" ? `${Math.round(a.progress * 100)}%` : a.key.startsWith("mcp") ? "MCP" : formatBytes(a.size)}
               {(a.state === "error" || tooBig(a)) && " ⚠"}
             </Chip>
           ))}
@@ -188,7 +201,9 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
           trigger={(p) => <IconButton icon="plus" label={t("composer.plus")} {...p} />}
           items={[
             { id: "attach", label: t("composer.attach"), icon: "paperclip", onSelect: () => fileRef.current?.click() },
+            { id: "resource", label: t("composer.mcpResource"), icon: "layers", onSelect: () => setMcpPick("resource") },
             { id: "skills", label: t("composer.skills"), icon: "sparkle", onSelect: () => setSkillPick(true) },
+            { id: "prompt", label: t("composer.mcpPrompt"), icon: "layers", onSelect: () => setMcpPick("prompt") },
             { id: "connectors", label: t("composer.connectors"), icon: "layers", disabled: !store, onSelect: () => setConnectors(true) },
             { id: "web", label: t("composer.webSearch"), icon: "globe", disabled: true, title: t("settings.notServed"), onSelect: () => {} },
             { id: "code", label: t("composer.codeExecution"), icon: "code", disabled: true, title: t("settings.notServed"), onSelect: () => {} },
@@ -219,6 +234,17 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
         )}
       </div>
       {connectors && store && <ConnectorToggles sessionId={store.id} onClose={() => setConnectors(false)} />}
+      {mcpPick === "resource" && <McpResourcePicker onPick={attachResource} onClose={() => setMcpPick(null)} />}
+      {mcpPick === "prompt" && (
+        <McpPromptPicker
+          onInsert={(cmd) => {
+            setText((x) => (x.trim() ? `${cmd} ${x}` : `${cmd} `));
+            setMcpPick(null);
+            taRef.current?.focus();
+          }}
+          onClose={() => setMcpPick(null)}
+        />
+      )}
       {skillPick && (
         <SkillPicker
           onPick={(s) => {

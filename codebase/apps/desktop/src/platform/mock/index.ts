@@ -20,6 +20,8 @@ export interface MockOptions {
   firstRun?: boolean;
   /** Reply text; default is a Markdown sample. */
   reply?: (prompt: string) => string;
+  /** What the native pickers return (default: a folder / a save path). */
+  pickFolder?: string | null;
   /** Replay ring size of mock terminals (bytes); default 64 KiB. */
   terminalRing?: number;
 }
@@ -75,7 +77,8 @@ let counter = 0;
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${(++counter).toString(36)}`;
 const now = () => new Date().toISOString();
 
-export function createMockPlatform(opts: MockOptions = {}): Platform & { sessions: Map<string, MockSession>; emit: (m: HostMessage) => void } {
+export function createMockPlatform(opts: MockOptions = {}): Platform & { sessions: Map<string, MockSession>; emit: (m: HostMessage) => void; notifications: { title: string; body?: string }[] } {
+  const notifications: { title: string; body?: string }[] = [];
   const tick = opts.tickMs ?? 18;
   const sessions = new Map<string, MockSession>();
   let listener: ((m: HostMessage) => void) | null = null;
@@ -142,6 +145,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     s.messages.push(assistant);
     const finish = (status: "completed" | "cancelled") => {
       s.running = undefined;
+      publish(s, { type: "step.ended", finish: status === "completed" ? "stop" : "cancelled", usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } }, true, turn_id);
       publish(s, { type: "usage.updated", context_tokens: 1200 + text.length, context_window: 200000, cost: { usd: 0.0021 }, session: { input_tokens: 1200, output_tokens: 300 } }, false, turn_id);
       publish(s, { type: "turn.settled", turn_id, status }, true, turn_id);
       setStatus(s, "idle");
@@ -403,6 +407,13 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "memory.update": () => ({}),
     "memory.set_state": () => ({}),
     "mcp.list": () => ({ servers: [{ name: "files", scope: "user", status: "connected", tools: 4 }] }),
+    "mcp.resources": (p) => ({ items: p.name === "files" ? [{ uri: "file:///notes/todo.md", name: "todo.md", mimeType: "text/markdown" }, { uriTemplate: "file:///{path}", name: "any file" }] : [] }),
+    "mcp.prompts": (p) => ({ items: p.name === "files" ? [{ name: "summarize", description: "Summarize a file", arguments: [{ name: "path", required: true }, { name: "style" }] }] : [] }),
+    "mcp.resource.read": (p) => {
+      const blob_id = uid("blob");
+      blobs.set(blob_id, btoa(`resource ${p.uri}`));
+      return { blob_id, mime: "text/markdown" };
+    },
     "skill.list": () => ({ skills: [{ id: "pdf", name: "PDF", description: "Read and fill PDFs", enabled: true, source: "builtin" }] }),
     "usage.query": () => ({ rows: [{ keys: ["mock"], usage: { input_tokens: 12000, output_tokens: 3400 }, cost: { usd: 0.12 } }] }),
     "daemon.status": () => ({ version: "0.1.0-mock", pid: 1, uptime_s: 42, socket: "mock", channel: "dev", clients: [], sessions_running: 0 }),
@@ -465,6 +476,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     kind: "mock",
     sessions,
     emit,
+    notifications,
     async connect(onMessage) {
       listener = onMessage;
       onMessage({ kind: "status", state: "ready", engine_version: "0.1.0-mock" });
@@ -494,6 +506,21 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     },
     async saveFile(name) {
       return `~/Downloads/${name}`;
+    },
+    async pickFolder() {
+      return opts.pickFolder === undefined ? "/tmp/mock-repo" : opts.pickFolder;
+    },
+    async pickSavePath(name) {
+      return `/tmp/${name}`;
+    },
+    async notify(title, body) {
+      notifications.push({ title, body });
+    },
+    async installCli() {
+      return { path: "~/.local/bin/genie", target: "/Applications/Genie.app/Contents/MacOS/genie", dir: "~/.local/bin", on_path: false };
+    },
+    async notices() {
+      return "# Third-party notices\n\n- **OpenCode** (MIT)\n";
     },
     artifactUrl: () => "about:blank",
     log() {},

@@ -269,6 +269,7 @@ export class App extends Emitter {
       case "notification": {
         const n = params as UserNotification;
         this.toast({ title: n.title, body: n.body, tone: "info", link: n.link });
+        this.osNotify(n.title, n.body ?? undefined);
         return;
       }
       case "daemon.restarting":
@@ -288,6 +289,9 @@ export class App extends Emitter {
     if (!ask?.id) return;
     this.askReqs.set(ask.id, reqId);
     this.reqAsks.set(reqId, ask.id);
+    // The turn is paused on us: tell the user if Genie isn't in front (05 §4 notifications).
+    const title = this.sessions.get(ask.session_id)?.title;
+    this.osNotify("Genie needs your approval", [ask.tool ?? ask.kind, title].filter(Boolean).join(" · "));
     const s = this.open.get(ask.session_id);
     if (s) s.addAsk(ask);
     else this.toast({ title: "Genie needs your approval", body: ask.tool ?? ask.kind, tone: "info", link: `genie://session/${ask.session_id}` });
@@ -379,6 +383,15 @@ export class App extends Emitter {
   }
 
   // ---------- misc ----------
+
+  /** Is the app window in front? (OS notifications only go out when it isn't.) */
+  isForeground: () => boolean = () => typeof document !== "undefined" && !document.hidden && document.hasFocus();
+
+  /** OS notification when the window is in the background and the user allows them. */
+  osNotify(title: string, body?: string) {
+    if (!this.ui.osNotifications || this.isForeground()) return;
+    void this.platform.notify(title, body).catch((e) => this.platform.log("warn", `notification: ${errorMessage(e)}`));
+  }
 
   onConfigChanged(f: Listener<string[]>) {
     this.configListeners.add(f);

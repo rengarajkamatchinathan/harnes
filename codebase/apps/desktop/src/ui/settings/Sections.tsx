@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { MemoryItem } from "@genie/protocol";
 import { applyAppearance, Badge, Banner, Button, Card, Dialog, Field, Input, Segmented, Select, Switch, Textarea, type ChatFont, type Density, type ThemePref } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
-import { errorKind } from "../../platform";
+import { errorKind, type CliInstall } from "../../platform";
 import { useApp, useAsync } from "../context";
 
 function Unavailable({ error }: { error: unknown }) {
@@ -58,10 +58,42 @@ export function GeneralExtras() {
         {report != null && <pre className="code">{JSON.stringify(report, null, 2)}</pre>}
         <Unavailable error={err} />
       </Field>
-      <Field label={'Install "genie" command in PATH'} description={t("settings.notServed")}>
-        <Button disabled>Install</Button>
+      <InstallCli />
+      <Field label={t("settings.osNotifications")} description={t("settings.osNotificationsHint")}>
+        <Switch checked={app.ui.osNotifications} onChange={(v) => app.setUi({ osNotifications: v })} aria-label={t("settings.osNotifications")} />
       </Field>
     </div>
+  );
+}
+
+/** "Install `genie` command in PATH" (05 §4 General, D40). */
+export function InstallCli() {
+  const app = useApp();
+  const [done, setDone] = useState<CliInstall | null>(null);
+  const [busy, setBusy] = useState(false);
+  const install = async () => {
+    setBusy(true);
+    try {
+      setDone(await app.platform.installCli());
+    } catch (e) {
+      app.toast({ title: app.describeError(e), tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Field label={t("settings.installCli")} description={t("settings.installCliHint")}>
+      <div className="row">
+        <Button disabled={busy} onClick={() => void install()}>
+          {done ? t("settings.reinstall") : t("settings.install")}
+        </Button>
+      </div>
+      {done && (
+        <p className="muted">
+          {t("settings.installed", { path: done.path })} {!done.on_path && t("settings.addToPath", { dir: done.dir })}
+        </p>
+      )}
+    </Field>
   );
 }
 
@@ -265,11 +297,16 @@ export function UsageSection() {
 export function PrivacySection() {
   const app = useApp();
   const [path, setPath] = useState("");
+  const choose = async () => {
+    const p = await app.platform.pickSavePath("genie-export.zip", [{ name: "Zip", extensions: ["zip"] }]).catch(() => null);
+    if (p) setPath(p);
+  };
   return (
     <div className="stack">
-      <Field label={t("privacy.exportAll")} description="Writes an archive of every chat to a folder you choose.">
+      <Field label={t("privacy.exportAll")} description="Writes an archive of every chat to a file you choose.">
         <div className="row">
-          <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/export" aria-label={t("privacy.exportAll")} />
+          <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/genie-export.zip" aria-label={t("privacy.exportAll")} />
+          <Button onClick={() => void choose()}>{t("common.choose")}</Button>
           <Button disabled={!path} onClick={() => void app.client.export.all({ path }).then(() => app.toast({ title: t("row.exported", { path }), tone: "success" }), (e) => app.toast({ title: app.describeError(e), tone: "danger" }))}>
             {t("privacy.exportAll")}
           </Button>
@@ -343,14 +380,25 @@ export function DeveloperSection() {
 
 export function AccountSection() {
   const app = useApp();
+  const notices = useAsync(() => app.platform.notices(), []);
   return (
     <div className="stack">
       <Card>
         <strong>{t("account.about")}</strong>
         <div>{t("account.version", { app: app.info?.app_version ?? "?", engine: app.status.engine_version ?? "?" })}</div>
         <div className="muted">{t("account.licence")}</div>
-        <div className="muted">{t("account.notices")}</div>
       </Card>
+      <h3 className="section-title">{t("account.notices")}</h3>
+      {notices.loading ? (
+        <p className="muted">{t("common.loading")}</p>
+      ) : notices.data ? (
+        <details className="notices">
+          <summary>{t("account.showNotices")}</summary>
+          <pre className="code notices__text">{notices.data}</pre>
+        </details>
+      ) : (
+        <p className="muted">{t("account.noNotices")}</p>
+      )}
     </div>
   );
 }

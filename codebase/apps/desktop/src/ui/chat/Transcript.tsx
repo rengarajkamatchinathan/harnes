@@ -5,6 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Citation, Part } from "@genie/protocol";
 import { Badge, Button, Icon, IconButton, Textarea } from "@genie/ui";
 import { t } from "../../i18n";
+import type { TurnUsage } from "../../state/sessionModel";
 import { readBlob } from "../../state/attachments";
 import type { MessageView, PartView, SessionModel, ToolView } from "../../state/sessionModel";
 import { siblingInfo } from "../../state/sessionModel";
@@ -148,6 +149,7 @@ const MessageRow = memo(
             ) : (
               <IconButton icon="refresh" size="sm" label={t("chat.regenerate")} onClick={() => void store.regenerate(msg.id).catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }))} />
             )}
+            {!isUser && msg.turnId && model.turnUsage.get(msg.turnId) && <UsageChip u={model.turnUsage.get(msg.turnId)!} />}
             {onRewind && isUser && <IconButton icon="refresh" size="sm" label={t("code.rewind")} onClick={() => onRewind(msg)} />}
           </div>
         )}
@@ -348,5 +350,18 @@ function Media({ part }: { part: Extract<Part, { type: "media" }> }) {
     <Badge>
       <Icon name="file" /> {part.name ?? part.mime}
     </Badge>
+  );
+}
+
+const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+
+/** Per-message tokens + cost (05 §2.2, D24), from the turn's `step.ended` events. */
+export function UsageChip({ u }: { u: TurnUsage }) {
+  const total = u.input + u.output;
+  const detail = t("chat.usageDetail", { input: u.input, output: u.output, reasoning: u.reasoning, cache: u.cacheRead, steps: u.steps, cost: u.usd.toFixed(4) });
+  return (
+    <span className="msg__usage muted" title={detail} aria-label={detail}>
+      {t("chat.usage", { tokens: fmtTokens(total), cost: u.usd >= 0.01 ? u.usd.toFixed(2) : u.usd.toFixed(4) })}
+    </span>
   );
 }
