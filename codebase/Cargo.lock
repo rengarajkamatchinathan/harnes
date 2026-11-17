@@ -697,6 +697,24 @@ version = "0.1.0"
 [[package]]
 name = "genie-mcp"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "genie-process",
+ "genie-protocol",
+ "genie-secrets",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "genie-permissions"
@@ -711,6 +729,7 @@ name = "genie-process"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
