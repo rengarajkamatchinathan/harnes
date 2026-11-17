@@ -47,6 +47,11 @@ impl SessionTracker {
         }
     }
 
+    /// The session this tracker follows.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
     /// The resume cursor: the last durable seq applied.
     pub fn last_seq(&self) -> u64 {
         self.last_seq
