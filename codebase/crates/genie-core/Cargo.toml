@@ -1,0 +1,28 @@
+[package]
+name = "genie-core"
+description = "EngineBuilder, per-directory contexts, session actors, inbox, bus, cancellation tree, error taxonomy."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+genie-protocol.workspace = true
+# Subsystem crates (01 §2 graph) are added here as the engine starts using them;
+# `cargo xtask check-deps` enforces the allowed directions.
+
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+ulid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

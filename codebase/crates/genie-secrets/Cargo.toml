@@ -1,0 +1,14 @@
+[package]
+name = "genie-secrets"
+description = "Keychain + passphrase-encrypted file; DB key."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+secrecy.workspace = true
+
+[lints]
+workspace = true

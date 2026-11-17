@@ -1,0 +1,11 @@
+[package]
+name = "genie-config"
+description = "Config layers, managed policy merge, watcher, diagnostics, schema."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

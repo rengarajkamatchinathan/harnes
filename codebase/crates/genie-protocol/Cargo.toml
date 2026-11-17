@@ -1,0 +1,18 @@
+[package]
+name = "genie-protocol"
+description = "Genie wire types: JSON-RPC envelope, handshake, events, errors. No internal deps."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# 01 §2.1 rule 2: NO internal (genie-*) dependencies. `cargo xtask check-deps` enforces it.
+[dependencies]
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

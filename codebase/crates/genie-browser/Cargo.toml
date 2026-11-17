@@ -1,0 +1,11 @@
+[package]
+name = "genie-browser"
+description = "CDP client over pipe, BrowserBackend, snapshot serializer, screencast, site policy."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

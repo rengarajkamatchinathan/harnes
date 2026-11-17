@@ -1,0 +1,11 @@
+[package]
+name = "genie-providers"
+description = "Protocol adapters (Anthropic Messages, OpenAI Responses, OpenAI Chat, Gemini), Executor, SSE parser, Compat, retry."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

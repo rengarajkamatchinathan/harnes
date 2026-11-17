@@ -1,0 +1,26 @@
+[package]
+name = "genie-process"
+description = "Process runner: pipe mode, kill-tree, children bound to the daemon. PTY mode behind feature `pty` (D45, D55)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# PTY mode for Terminal tabs (D55). Lands with spec 06/07.
+pty = []
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[lints]
+workspace = true

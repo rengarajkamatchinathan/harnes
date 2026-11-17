@@ -1,0 +1,26 @@
+[package]
+name = "genie-cli"
+description = "The `genie` binary: CLI, TUI and `genie daemon` (one binary, 01 §1.1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "genie"
+path = "src/main.rs"
+
+[dependencies]
+genie-protocol.workspace = true
+genie-client.workspace = true
+genie-daemon.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+ulid.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "genie-catalog"
+description = "Model catalog load/verify/refresh, live discovery, effort map, pricing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
