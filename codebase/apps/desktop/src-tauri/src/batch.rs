@@ -154,7 +154,10 @@ mod tests {
         let o = |start: u64, data: &str| json!({"session_id": "s", "ts": "t", "event": {"type": "terminal.output", "terminal_id": "term_1", "start": start, "end": start + 1, "data_b64": data}});
         b.push("event", o(0, "YQ=="));
         b.push("event", o(1, "Yg=="));
-        b.push("terminal.exited", json!({"terminal_id": "term_1", "code": 0}));
+        b.push(
+            "terminal.exited",
+            json!({"terminal_id": "term_1", "code": 0}),
+        );
         let out = b.take();
         assert_eq!(out.len(), 3);
         assert_eq!(out[1]["params"]["event"]["start"], 1);

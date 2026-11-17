@@ -3,14 +3,15 @@
 //! through `src/platform/tauri/` (01 §1.3).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use base64::Engine as _;
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode};
 use tauri::ipc::Channel;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::artifact;
 use crate::batch::BATCH_MS;
@@ -31,6 +32,43 @@ struct App {
     relay: Arc<Relay>,
     state: StateFile,
     artifacts: Mutex<HashMap<(String, u32), Arc<artifact::Rendered>>>,
+    /// Set in `setup`: the embedded frontend (release) holds `artifact-runtime/`.
+    handle: OnceLock<AppHandle>,
+    runtime_dirs: OnceLock<Vec<PathBuf>>,
+    runtime_cache: Mutex<HashMap<String, Arc<Vec<u8>>>>,
+}
+
+/// A file of the React artifact runtime (`packages/artifact-runtime/dist`), from the
+/// embedded frontend (`dist/artifact-runtime`) or a runtime folder; cached in memory.
+fn runtime_file(app: &App, rel: &str) -> Option<Arc<Vec<u8>>> {
+    if let Some(b) = app
+        .runtime_cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(rel)
+    {
+        return Some(b.clone());
+    }
+    let embedded = app
+        .handle
+        .get()
+        .and_then(|h| h.asset_resolver().get(format!("artifact-runtime/{rel}")))
+        .map(|a| a.bytes().to_vec());
+    let bytes = match embedded {
+        Some(b) => b,
+        None => {
+            let dirs = app
+                .runtime_dirs
+                .get_or_init(|| artifact::runtime_dirs(None));
+            artifact::read_runtime_file(dirs, rel)?
+        }
+    };
+    let bytes = Arc::new(bytes);
+    app.runtime_cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(rel.to_string(), bytes.clone());
+    Some(bytes)
 }
 
 /// Start (or re-attach after a reload) the stream of [`HostMessage`]s.
@@ -204,6 +242,24 @@ async fn serve_artifact(app: Arc<App>, path: String) -> Response<Vec<u8>> {
             artifact::BRIDGE_JS.as_bytes().to_vec(),
         );
     }
+    if path.starts_with("/_genie/runtime/") {
+        let Some(rel) = artifact::runtime_rel(&path) else {
+            return respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec());
+        };
+        return match runtime_file(&app, rel) {
+            Some(bytes) => respond(
+                StatusCode::OK,
+                artifact::runtime_mime(rel),
+                (*bytes).clone(),
+            ),
+            None => respond(
+                StatusCode::NOT_FOUND,
+                "text/plain",
+                b"artifact runtime not built: run `pnpm --filter @genie/artifact-runtime build`"
+                    .to_vec(),
+            ),
+        };
+    }
     let Some((id, n, file)) = artifact::parse_path(&path) else {
         return respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec());
     };
@@ -216,6 +272,15 @@ async fn serve_artifact(app: Arc<App>, path: String) -> Response<Vec<u8>> {
             StatusCode::OK,
             rendered.mime,
             rendered.body.clone().into_bytes(),
+        );
+    }
+    if file == "source.js"
+        && let Some(js) = &rendered.source_js
+    {
+        return respond(
+            StatusCode::OK,
+            "text/javascript; charset=utf-8",
+            js.clone().into_bytes(),
         );
     }
     let script = file
@@ -259,7 +324,11 @@ pub fn run() -> Result<(), String> {
         relay: relay.clone(),
         state: StateFile::new(&dir),
         artifacts: Mutex::new(HashMap::new()),
+        handle: OnceLock::new(),
+        runtime_dirs: OnceLock::new(),
+        runtime_cache: Mutex::new(HashMap::new()),
     });
+    let setup_app = app.clone();
     let scheme_app = app.clone();
 
     let result = tauri::Builder::default()
@@ -287,10 +356,15 @@ pub fn run() -> Result<(), String> {
             host_save_file,
             host_log
         ])
-        .setup(|app| {
+        .setup(move |app| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("Genie");
             }
+            let _ = setup_app.handle.set(app.handle().clone());
+            let resources = app.path().resource_dir().ok();
+            let _ = setup_app
+                .runtime_dirs
+                .set(artifact::runtime_dirs(resources.as_deref()));
             Ok(())
         })
         .run(tauri::generate_context!())
