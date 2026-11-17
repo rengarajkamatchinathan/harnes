@@ -322,6 +322,34 @@ impl DaemonState {
         self.workspace_send(m::SessionListed::NAME, &SessionListed { change, session });
     }
 
+    /// A fresh `workspace.snapshot` to every workspace subscriber (after
+    /// `data.delete_all`, the feed's state changed wholesale).
+    pub(crate) fn broadcast_snapshot(&self) {
+        self.workspace_send(m::WorkspaceSnapshot::NAME, &snapshot(self));
+    }
+
+    /// Close and forget every session (`data.delete_all`): actors stopped, leases,
+    /// worktree/terminal bookkeeping dropped, `session.listed {deleted}` on the feed.
+    /// Returns how many sessions there were.
+    pub(crate) fn wipe_sessions(self: &Arc<Self>) -> u64 {
+        let all = self.registry.clear();
+        for info in &all {
+            let id = &info.summary.session_id;
+            self.engine.close_session(id);
+            self.leases.forget(id);
+            crate::code::session_deleted(self, id);
+            crate::terminal::session_deleted(self, id);
+            if !info.incognito {
+                self.listed(ListedChange::Deleted, info.summary.clone());
+            }
+        }
+        self.prompts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        all.len() as u64
+    }
+
     /// Start the bus → workspace-feed pump once (02 §3.2, §7 step 2).
     fn ensure_pump(self: &Arc<Self>) {
         if self.pump_started.swap(true, Ordering::SeqCst) {
@@ -1579,6 +1607,10 @@ fn workspace_subscribe(state: &Arc<DaemonState>, conn: &Arc<Conn>) {
 }
 
 fn send_snapshot(state: &DaemonState, conn: &Conn) {
+    conn.notify(m::WorkspaceSnapshot::NAME, &snapshot(state));
+}
+
+fn snapshot(state: &DaemonState) -> WorkspaceSnapshot {
     let mut sessions = state.registry.all_summaries();
     let mut pending = 0u32;
     for s in &mut sessions {
@@ -1595,12 +1627,9 @@ fn send_snapshot(state: &DaemonState, conn: &Conn) {
         .map(|c| c.client.clone())
         .collect();
     clients.sort_by(|a, b| a.client_instance_id.cmp(&b.client_instance_id));
-    conn.notify(
-        m::WorkspaceSnapshot::NAME,
-        &WorkspaceSnapshot {
-            sessions,
-            pending_asks: pending,
-            clients,
-        },
-    );
+    WorkspaceSnapshot {
+        sessions,
+        pending_asks: pending,
+        clients,
+    }
 }

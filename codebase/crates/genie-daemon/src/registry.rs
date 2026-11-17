@@ -107,6 +107,11 @@ impl Registry {
         self.lock().contains_key(id)
     }
 
+    /// Every session, archived and incognito included.
+    pub fn count(&self) -> usize {
+        self.lock().len()
+    }
+
     /// Apply an update; returns the new record.
     pub fn update(&self, p: &UpdateParams) -> Option<SessionInfo> {
         let mut map = self.lock();

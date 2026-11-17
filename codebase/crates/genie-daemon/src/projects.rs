@@ -13,7 +13,8 @@ use genie_core::runtime::projects::{ProjectError, ProjectsConfig, ProjectsHub, e
 use genie_core::runtime::{ModelResolver, RuntimeBuilder};
 use genie_protocol::api::project::{
     ArtifactGetResult, ArtifactListResult, ArtifactSummary, FileIdResult, MemoryItem,
-    MemoryListResult, MemoryState, ProjectIdResult, ProjectInfo, ProjectListResult,
+    MemoryListResult, MemoryState, ProjectFileInfo, ProjectFileListResult, ProjectIdResult,
+    ProjectInfo, ProjectListResult,
 };
 use genie_protocol::api::session::{
     ExportFormat, ExportResult, SearchHit, SearchResult, SearchScope,
@@ -132,6 +133,38 @@ fn memory_item(m: genie_store::memory::Memory) -> MemoryItem {
     }
 }
 
+/// `project.file.list`: the project's knowledge files, oldest first.
+fn project_files(store: &genie_store::Store, project_id: &str) -> Result<Value, RpcError> {
+    let files = store
+        .read(|c| {
+            if genie_store::projects::get(c, project_id)?.is_none() {
+                return Err(genie_store::StoreError::NotFound("project".into()));
+            }
+            genie_store::projects::files(c, project_id)
+        })
+        .map_err(store_err)?;
+    let files = files
+        .into_iter()
+        .map(|f| {
+            let size = f
+                .blob_id
+                .as_deref()
+                .and_then(|b| store.blob_row(b).ok().flatten())
+                .map(|b| b.size);
+            ProjectFileInfo {
+                file_id: f.id,
+                name: f.name,
+                mime: f.mime,
+                blob_id: f.blob_id,
+                tokens: f.tokens.and_then(|t| u64::try_from(t).ok()),
+                size,
+                added_at: genie_protocol::rfc3339_ms(u64::try_from(f.added).unwrap_or(0)),
+            }
+        })
+        .collect();
+    to_result(&ProjectFileListResult { files })
+}
+
 /// Handle the method if it is one of ours.
 /// The scope of the memory a `memory.update/delete` names, read before the change.
 pub(crate) fn memory_scope(svc: &Services, r: &Request) -> Option<String> {
@@ -201,6 +234,7 @@ pub(crate) fn dispatch(svc: &Services, r: &Request) -> Option<Result<Value, RpcE
         m::ProjectDelete::NAME,
         m::ProjectFileAdd::NAME,
         m::ProjectFileRemove::NAME,
+        m::ProjectFileList::NAME,
         m::ProjectIndexStatus::NAME,
         m::ArtifactList::NAME,
         m::ArtifactGet::NAME,
@@ -287,6 +321,9 @@ pub(crate) fn dispatch(svc: &Services, r: &Request) -> Option<Result<Value, RpcE
                 .map_err(project_err)?;
             to_result(&Empty {})
         }),
+        n if n == m::ProjectFileList::NAME => {
+            params::<m::ProjectFileList>(r).and_then(|p| project_files(&store, &p.project_id))
+        }
         n if n == m::ProjectIndexStatus::NAME => params::<m::ProjectIndexStatus>(r)
             .and_then(|p| to_result(&projects()?.status(&p.project_id).map_err(project_err)?)),
 

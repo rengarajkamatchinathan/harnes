@@ -124,6 +124,34 @@ impl PermissionAuthorizer {
             .unwrap_or_default()
     }
 
+    /// Rules remembered for `session` only (`permissions.rules.list`, session scope).
+    pub fn session_rules(&self, session: &str) -> Vec<String> {
+        self.remembered(session)
+            .into_iter()
+            .filter(|(o, _)| *o == Origin::Session)
+            .map(|(_, r)| r.to_string())
+            .collect()
+    }
+
+    /// Forget a remembered "always" rule. `session_scope`: the session-only copy in
+    /// `session`; otherwise the in-memory copies of a rule that was just removed from a
+    /// settings file (every session, or only `session`). Returns whether one was removed.
+    pub fn forget_rule(&self, session: Option<&str>, rule: &str, session_scope: bool) -> bool {
+        let mut g = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let mut removed = false;
+        for (id, st) in g.iter_mut() {
+            if session.is_some_and(|s| s != id) {
+                continue;
+            }
+            let before = st.remembered.len();
+            st.remembered.retain(|(o, r)| {
+                r.to_string() != rule || ((*o == Origin::Session) != session_scope)
+            });
+            removed |= st.remembered.len() != before;
+        }
+        removed
+    }
+
     /// The project root whose settings apply (Code sessions).
     fn root(s: &SessionSettings) -> Option<PathBuf> {
         if s.kind != SessionKind::Code {

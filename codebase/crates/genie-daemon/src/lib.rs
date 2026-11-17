@@ -14,6 +14,7 @@ mod blobs;
 mod code;
 mod keystore;
 mod lease;
+mod manage;
 mod listener;
 mod observe;
 mod ops;
@@ -435,7 +436,9 @@ fn build_engine(
         if let Some(a) = &services.audit {
             authz = authz.with_audit(a.clone());
         }
-        rb = rb.authorizer(Arc::new(authz));
+        let authz = Arc::new(authz);
+        services.authz = Some(authz.clone());
+        rb = rb.authorizer(authz);
         match McpPorts::default_ports() {
             Ok(ports) => {
                 let mcp = McpHub::new(

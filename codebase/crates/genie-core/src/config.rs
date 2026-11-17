@@ -373,6 +373,42 @@ impl ConfigHub {
         Ok(added)
     }
 
+    /// Remove a saved rule (Settings → Permissions). Returns false if it was not there.
+    pub fn remove_permission_rule(
+        &self,
+        root: Option<&Path>,
+        scope: ConfigScope,
+        class: &str,
+        rule: &str,
+    ) -> Result<bool, ConfigError> {
+        let removed = self.with_store(root, |s| s.remove_permission_rule(scope, class, rule))?;
+        if scope == ConfigScope::User {
+            self.refresh_others(root);
+        }
+        if removed {
+            self.emit(HubEvent::Config {
+                root: root.map(Path::to_path_buf),
+                scope,
+                keys: vec![format!("permissions.{class}")],
+            });
+        }
+        Ok(removed)
+    }
+
+    /// The `permissions` block per loaded layer with the file it came from
+    /// (`permissions.rules.list`).
+    pub fn permission_rule_files(
+        &self,
+        root: Option<&Path>,
+    ) -> Vec<(LayerKind, Option<PathBuf>, PermissionsSettings)> {
+        self.with_store(root, |s| {
+            s.permission_layers()
+                .into_iter()
+                .map(|(k, p)| (k, s.paths().file(k), p))
+                .collect()
+        })
+    }
+
     /// Edit a JSON file's top-level object in place (0600, atomic) and reload stores.
     /// Used for `mcpServers` entries (`mcp.add` / `mcp.remove`).
     pub fn edit_mcp_servers(
@@ -457,6 +493,11 @@ impl ConfigHub {
 
     pub fn trusted(&self, root: &Path) -> bool {
         Self::trusted_in(&self.lock(), root)
+    }
+
+    /// `trust.list`: the stored folder decisions (`trust.json`).
+    pub fn trust_list(&self) -> Vec<genie_config::trust::TrustEntry> {
+        self.lock().trust.entries().to_vec()
     }
 
     /// `trust.get`.

@@ -38,6 +38,8 @@ pub enum AuditEvent {
     Usage,
     HookRan,
     TrustChanged,
+    /// Settings → Privacy → "Delete all data" (04 §8).
+    DataDeleted,
 }
 
 impl AuditEvent {
@@ -58,6 +60,7 @@ impl AuditEvent {
             AuditEvent::Usage => "usage.request",
             AuditEvent::HookRan => "hook.ran",
             AuditEvent::TrustChanged => "trust.changed",
+            AuditEvent::DataDeleted => "data.deleted",
         }
     }
 }
