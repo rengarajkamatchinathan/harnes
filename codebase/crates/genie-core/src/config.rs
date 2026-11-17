@@ -476,7 +476,7 @@ impl ConfigHub {
     }
 
     /// Project definitions that need approval (D43): `.mcp.json` and project-settings
-    /// `mcpServers` entries.
+    /// `mcpServers` entries, and project-settings `hooks`.
     pub fn project_definitions(&self, root: &Path) -> Vec<Definition> {
         let mut defs: BTreeMap<String, Value> = BTreeMap::new();
         if let Some(Value::Object(m)) =
@@ -485,13 +485,17 @@ impl ConfigHub {
             defs.extend(m);
         }
         defs.extend(self.mcp_json(root));
-        defs.into_iter()
+        let mut out: Vec<Definition> = defs
+            .into_iter()
             .map(|(name, value)| Definition {
                 kind: DefinitionKind::Mcp,
                 name,
                 value,
             })
-            .collect()
+            .collect();
+        // Project hooks (06 §12, 08 §2.3) need the same approval.
+        out.extend(crate::runtime::hooks::project_hook_definitions(self, root));
+        out
     }
 
     /// `trust.pending_definitions`.

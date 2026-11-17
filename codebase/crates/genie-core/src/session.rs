@@ -167,6 +167,15 @@ struct Shared {
     doorbell: Notify,
     status_tx: watch::Sender<LiveStatus>,
     subscribers: AtomicUsize,
+    /// Subagent sessions (D47): asks surface in the parent session, labelled.
+    relay: Mutex<Option<AskRelay>>,
+}
+
+/// Where a child session's asks go: the parent's pending asks, with `Ask.subagent` set.
+#[derive(Clone)]
+struct AskRelay {
+    parent: SessionHandle,
+    label: genie_protocol::ask::SubagentRef,
 }
 
 /// A cheap, cloneable handle to a session actor.
@@ -215,6 +224,7 @@ impl SessionHandle {
             doorbell: Notify::new(),
             status_tx,
             subscribers: AtomicUsize::new(0),
+            relay: Mutex::new(None),
         });
         let actor = sh.clone();
         sh.scope.spawn(async move {
@@ -229,6 +239,17 @@ impl SessionHandle {
 
     pub fn id(&self) -> &str {
         &self.sh.id
+    }
+
+    /// Make this a subagent session (D47): its asks are raised in `parent` (where they
+    /// are listed, answered and notified), labelled with `agent` and this session's id.
+    pub fn set_ask_relay(&self, parent: SessionHandle, agent: impl Into<String>) {
+        let label = genie_protocol::ask::SubagentRef {
+            session_id: self.sh.id.clone(),
+            agent: agent.into(),
+        };
+        *self.sh.relay.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(AskRelay { parent, label });
     }
 
     /// Write an inbox item and ring the doorbell. Returns once the item is committed
@@ -880,6 +901,15 @@ impl TurnCtx {
         if ask.created_at.is_empty() {
             ask.created_at = genie_protocol::rfc3339_ms(now_ms());
         }
+        let relay = self
+            .sh
+            .relay
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(r) = relay {
+            return self.relay_ask(r, ask).await;
+        }
         let ask_id = ask.id.clone();
         let kind = ask.kind;
         let (tx, rx) = oneshot::channel();
@@ -921,6 +951,56 @@ impl TurnCtx {
             self.sh.publish_logged(cancelled_ask(ask_id));
         }
         if !self.token().is_cancelled() && self.sh.lock().asks.is_empty() {
+            self.sh.set_status(LiveStatus::Running);
+        }
+        res
+    }
+}
+
+impl TurnCtx {
+    /// A subagent's ask, held by the parent session (D47): listed by its
+    /// `permission.pending`, answered with its `permission.respond`, notified when it has
+    /// no client. Keyed by this (child) turn, so the parent's own turn ending does not
+    /// cancel it; this turn ending does.
+    async fn relay_ask(&self, r: AskRelay, mut ask: Ask) -> Result<Value, TurnError> {
+        let parent = r.parent.sh.clone();
+        ask.session_id.clone_from(&parent.id);
+        ask.subagent = Some(r.label);
+        let ask_id = ask.id.clone();
+        let kind = ask.kind;
+        let (tx, rx) = oneshot::channel();
+        let published = {
+            let mut st = parent.lock();
+            st.asks.insert(
+                ask_id.clone(),
+                PendingAsk {
+                    turn_id: self.turn_id.clone(),
+                    ask: ask.clone(),
+                    tx,
+                },
+            );
+            parent.publish(CoreEvent::AskCreated {
+                ask_id: ask_id.clone(),
+                turn_id: self.turn_id.clone(),
+                kind,
+                ask: Some(Box::new(ask)),
+            })
+        };
+        published.map_err(TurnError::Internal)?;
+        if parent.subscribers.load(Ordering::SeqCst) == 0 {
+            self.sh.set_status(LiveStatus::Paused);
+            parent.deps.notifier.ask_paused(&parent.id, &ask_id, kind);
+        } else {
+            self.sh.set_status(LiveStatus::AwaitingAsk);
+        }
+        let res = tokio::select! {
+            r = rx => r.map_err(|_| TurnError::Cancelled),
+            () = self.token().cancelled() => Err(TurnError::Cancelled),
+        };
+        if res.is_err() && parent.lock().asks.remove(&ask_id).is_some() {
+            parent.publish_logged(cancelled_ask(ask_id));
+        }
+        if !self.token().is_cancelled() {
             self.sh.set_status(LiveStatus::Running);
         }
         res

@@ -22,9 +22,11 @@ genie-mcp.workspace = true
 genie-audit.workspace = true
 genie-skills.workspace = true
 genie-browser.workspace = true
+genie-process.workspace = true
 
 async-trait.workspace = true
 http.workspace = true
+schemars.workspace = true
 
 futures.workspace = true
 serde.workspace = true

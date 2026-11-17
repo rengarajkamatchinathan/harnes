@@ -90,6 +90,8 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
             class: "no_model_selected".into(),
             fix_link: None,
         })?;
+    // The session's agent (06 §11): model, effort and a narrowed mode.
+    let (settings, agent) = crate::runtime::agents::turn_settings(&rt, &sid, settings);
     let model = rt.models.resolve(&settings.model).map_err(resolve_err)?;
     let meta = rt.conversation.meta(&sid)?;
     let path = rt.conversation.path(&sid)?;
@@ -104,7 +106,13 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
     let turns = rt.turns.clone();
     let _active = turns.enter(&turn);
     let taint_cell = rt.taints.enter(&sid, &turn.turn_id);
+    let hooks = rt
+        .hooks
+        .as_ref()
+        .and_then(|h| crate::runtime::hooks::TurnHooks::new(h, &turn, &settings));
     let mut r = Run {
+        agent,
+        hooks,
         leaf: path.last().map(|m| m.id().to_string()),
         rt,
         turn,
@@ -184,6 +192,10 @@ struct Run {
     leaf: Option<String>,
     /// Untrusted content seen in this turn (SA-29): the source label.
     taint: Arc<Mutex<Option<String>>>,
+    /// The agent this session runs as (06 §11).
+    agent: Option<crate::runtime::agents::AgentDef>,
+    /// Hooks of this turn (06 §12; Code with hooks configured).
+    hooks: Option<Arc<crate::runtime::hooks::TurnHooks>>,
 }
 
 impl Run {
@@ -227,13 +239,26 @@ impl Run {
                 self.append_synthetic(fragments::INTERRUPTED_RESUME.trim_end())?;
             }
             InboxKind::User | InboxKind::Synthetic { .. } => {
+                let first = self.leaf.is_none();
                 self.baseline_delta()?;
+                // `prompt.submit` / `session.start` hooks (06 §12).
+                let extra = match self.prompt_hooks(first).await {
+                    Ok(extra) => extra,
+                    Err(message) => {
+                        self.publish(SessionEvent::SessionError(
+                            genie_protocol::event::SessionError {
+                                code: "hook_blocked".into(),
+                                message,
+                                link: None,
+                            },
+                        ))?;
+                        return Ok(());
+                    }
+                };
                 let input = &self.turn.input;
-                let msg = Message::new(
-                    input.message_id.clone(),
-                    Role::User,
-                    wire::input_parts(&self.rt.resolve_input(&self.sid, &input.parts)),
-                );
+                let mut parts = wire::input_parts(&self.rt.resolve_input(&self.sid, &input.parts));
+                parts.extend(extra.into_iter().map(Part::text));
+                let msg = Message::new(input.message_id.clone(), Role::User, parts);
                 let kind = if matches!(input.kind, InboxKind::Synthetic { .. }) {
                     MsgKind::Synthetic
                 } else {
@@ -324,6 +349,9 @@ impl Run {
     }
 
     fn max_steps(&self) -> u32 {
+        if let Some(n) = self.agent.as_ref().and_then(|a| a.max_steps) {
+            return n.max(1);
+        }
         match self.settings.kind {
             SessionKind::Code => self.rt.cfg.max_steps_code,
             _ => self.rt.cfg.max_steps_chat,
@@ -337,6 +365,7 @@ impl Run {
         let mut continues = 0u32;
         let mut overflow = 0usize;
         let mut compacted_for: Option<u32> = None;
+        let mut hook_continues = 0u32;
         loop {
             if self.turn.token().is_cancelled() {
                 return Err(TurnError::Cancelled);
@@ -397,12 +426,87 @@ impl Run {
                     if steered || finish == FinishReason::Paused {
                         continue;
                     }
-                    // Extension points: `finish = stop` with subagents running (D47) waits
-                    // for their reports; a `turn.end` hook may ask to continue (D48).
+                    // `finish = stop` with subagents running waits for their reports (D47);
+                    // a `turn.end` hook may ask to continue (D48).
+                    if self.wait_for_children().await?
+                        || self.turn_end_hook(&mut hook_continues).await?
+                    {
+                        continue;
+                    }
                     return Ok(());
                 }
             }
         }
+    }
+
+    /// Children still running (D47): wait for a report (it is steered in) or until none
+    /// run. `true` = something was injected, take another step.
+    async fn wait_for_children(&mut self) -> Result<bool, TurnError> {
+        use crate::runtime::subagents::SubagentHub;
+        let Some(hub) = self.rt.subagents.clone() else {
+            return Ok(false);
+        };
+        let mut waiting = false;
+        let r = loop {
+            match self.inject_steer() {
+                Ok(true) => break Ok(true),
+                Ok(false) => {}
+                Err(e) => break Err(e),
+            }
+            if !hub.has_running(&self.sid) {
+                break Ok(false);
+            }
+            if !waiting {
+                SubagentHub::show_waiting(&self.turn, true);
+                waiting = true;
+            }
+            if let Err(e) = hub.wait_change(&self.turn).await {
+                break Err(e);
+            }
+        };
+        if waiting && !self.turn.token().is_cancelled() {
+            SubagentHub::show_waiting(&self.turn, false);
+        }
+        r
+    }
+
+    /// `turn.end` hooks may ask to continue, at most 3 times per turn (D48).
+    async fn turn_end_hook(&mut self, n: &mut u32) -> Result<bool, TurnError> {
+        let Some(h) = self.hooks.clone() else {
+            return Ok(false);
+        };
+        if *n >= crate::runtime::hooks::MAX_TURN_END_CONTINUES {
+            return Ok(false);
+        }
+        let Some(message) = h.turn_end(*n).await else {
+            return Ok(false);
+        };
+        *n += 1;
+        let text = prompts::render(
+            fragments::HOOK_CONTINUE.trim_end(),
+            &[("message", message.trim())],
+            &[],
+        );
+        self.append_synthetic(&text)?;
+        Ok(true)
+    }
+
+    /// `prompt.submit` (user prompts) and `session.start` (first turn): extra context, or
+    /// `Err(message)` when a hook blocks the prompt.
+    async fn prompt_hooks(&self, first: bool) -> Result<Vec<String>, String> {
+        let Some(h) = &self.hooks else {
+            return Ok(Vec::new());
+        };
+        let mut extra = Vec::new();
+        if first && let Some(c) = h.session_start().await {
+            extra.push(c);
+        }
+        if self.turn.input.kind == InboxKind::User
+            && let Some(c) = h.prompt_submit(&self.turn.input.text).await?
+        {
+            extra.push(c);
+        }
+        Ok(extra)
     }
 
     /// Undo the max-steps note when the step is retried after compaction.
@@ -461,7 +565,7 @@ impl Run {
             },
             family: spec.family.clone(),
             provider: spec.provider.0.clone(),
-            agent_body: None,
+            agent_body: self.agent.as_ref().and_then(|a| a.body.clone()),
         })
     }
 
@@ -615,6 +719,7 @@ impl Run {
             started.mark(None);
         }
         let scope = self.turn.scope().child("tool");
+        let call_hooks = self.hooks.as_ref().map(|h| h.call(&name));
         let ctx = ToolCtx {
             env: self.env.clone(),
             turn_id: self.turn.turn_id.clone(),
@@ -629,14 +734,16 @@ impl Run {
                 mode: self.settings.mode,
                 started: started.clone(),
                 taint: self.taint.clone(),
+                hooks: call_hooks.clone(),
             }),
             events: Arc::new(TurnEvents(self.turn.clone())),
         };
         let input = call.input.clone();
         let token = scope.token().clone();
+        let started2 = started.clone();
         let task = scope.spawn(async move {
             tokio::select! {
-                r = tool.execute(input, ctx) => r,
+                r = crate::runtime::hooks::run_tool(tool, input, ctx, call_hooks, started2) => r,
                 () = token.cancelled() => Err(genie_tools::ToolError::Cancelled),
             }
         });
@@ -1175,9 +1282,17 @@ impl Run {
         focus: Option<&str>,
         tail_scale: f64,
     ) -> Result<(), TurnError> {
+        if let Some(h) = self.hooks.clone() {
+            h.compact(true, trigger).await;
+        }
         self.turn.set_compacting(true);
         let r = self.compact_inner(trigger, focus, tail_scale).await;
         self.turn.set_compacting(false);
+        if r.is_ok()
+            && let Some(h) = self.hooks.clone()
+        {
+            h.compact(false, trigger).await;
+        }
         r
     }
 
