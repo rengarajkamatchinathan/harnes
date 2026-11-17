@@ -31,12 +31,16 @@ base64 = "0.22"
 bytes = "1"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { version = "4", features = ["derive", "env"] }
+# Inline TUI (07 §1): ratatui inline viewport on crossterm.
+crossterm = "0.29"
 data-encoding = "2"
 futures = "0.3"
 getrandom = "0.3"
 hex = "0.4"
 http = "1"
+ignore = "0.4"
 libc = "0.2"
+ratatui = "0.30"
 # SQLCipher (04 §2). Vendored OpenSSL: macOS ships LibreSSL without headers.
 rusqlite = { version = "0.43", features = ["bundled-sqlcipher-vendored-openssl", "backup"] }
 regex = "1"
@@ -56,6 +60,7 @@ tokio-util = { version = "0.7", features = ["rt", "codec"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ulid = "1"
+unicode-width = "0.2"
 zeroize = { version = "1", features = ["derive"] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
