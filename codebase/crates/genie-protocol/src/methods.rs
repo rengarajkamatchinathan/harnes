@@ -231,7 +231,7 @@ methods! {
     GitStatus = "git.status", Request, false, code::SessionPathParams => code::GitStatusResult;
     GitDiff = "git.diff", Request, false, code::SessionPathParams => code::TextResult;
     GitCommit = "git.commit", Request, true, code::GitCommitParams => code::GitCommitResult;
-    WorktreeFinish = "worktree.finish", Request, true, code::WorktreeFinishParams => Empty;
+    WorktreeFinish = "worktree.finish", Request, true, code::WorktreeFinishParams => code::WorktreeFinishResult;
     FilesTree = "files.tree", Request, false, code::SessionPathParams => code::FilesTreeResult;
     FilesRead = "files.read", Request, false, code::SessionPathParams => code::FilesReadResult;
     ImportScan = "import.scan", Request, false, code::ImportParams => code::ImportResult;

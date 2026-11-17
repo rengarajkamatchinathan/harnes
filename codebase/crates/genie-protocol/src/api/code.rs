@@ -88,6 +88,10 @@ pub struct GitCommitResult {
     pub commit: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr_url: Option<String>,
+    /// What the user still has to do (e.g. the commands that open a pull request when
+    /// the engine doesn't push itself).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -105,6 +109,22 @@ pub enum WorktreeAction {
 pub struct WorktreeFinishParams {
     pub session_id: String,
     pub action: WorktreeAction,
+}
+
+/// `worktree.finish` result (additive: older clients read it as `{}`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WorktreeFinishResult {
+    /// The worktree folder was removed.
+    #[serde(default)]
+    pub removed: bool,
+    /// The `genie/<slug>` branch was deleted.
+    #[serde(default)]
+    pub branch_deleted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit: Option<String>,
+    /// What happened, for the user (PR commands, why a branch was kept …).
+    #[serde(default)]
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

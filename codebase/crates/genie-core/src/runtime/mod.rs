@@ -27,6 +27,8 @@ pub mod attachments;
 pub mod bridge;
 pub mod browser;
 pub mod chat_search;
+pub mod checkpoint;
+pub mod code;
 pub mod context;
 pub mod conversation;
 pub mod extract;
@@ -131,6 +133,8 @@ pub struct AgentRuntime {
     pub memory_ctl: Option<Arc<memory_ctl::MemoryControl>>,
     /// Attachments in prompts (06 §2.5); without it they stay placeholders.
     pub attachments: Option<Arc<attachments::Attachments>>,
+    /// Shadow-git checkpoints around mutating steps (Code, D49).
+    pub checkpoints: Option<Arc<checkpoint::Checkpoints>>,
 }
 
 impl AgentRuntime {
@@ -283,6 +287,7 @@ impl RuntimeBuilder {
                 projects: None,
                 memory_ctl: None,
                 attachments: None,
+                checkpoints: None,
             },
         }
     }

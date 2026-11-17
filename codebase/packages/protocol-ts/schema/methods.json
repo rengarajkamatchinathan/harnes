@@ -1341,7 +1341,7 @@
         "$ref": "#/$defs/WorktreeFinishParams"
       },
       "result": {
-        "$ref": "#/$defs/Empty"
+        "$ref": "#/$defs/WorktreeFinishResult"
       }
     },
     {

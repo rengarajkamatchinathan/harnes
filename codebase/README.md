@@ -38,7 +38,8 @@ crates/
                    prompts, progress, cancellation, elicitation/sampling/OAuth ports (06 §7)
   genie-tools      Tool trait + ports, registry, input repair/validation, output limits + spill,
                    v1 chat tools (`tool_output_read`, `memory_*`) (spec 06 §2.4, §4);
-                   `shell` tool + command scanner (06 §13), `web_fetch` / web search (06 §8)
+                   `shell` tool + command scanner (06 §13), `web_fetch` / web search (06 §8);
+                   Code file tools, shadow-git snapshots, worktrees (`code`, 06 §4.2, D49, D50)
   genie-skills     skills: scanner (built-in / user / trusted project), SKILL.md schema, catalogue
                    (policy, enable state, index, load, skill_read), .zip/.skill import, signed
                    skills directory; Markdown slash commands (06 §9)
@@ -208,12 +209,13 @@ output, exit codes 0/1/2/3, `--on-ask deny`, `--ask-timeout`, an ask answered vi
 
 - **Engine-side pieces the CLI can't supply:** the daemon answers `not_implemented` for
   `provider.*`, `model.list`,
-  `usage.query`, `checkpoint.*` (`/rewind`), `worktree.finish`, `session.compact`
+  `usage.query`, `session.compact`
   and `import.*`; the CLI wires each one and prints "not available in this
   engine build yet". `session.get` returns an empty `path`, so `genie chat open` replays the
   event log instead of printing the branch.
 - **Headless flags:** `--allow/--deny`, `--settings`, `--add-dir` and `--worktree <name>` go
-  out on `session.create` (session-only layer, `worktree_name`); worktrees are not created yet.
+  out on `session.create` (session-only layer, `worktree_name`); the daemon now creates the
+  worktree (see "Code mode" below).
 - **`no_provider_configured`:** core maps every `TurnError::Provider` to the bare code
   `GENIE-PROV`, so the class is lost on the wire; the CLI words bare `GENIE-PROV` as "provider
   failed / none configured". Suggested core change: put the class in `ErrorInfo.message` or the
@@ -438,6 +440,39 @@ PDF extractor, image budget and embedders; `genie-daemon/tests/projects.rs` (in-
 chunked upload round trip (conflict, retry, early end, ranged reads, `blob.put.path`), project
 methods and files, memory methods and state, artifact list/get, `session.search`, `session.export`.
 
+### Spec 06 §4.2, D49, D50, 02 §6.10 (Code mode: file tools, checkpoints, worktrees)
+
+| § | What | Where |
+|---|---|---|
+| 06 §4.2 `read` | path relative to the workspace (or absolute, `~/`), `offset`/`limit`, `cat -n` numbering, 2,000 lines / 50 KiB / 2,000 chars per line with a "read with offset=N" note, BOM stripped, binary/image/PDF reported (not shown), "similar names" on a miss, pages spilled-output refs; records **mtime + hash** per session | `genie-tools::code::{read, ReadState}` |
+| 06 §4.2 `write` | create (folders too) or overwrite **only after read** + staleness check, keeps the file's CRLF/BOM, atomic temp + rename keeping permissions, `Diff` preview ask | `code::write` |
+| 06 §4.2 `edit` / `multi_edit` | `old_string/new_string/replace_all` (aliases `old_str`, `file_path` …); 3 tiers exact → Unicode-normalised (quotes/dashes/nbsp folded char for char, mapped back to the original bytes) → trailing-whitespace-tolerant lines; a non-unique match fails unless `replace_all`; "closest lines" hint (Levenshtein) on a miss; LF view preserving CRLF + BOM; read-before-edit + staleness **inside the per-path lock**; ask **after** the match (a miss never asks); empty `old_string` creates a file; `multi_edit` all or nothing | `code::{edit, matcher}` |
+| 06 §4.2 `patch` | Codex envelope (Add / Delete / Update + Move to, `@@` context headers, `*** End of File`), fuzz (exact → trim-end → trim), all paths locked in sorted order, one ask per file, atomic write with rollback | `code::patch` |
+| 06 §4.2 `grep` / `glob` / `list` | ripgrep's own crates in-process (`ignore` walker: `.gitignore` in repos, `.ignore`, git excludes, hidden skipped; `regex`; `globset`), so every OS behaves alike; grep `content` / `files_with_matches` / `count`, context lines, glob filter, binary and > 20 MiB files skipped; glob newest first; list as an indented tree; 100 results / 500 entries, 30 s, cancellable | `code::search` |
+| 06 §4.2 `todo_write` | whole-list replace, kept per session (`TodoStore`) | `code::todo` |
+| 06 §4.2 registry / permissions | Code registry only (`RuntimeBuilder::code`); every tool asks the gate with the absolute path (`read/grep/glob/list` → `Action::Read`, editors → `Action::Edit` + `Diff` preview) through the existing `permissions::action_for` names | `runtime::code`, `runtime::permissions` |
+| 06 §4.2 "serialised per path" | `PathLocker` port; `EnginePathLocks` on `genie-core::locks::PathLocks`, one instance per daemon (all sessions and clients) | `code::PathLocker`, `runtime::code::EnginePathLocks` |
+| 04 §10 / D49 shadow git | `<data>/snapshots/<project or _>/<fnv(work tree)>/` (0700), `GIT_DIR` + `GIT_WORK_TREE`, alternates to the user's objects, index seeded from the user's index, user `info/exclude` synced, untracked files > 2 MiB skipped and reported, non-git folders snapshotted directly (≤ 50,000 untracked files); `git` through `genie-process` (kill-tree, `GIT_DIR`-style overrides removed, no prompts) | `code::{git, snapshot}` |
+| D49 per step | before snapshot lazily, just before the first `edit/write/multi_edit/patch/shell` call of a step; after snapshot when the calls joined; a step that changed files → JSONL record + refs `refs/genie/<session>/<n>/{before,after}` + durable `checkpoint.created {step_ref = the step's assistant message id, before_tree, after_tree, skipped}` | `runtime::checkpoint`, hook in `runtime::turn` |
+| D49 rewind | `checkpoint.list` (per message on the active path, `files_changed`), `preview` (files with their change relative to now, `external_changes` = touched paths changed outside Genie between checkpoints or since the last, `skipped`), `rewind` files / conversation / both (path-level restore through a temporary index; leaf → the message's parent + `branch.switched`), two-phase: `undo` restores files and leaf, the next turn commits; refused while the session runs (`busy`) | `runtime::checkpoint`, `genie-daemon::code` |
+| D49 retention | `session.delete` drops the session's refs and log and runs `git gc --prune=now`; `Checkpoints::disk_usage` per project folder | `Checkpoints::drop_session` |
+| 06 §15 / D50 worktrees | `session.create` (Code) with `worktree: new` or `worktree_name` → `../<repo>.genie-worktrees/<slug>/` on `genie/<slug>` from HEAD (numeric suffixes; a session started in a subfolder keeps its relative folder); `auto` → only when another Code session already works in that repo (otherwise, or on failure, the main checkout); `new` in a non-git folder → `invalid_state` | `code::worktree`, `genie-daemon::code` |
+| D50 finish | `worktree.finish`: merge (clean worktree, main checkout on the base branch, `--no-ff`, aborted on conflict, then remove + `branch -d`; the session moves back to the main checkout), pr (network-free: returns the push + `gh pr create` commands), keep, discard (remove; the branch is deleted only when nothing is unmerged/unpushed, else kept and said so); `session.delete` removes a clean, fully merged/pushed worktree | `code::worktree::finish`, `genie-daemon::code` |
+| 02 §6.10 panels | `git.status` (porcelain v1, branch, added/modified/deleted incl. untracked), `git.diff` (against HEAD, or the index on an unborn branch), `git.commit` (`paths`; `then: push` runs `git push -u origin HEAD`, `then: pr` returns instructions), `files.tree` (one level, ignore rules, hidden files shown except `.git`), `files.read` (text ≤ 2 MiB, else a store blob); paths confined to the session folder (symlink escapes refused) | `genie-daemon::code` |
+| Protocol (additive) | `worktree.finish` → `WorktreeFinishResult {removed, branch_deleted, merge_commit?, message}` (was `{}`); `GitCommitResult.note` | `genie-protocol::api::code` |
+
+Tests: `genie-tools/tests/code.rs` (every tool on temp folders: paging, read-before-edit, staleness,
+another session's read, CRLF/BOM, matcher tiers, uniqueness, miss hint without an ask, decline,
+atomic multi-edit, patch rollback + move/delete, ignore rules, 100-result cap, todo, concurrent edits
+of one path; shadow snapshots in a real repo and a plain folder, big-file skip, restore, refs + gc;
+worktree create / suffix / merge / PR / discard with and without unpushed commits, non-git refusal)
+plus unit tests (matcher, Myers diff, patch parser); `genie-core/tests/code.rs` (cassette turns: read
+→ two parallel edits of one file + write in one step → one checkpoint; a shell step's checkpoint;
+list / preview / rewind / undo of files, conversation and both; external-change detection; a failed
+edit and read-only steps leave none; drop); `genie-daemon/tests/code.rs` (in-memory transport:
+plain / auto / named worktree sessions, `files.tree/read` + escape refusal, `git.status/diff/commit`,
+merge / keep / discard, checkpoint errors, `new` without git).
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -508,7 +543,7 @@ methods and files, memory methods and state, artifact list/get, `session.search`
   yet); there is no `--enable-browser` CLI flag (the wire field exists); "always" answers for
   sites are saved as `Browser(site:…)` permission rules, not as `browser.sites` states;
   `attachment_path` is not implemented; `browser.popout` is not routed.
-- **`worktree_name`** and `add_dirs` are stored; worktrees themselves are not created yet.
+- **`add_dirs`** is stored and fed to the evaluator; worktrees are created (see "Code mode").
 - **Audit** covers the events listed in the coverage table; tool calls, usage, sign-ins and
   hook runs are not recorded yet.
 
@@ -532,7 +567,7 @@ methods and files, memory methods and state, artifact list/get, `session.search`
 
 ### Spec 02 gaps and deviations
 
-- **Methods owned by other specs** (providers, terminal, Code mode, `export.all`,
+- **Methods owned by other specs** (providers, terminal, import/`export.all`,
   `browser.popout`) are typed in the table and generated
   into TS, but the daemon answers `method_not_found` with `data.reason = "not_implemented"`
   until their subsystem lands.
@@ -551,10 +586,11 @@ methods and files, memory methods and state, artifact list/get, `session.search`
 
 ### Spec 06 gaps and deviations
 
-- **Out of scope here (typed extension points only):** code tools (§4.2), `tool_search`
+- **Out of scope here (typed extension points only):** `tool_search`
   deferral (§7), subagents (§11:
   `finish = stop` with running children), hooks (§12: `turn.end` continue, `compact.before/after`),
-  checkpoints (D49).
+  and nothing else (artifacts, `chat_search` / `project_search`: see "Projects, artifacts…";
+  Code tools and checkpoints: see "Code mode").
 - **Native compaction** (`capabilities.native_compaction`) is not used; we always write our own
   summary. Re-injection after compaction covers the rebuilt baseline only (skills, artifact
   refs, read-state, grants, todo, MCP resources come with their subsystems). If the summary
@@ -570,8 +606,8 @@ methods and files, memory methods and state, artifact list/get, `session.search`
   are read, see the projects section). `UsageLine` web-search fees are not counted.
 - **Wire records** for byte-exact replay are cached in memory per daemon run (the store's
   `wire_record` table stores request/response blobs, not compiled items).
-- **Parallel tools:** all calls of a step run concurrently; per-path serialisation of mutating
-  file tools arrives with the code tools (`PathLocks` exists).
+- **Parallel tools:** all calls of a step run concurrently; mutating file tools serialise per
+  path through `PathLocks` (shell commands are not path-locked).
 - **`session.get`** returns the active path but no `siblings`; `prompt` with `parent_id` (edit →
   branch) is still refused. Session metadata stays in the daemon's in-memory registry.
 - **Model resolution in the daemon:** bundled catalog + preset routes + credentials from the
@@ -600,7 +636,8 @@ methods and files, memory methods and state, artifact list/get, `session.search`
 - **Blobs**: `put_blob` takes the whole buffer (two passes would be needed for streaming input
   because the address is the plaintext hash); no streaming writer yet.
 - **Not implemented:** long resumable data migrations (kv cursor jobs); export-all `.zip` (SA-17),
-  session import with id remapping; checkpoints / shadow git (§10, M5);
+  session import with id remapping (shadow git §10 lives in
+  `genie-tools::code::snapshot` + `genie-core::runtime::checkpoint`, see "Code mode");
   the in-memory `Store` for incognito (§8); the daily scheduler that calls `run_maintenance`.
 - **Build:** `rusqlite` uses `bundled-sqlcipher-vendored-openssl` (macOS has no OpenSSL headers);
   it needs Perl and a C compiler. Not yet tried on Windows with `scripts/cargo-win-gnu.sh`.
@@ -740,3 +777,32 @@ methods and files, memory methods and state, artifact list/get, `session.search`
   category navigation always confirm even when the site was allowed; downloads triggered by an agent
   action from an unknown frame are attributed to the acting session; refs keep counting up per tab
   so a stale ref never names a new element.
+
+### Code mode (06 §4.2, D49, D50) gaps and deviations
+
+- **Not implemented:** `ask_user` (needs a `question` ask port for tools); `task` / `task_wait`
+  (subagents workstream); the opt-in formatter after edits; images/PDFs in `read` (`ToolOutput`
+  has no image part); `prefers_patch` gating (`patch` is offered to every model in Code); the
+  worktree setup command (trust + hash approval); `worktrees.dir` / `branchPrefix` from settings
+  (the fields exist on `CreateSpec` / `CodeServices`); the Settings → Developer list of dirty
+  worktrees; `git worktree list --porcelain` reconciliation at startup; `worktree` table rows
+  (worktrees are tracked in daemon memory, like sessions); the Settings clean-up action and the
+  policy caps `checkpoints.maxDays/maxSizeMB`; checkpoint ids on `message.snapshot_before/after`
+  (records live in the shadow dir's JSONL so `StoredMessage` stays unchanged).
+- **grep/glob/list** use ripgrep's crates in-process instead of spawning a system or bundled
+  `rg` (same ignore/hidden rules, no binary to ship or pin).
+- **Non-git folders** use the same shadow git (nothing to borrow from) instead of the store's
+  blob fallback; a tree with more than 50,000 untracked files is not snapshotted (logged).
+- **Checkpoints:** only steps whose trees differ are recorded (no empty checkpoints); restoring
+  the conversation moves the leaf to the chosen message's **parent** (the message is asked again,
+  as in Claude Code); a second rewind commits the first; staged state is in memory (a daemon
+  restart commits it). Objects borrowed through alternates can vanish if the user's repo prunes
+  them (inherent to the alternates design). A shell command moved to the background is captured
+  by the next mutating step, not its own.
+- **Edits:** `patch` doesn't require a prior `read` (hunk context guards it) but refuses files
+  read and changed since; `write` over a non-UTF-8 file replaces it as text; shell commands are not
+  path-locked.
+- **Worktree `auto`** treats "running session" as any other Code session in the daemon whose
+  folder is inside the repo; slugs come from `worktree_name` or `session` (the title isn't known
+  at create). `pr` and `git.commit then: pr` never touch the network (instructions only);
+  `then: push` does run `git push`.

@@ -10,6 +10,7 @@
 //!   crash recovery via execution claims, standalone lease mode (01 §4.4).
 
 mod blobs;
+mod code;
 mod keystore;
 mod lease;
 mod listener;
@@ -34,6 +35,7 @@ use genie_core::runtime::permissions::PermissionAuthorizer;
 use genie_core::runtime::{ConversationStore, ModelResolver, NoModels, RuntimeBuilder};
 use genie_core::{Engine, EngineBuilder, TaskScope};
 
+pub use code::CodeServices;
 pub use keystore::PlaceholderKeyStore;
 
 pub use blobs::Uploads;
@@ -267,6 +269,16 @@ fn build_engine(
     rb = rb
         .shell(shell.clone())
         .web(genie_tools::web::WebConfig::default());
+    // Code file tools on the shared path locks + shadow-git checkpoints (06 §4.2, D49).
+    let code_cfg = genie_core::runtime::code::code_config(
+        registry.clone(),
+        Arc::new(genie_core::locks::PathLocks::new()),
+    );
+    let checkpoints = genie_core::runtime::checkpoint::Checkpoints::new(
+        ep.data_dir.join("snapshots"),
+        registry.clone(),
+    );
+    rb = rb.code(code_cfg.clone()).checkpoints(checkpoints.clone());
 
     // The agent browser (06 §10): built now, Chrome launched on first use.
     let browser_host = {
@@ -367,6 +379,14 @@ fn build_engine(
     let runner = rb.build();
     let conversation = runner.conversation();
     services.runtime = Some(runner.runtime().clone());
+    services.code = Some(Arc::new({
+        let mut c = CodeServices::new(registry.clone());
+        c.conversation = Some(conversation.clone());
+        c.checkpoints = Some(checkpoints);
+        c.code = Some(code_cfg);
+        c.store = store.clone();
+        c
+    }));
     {
         let sh = shell.clone();
         let br = services.browser.clone();

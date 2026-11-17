@@ -12,6 +12,7 @@
 //! [`web::Resolver`], [`web::SearchBackend`]) in their configs.
 
 pub mod chat;
+pub mod code;
 pub mod output;
 pub mod registry;
 pub mod shell;

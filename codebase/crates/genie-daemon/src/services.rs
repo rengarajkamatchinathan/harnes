@@ -51,6 +51,8 @@ pub struct Services {
     pub projects: Option<Arc<genie_core::runtime::projects::ProjectsHub>>,
     pub memory_ctl: Option<Arc<genie_core::runtime::memory_ctl::MemoryControl>>,
     pub uploads: crate::blobs::Uploads,
+    /// Code mode: checkpoints, worktrees, git and files methods (02 §6.10).
+    pub code: Option<Arc<crate::code::CodeServices>>,
 }
 
 pub(crate) enum Handled {

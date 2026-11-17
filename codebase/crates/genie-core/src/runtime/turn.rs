@@ -103,6 +103,10 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
     let registry = rt.registry_for(&sid, &settings);
     let turns = rt.turns.clone();
     let _active = turns.enter(&turn);
+    // A new turn commits a staged rewind (D49 two-phase).
+    if let Some(c) = &rt.checkpoints {
+        c.commit_staged(&sid);
+    }
     let taint_cell = rt.taints.enter(&sid, &turn.turn_id);
     let mut r = Run {
         leaf: path.last().map(|m| m.id().to_string()),
@@ -115,6 +119,7 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
         env,
         registry,
         taint: taint_cell,
+        step_cp: None,
     };
     let res = r.go().await;
     r.rt.taints.leave(&r.sid, &r.turn.turn_id);
@@ -184,6 +189,8 @@ struct Run {
     leaf: Option<String>,
     /// Untrusted content seen in this turn (SA-29): the source label.
     taint: Arc<Mutex<Option<String>>>,
+    /// The running step's checkpoint (Code, D49).
+    step_cp: Option<Arc<crate::runtime::checkpoint::StepCheckpoint>>,
 }
 
 impl Run {
@@ -653,7 +660,14 @@ impl Run {
         };
         let input = call.input.clone();
         let token = scope.token().clone();
+        let cp = self
+            .step_cp
+            .clone()
+            .filter(|_| crate::runtime::checkpoint::StepCheckpoint::captures(tool.name()));
         let task = scope.spawn(async move {
+            if let Some(cp) = cp {
+                cp.before().await;
+            }
             tokio::select! {
                 r = tool.execute(input, ctx) => r,
                 () = token.cancelled() => Err(genie_tools::ToolError::Cancelled),
@@ -696,6 +710,10 @@ impl Run {
             model: self.settings.model.clone(),
             route: format!("{}/{}", route.provider, route.protocol.kind().as_str()),
         }))?;
+        self.step_cp = match &self.rt.checkpoints {
+            Some(c) if !final_step => c.step(&self.sid, &self.settings, &self.turn.turn_id).await,
+            _ => None,
+        };
         let step_scope = self.turn.scope().child("step");
         let mut stream = self
             .model
@@ -1048,6 +1066,11 @@ impl Run {
         }
         for e in ended {
             self.publish(SessionEvent::ToolEnded(e))?;
+        }
+        if let Some(cp) = self.step_cp.take()
+            && let Some(ev) = cp.finish(&msg_id).await
+        {
+            self.publish(SessionEvent::CheckpointCreated(ev))?;
         }
 
         let client_calls = !results.is_empty();

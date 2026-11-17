@@ -113,7 +113,7 @@ export interface Requests {
   "git.status": { params: T.SessionPathParams; result: T.GitStatusResult };
   "git.diff": { params: T.SessionPathParams; result: T.TextResult };
   "git.commit": { params: T.GitCommitParams; result: T.GitCommitResult };
-  "worktree.finish": { params: T.WorktreeFinishParams; result: T.Empty };
+  "worktree.finish": { params: T.WorktreeFinishParams; result: T.WorktreeFinishResult };
   "files.tree": { params: T.SessionPathParams; result: T.FilesTreeResult };
   "files.read": { params: T.SessionPathParams; result: T.FilesReadResult };
   "import.scan": { params: T.ImportParams; result: T.ImportResult };
@@ -495,7 +495,7 @@ export class GenieClient {
     subscribe: (params: T.Empty = {}): Promise<T.Empty> => this.t.request("workspace.subscribe", params) as Promise<T.Empty>,
   };
   readonly worktree = {
-    finish: (params: T.WorktreeFinishParams): Promise<T.Empty> => this.t.request("worktree.finish", params) as Promise<T.Empty>,
+    finish: (params: T.WorktreeFinishParams): Promise<T.WorktreeFinishResult> => this.t.request("worktree.finish", params) as Promise<T.WorktreeFinishResult>,
   };
 }
 

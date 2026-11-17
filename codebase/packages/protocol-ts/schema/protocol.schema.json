@@ -2019,6 +2019,13 @@
         "commit": {
           "type": "string"
         },
+        "note": {
+          "description": "What the user still has to do (e.g. the commands that open a pull request when\nthe engine doesn't push itself).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "pr_url": {
           "type": [
             "string",
@@ -6567,6 +6574,33 @@
         "session_id",
         "action"
       ],
+      "type": "object"
+    },
+    "WorktreeFinishResult": {
+      "description": "`worktree.finish` result (additive: older clients read it as `{}`).",
+      "properties": {
+        "branch_deleted": {
+          "default": false,
+          "description": "The `genie/<slug>` branch was deleted.",
+          "type": "boolean"
+        },
+        "merge_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "default": "",
+          "description": "What happened, for the user (PR commands, why a branch was kept …).",
+          "type": "string"
+        },
+        "removed": {
+          "default": false,
+          "description": "The worktree folder was removed.",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     }
   },
