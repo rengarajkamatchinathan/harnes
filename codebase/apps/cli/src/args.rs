@@ -139,6 +139,9 @@ pub struct RunArgs {
     /// Private daemon that exits with this process (CI containers).
     #[arg(long)]
     pub standalone: bool,
+    /// Offer the browser tools in this (headless) session (06 §10).
+    #[arg(long)]
+    pub enable_browser: bool,
 }
 
 impl RunArgs {
@@ -149,6 +152,32 @@ impl RunArgs {
         } else {
             self.permission_mode.map(PermissionMode::to_mode)
         }
+    }
+
+    /// `--allow`/`--deny`/`--settings`/`--add-dir`/`--enable-browser` as the session-only
+    /// settings layer (paths made absolute).
+    pub fn overlay(&self) -> Option<genie_protocol::api::session::SessionSettingsOverlay> {
+        if self.allow.is_empty()
+            && self.deny.is_empty()
+            && self.settings.is_none()
+            && self.add_dir.is_empty()
+            && !self.enable_browser
+        {
+            return None;
+        }
+        let abs = |p: &PathBuf| {
+            std::path::absolute(p)
+                .unwrap_or_else(|_| p.clone())
+                .to_string_lossy()
+                .into_owned()
+        };
+        Some(genie_protocol::api::session::SessionSettingsOverlay {
+            allow: self.allow.clone(),
+            deny: self.deny.clone(),
+            settings_path: self.settings.as_ref().map(abs),
+            add_dirs: self.add_dir.iter().map(abs).collect(),
+            enable_browser: self.enable_browser,
+        })
     }
 }
 
@@ -462,6 +491,18 @@ mod tests {
         assert_eq!(c.run.resume.as_deref(), Some(""));
         let c = parse(&["--dangerously-skip-permissions"]);
         assert_eq!(c.run.mode(), Some(Mode::Bypass));
+    }
+
+    #[test]
+    fn enable_browser_goes_into_the_session_layer() {
+        assert!(parse(&["-p", "x"]).run.overlay().is_none());
+        let o = parse(&["-p", "x", "--enable-browser"])
+            .run
+            .overlay()
+            .unwrap();
+        assert!(o.enable_browser && o.allow.is_empty());
+        let o = parse(&["--allow", "WebFetch"]).run.overlay().unwrap();
+        assert!(!o.enable_browser);
     }
 
     #[test]

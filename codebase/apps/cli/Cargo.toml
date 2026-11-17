@@ -19,6 +19,7 @@ path = "src/main.rs"
 genie-protocol.workspace = true
 genie-client.workspace = true
 genie-daemon.workspace = true
+genie-config.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 crossterm.workspace = true

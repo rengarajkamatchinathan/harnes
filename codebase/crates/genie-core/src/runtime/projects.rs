@@ -172,7 +172,9 @@ impl ProjectsHub {
     }
 
     /// `project.file.add`: extract, check the cap, store and chunk; embeddings follow in
-    /// the background.
+    /// the background. Adding a file under a name the project already has is an update:
+    /// identical content is a no-op, changed content replaces the file's text, chunks and
+    /// embeddings in place (same file id) and re-indexes it.
     pub fn add_file(
         self: &Arc<Self>,
         project_id: &str,
@@ -197,10 +199,25 @@ impl ProjectsHub {
             .clone()
             .filter(|m| !m.is_empty() && m != "application/octet-stream")
             .unwrap_or_else(|| extract::guess_mime(name).to_string());
+        let existing = self
+            .store
+            .read(|c| genie_store::projects::files(c, project_id))
+            .map_err(se)?
+            .into_iter()
+            .find(|f| f.name == name);
+        if let Some(f) = &existing
+            && f.blob_id.as_deref() == Some(blob_id)
+        {
+            return Ok(f.clone());
+        }
         let bytes = self.store.read_blob(blob_id).map_err(se)?;
         let text = extract::extract_text(&bytes, &mime, name).map_err(ProjectError::Invalid)?;
         let tokens = estimate_text(&text);
-        let (have, files) = self.project_tokens(project_id)?;
+        let (mut have, mut files) = self.project_tokens(project_id)?;
+        if let Some(f) = &existing {
+            have = have.saturating_sub(u64::try_from(f.tokens.unwrap_or(0)).unwrap_or(0));
+            files = files.saturating_sub(1);
+        }
         if files >= self.cfg.max_files {
             return Err(ProjectError::Capacity(format!(
                 "a project holds at most {} files",
@@ -220,14 +237,23 @@ impl ProjectsHub {
         let file = self
             .store
             .write(|tx| {
-                let f = genie_store::projects::add_file(
-                    tx,
-                    project_id,
-                    name,
-                    Some(&mime),
-                    blob_id,
-                    Some(tok_i64),
-                )?;
+                let f = match &existing {
+                    Some(old) => genie_store::projects::update_file(
+                        tx,
+                        &old.id,
+                        Some(&mime),
+                        blob_id,
+                        Some(tok_i64),
+                    )?,
+                    None => genie_store::projects::add_file(
+                        tx,
+                        project_id,
+                        name,
+                        Some(&mime),
+                        blob_id,
+                        Some(tok_i64),
+                    )?,
+                };
                 let chunks: Vec<genie_store::retrieval::NewChunk<'_>> = spans
                     .iter()
                     .enumerate()

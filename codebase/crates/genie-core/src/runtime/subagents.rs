@@ -120,7 +120,12 @@ pub struct SubagentHub {
     hooks: Option<Arc<HooksHub>>,
     children: Mutex<HashMap<String, Child>>,
     parents: Mutex<HashMap<String, ParentState>>,
+    /// Durable outbox for reports (the store's `inbox` table, source `subagent:<child>`).
+    outbox: OnceLock<Arc<genie_store::Store>>,
 }
+
+/// Inbox `source` prefix of a persisted subagent report.
+pub const REPORT_SOURCE: &str = "subagent:";
 
 /// What the hub needs from the runtime (built by `RuntimeBuilder::build`).
 pub struct HubParts {
@@ -155,7 +160,87 @@ impl SubagentHub {
             hooks: parts.hooks,
             children: Mutex::new(HashMap::new()),
             parents: Mutex::new(HashMap::new()),
+            outbox: OnceLock::new(),
         })
+    }
+
+    /// Persist reports in the store before they are delivered, so a daemon crash between
+    /// a child's end and its parent's next turn doesn't lose them ([`Self::recover_reports`]).
+    pub fn set_store(&self, store: Arc<genie_store::Store>) {
+        let _ = self.outbox.set(store);
+    }
+
+    /// The parent of a child session this hub started.
+    pub fn parent_of(&self, child: &str) -> Option<String> {
+        self.children().get(child).map(|c| c.parent.clone())
+    }
+
+    /// Write the report as a pending inbox row of the parent (one transaction).
+    fn save_report(&self, parent: &str, child: &str, report: &str) -> Option<String> {
+        let store = self.outbox.get()?;
+        let res = store.write(|tx| {
+            genie_store::sessions::ensure(tx, parent)?;
+            genie_store::events::inbox_add(
+                tx,
+                parent,
+                Delivery::Steer,
+                &json!([{ "type": "text", "text": report }]),
+                Some(&format!("{REPORT_SOURCE}{child}")),
+                None,
+            )
+        });
+        match res {
+            Ok((item, _)) => Some(item.id),
+            Err(e) => {
+                tracing::warn!(error = %e, child, "subagent report not persisted");
+                None
+            }
+        }
+    }
+
+    fn mark_delivered(&self, id: Option<String>) {
+        if let (Some(store), Some(id)) = (self.outbox.get(), id)
+            && let Err(e) = store.write(|tx| {
+                genie_store::events::inbox_set_state(
+                    tx,
+                    &id,
+                    genie_store::events::InboxState::Admitted,
+                )
+            })
+        {
+            tracing::warn!(error = %e, "subagent report not marked delivered");
+        }
+    }
+
+    /// On daemon start (after crash recovery): deliver reports that were persisted but
+    /// never reached their parent. Each starts a new parent turn. Returns how many.
+    pub fn recover_reports(&self) -> usize {
+        let (Some(store), Some(engine)) = (self.outbox.get(), self.engine.get()) else {
+            return 0;
+        };
+        let items = match store.read(|c| genie_store::events::inbox_pending_from(c, REPORT_SOURCE))
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "reading pending subagent reports failed");
+                return 0;
+            }
+        };
+        let mut n = 0;
+        for it in items {
+            let text = it.parts[0]["text"].as_str().unwrap_or_default().to_string();
+            let Ok(ph) = engine.session(&it.session_id) else {
+                continue;
+            };
+            match ph.push_synthetic("subagent", text, Delivery::Queue) {
+                Ok(_) => {
+                    self.mark_delivered(Some(it.id));
+                    n += 1;
+                }
+                Err(e) => tracing::warn!(error = %e, "recovered subagent report not delivered"),
+            }
+        }
+        n
     }
 
     /// Give the hub the engine (built after the runtime) and the session registry.
@@ -557,8 +642,13 @@ impl SubagentHub {
                 ],
                 &[],
             );
-            if let Err(e) = ph.push_synthetic("subagent", report, Delivery::Steer) {
-                tracing::warn!(error = %e, child = %child, "subagent report not delivered");
+            // Outbox: persisted first; marked delivered once the parent's inbox has it.
+            let saved = self.save_report(&parent, &child, &report);
+            match ph.push_synthetic("subagent", report, Delivery::Steer) {
+                Ok(_) => self.mark_delivered(saved),
+                Err(e) => {
+                    tracing::warn!(error = %e, child = %child, "subagent report not delivered");
+                }
             }
         }
         if let Some(ph) = &parent_h

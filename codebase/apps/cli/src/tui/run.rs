@@ -476,6 +476,19 @@ async fn exec(
                 switch(link, app, tracker, &Target::Resume(id), &spec, &opts.cwd).await;
             }
             Effect::ListAgents => {
+                // The engine's catalog (built-in, user, trusted project, 06 §11).
+                let cwd = Some(opts.cwd.display().to_string());
+                if let Ok(r) = conn
+                    .call::<m::AgentsList>(genie_protocol::api::config::CwdParams { cwd })
+                    .await
+                {
+                    app.update(Msg::CallResult {
+                        label: "agents".into(),
+                        result: Ok(serde_json::to_value(r).unwrap_or_default()),
+                    });
+                    continue;
+                }
+                // Older engines: list the definition files.
                 let mut names = vec![];
                 for dir in agent_dirs(opts.genie_home.as_deref(), &opts.cwd) {
                     if let Ok(rd) = std::fs::read_dir(&dir) {

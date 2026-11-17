@@ -28,6 +28,7 @@ pub mod retrieval;
 pub mod search;
 pub mod sessions;
 mod store;
+pub mod transfer;
 pub mod util;
 
 pub use error::{Result, StoreError};

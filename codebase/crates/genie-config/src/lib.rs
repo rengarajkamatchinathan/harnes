@@ -12,6 +12,7 @@
 //! [`ConfigStore::permission_layers`] and [`EffectivePolicy`] into its rule set.
 
 pub mod fsutil;
+pub mod import;
 pub mod layers;
 pub mod policy;
 pub mod settings;

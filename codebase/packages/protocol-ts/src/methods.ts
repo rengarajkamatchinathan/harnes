@@ -30,6 +30,8 @@ export interface Requests {
   "session.export": { params: T.ExportParams; result: T.ExportResult };
   "session.search": { params: T.SearchParams; result: T.SearchResult };
   "tools.list": { params: T.SessionIdParams; result: T.ToolsListResult };
+  "session.import": { params: T.SessionImportParams; result: T.SessionImportResult };
+  "agents.list": { params: T.CwdParams; result: T.AgentListResult };
   "permission.pending": { params: T.PendingParams; result: T.PendingResult };
   "permission.respond": { params: T.RespondParams; result: T.Empty };
   "config.get": { params: T.ConfigGetParams; result: T.ConfigGetResult };
@@ -119,7 +121,7 @@ export interface Requests {
   "import.scan": { params: T.ImportParams; result: T.ImportResult };
   "import.preview": { params: T.ImportParams; result: T.ImportResult };
   "import.apply": { params: T.ImportParams; result: T.ImportResult };
-  "export.all": { params: T.ExportAllParams; result: T.Empty };
+  "export.all": { params: T.ExportAllParams; result: T.ExportAllResult };
 }
 
 export interface ServerRequests {
@@ -142,6 +144,7 @@ export interface Notifications {
   "provider.status": T.ProviderStatusChanged;
   "notification": T.UserNotification;
   "terminal.exited": T.TerminalExited;
+  "memory.changed": T.MemoryChanged;
 }
 
 export interface ClientNotifications {
@@ -177,6 +180,8 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "session.export", direction: "request", needsLease: false },
   { name: "session.search", direction: "request", needsLease: false },
   { name: "tools.list", direction: "request", needsLease: false },
+  { name: "session.import", direction: "request", needsLease: false },
+  { name: "agents.list", direction: "request", needsLease: false },
   { name: "permission.pending", direction: "request", needsLease: false },
   { name: "permission.respond", direction: "request", needsLease: false },
   { name: "permission.ask", direction: "server_request", needsLease: false },
@@ -283,6 +288,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "provider.status", direction: "notification", needsLease: false },
   { name: "notification", direction: "notification", needsLease: false },
   { name: "terminal.exited", direction: "notification", needsLease: false },
+  { name: "memory.changed", direction: "notification", needsLease: false },
 ];
 
 /** Sends a JSON-RPC request and resolves with its result (the Tauri relay or a test transport). */
@@ -294,6 +300,9 @@ export interface Transport {
 export class GenieClient {
   constructor(private readonly t: Transport) {}
 
+  readonly agents = {
+    list: (params: T.CwdParams): Promise<T.AgentListResult> => this.t.request("agents.list", params) as Promise<T.AgentListResult>,
+  };
   readonly artifact = {
     get: (params: T.ArtifactGetParams): Promise<T.ArtifactGetResult> => this.t.request("artifact.get", params) as Promise<T.ArtifactGetResult>,
     list: (params: T.ArtifactListParams): Promise<T.ArtifactListResult> => this.t.request("artifact.list", params) as Promise<T.ArtifactListResult>,
@@ -362,7 +371,7 @@ export class GenieClient {
     run: (params: T.Empty = {}): Promise<T.DoctorResult> => this.t.request("doctor.run", params) as Promise<T.DoctorResult>,
   };
   readonly export = {
-    all: (params: T.ExportAllParams): Promise<T.Empty> => this.t.request("export.all", params) as Promise<T.Empty>,
+    all: (params: T.ExportAllParams): Promise<T.ExportAllResult> => this.t.request("export.all", params) as Promise<T.ExportAllResult>,
   };
   readonly files = {
     read: (params: T.SessionPathParams): Promise<T.FilesReadResult> => this.t.request("files.read", params) as Promise<T.FilesReadResult>,
@@ -449,6 +458,7 @@ export class GenieClient {
     export: (params: T.ExportParams): Promise<T.ExportResult> => this.t.request("session.export", params) as Promise<T.ExportResult>,
     fork: (params: T.ForkParams): Promise<T.CreateResult> => this.t.request("session.fork", params) as Promise<T.CreateResult>,
     get: (params: T.GetParams): Promise<T.GetResult> => this.t.request("session.get", params) as Promise<T.GetResult>,
+    import: (params: T.SessionImportParams): Promise<T.SessionImportResult> => this.t.request("session.import", params) as Promise<T.SessionImportResult>,
     inbox: {
       remove: (params: T.InboxRemoveParams): Promise<T.Empty> => this.t.request("session.inbox.remove", params) as Promise<T.Empty>,
     },

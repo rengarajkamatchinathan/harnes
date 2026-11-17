@@ -246,6 +246,26 @@ async fn kill_job_stops_one_job() {
     assert!(!f.rt.kill_job(&id));
 }
 
+#[tokio::test]
+async fn kill_session_jobs_keeps_the_cwd() {
+    let mut f = fixture();
+    std::fs::create_dir_all(f.work.join("sub")).unwrap();
+    f.run(json!({"command": "cd sub"})).await.unwrap();
+    let cwd = f.rt.cwd("ses");
+    assert!(cwd.as_ref().is_some_and(|c| c.ends_with("sub")), "{cwd:?}");
+    f.run(json!({"command": "sleep 30", "run_in_background": true}))
+        .await
+        .unwrap();
+    f.run(json!({"command": "sleep 31", "run_in_background": true}))
+        .await
+        .unwrap();
+    assert_eq!(f.rt.kill_session_jobs("other"), 0);
+    assert_eq!(f.rt.kill_session_jobs("ses"), 2);
+    assert!(f.finished().await.killed);
+    assert!(f.finished().await.killed);
+    assert_eq!(f.rt.cwd("ses"), cwd);
+}
+
 fn alive(pid: i32) -> bool {
     // SAFETY: signal 0 only checks for existence.
     unsafe { libc::kill(pid, 0) == 0 }

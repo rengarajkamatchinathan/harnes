@@ -220,28 +220,9 @@ fn spec_from(run: &RunArgs) -> Spec {
     }
 }
 
-/// `--allow`/`--deny`/`--settings`/`--add-dir` as the session-only settings layer.
+/// The session-only settings layer from the run flags.
 fn overlay_from(run: &RunArgs) -> Option<genie_protocol::api::session::SessionSettingsOverlay> {
-    if run.allow.is_empty()
-        && run.deny.is_empty()
-        && run.settings.is_none()
-        && run.add_dir.is_empty()
-    {
-        return None;
-    }
-    let abs = |p: &std::path::PathBuf| {
-        std::path::absolute(p)
-            .unwrap_or_else(|_| p.clone())
-            .to_string_lossy()
-            .into_owned()
-    };
-    Some(genie_protocol::api::session::SessionSettingsOverlay {
-        allow: run.allow.clone(),
-        deny: run.deny.clone(),
-        settings_path: run.settings.as_ref().map(abs),
-        add_dirs: run.add_dir.iter().map(abs).collect(),
-        enable_browser: false,
-    })
+    run.overlay()
 }
 
 fn target_from(run: &RunArgs) -> Target {
@@ -360,39 +341,9 @@ fn ask_yes_no(q: &str) -> bool {
     std::io::stdin().read_line(&mut s).is_ok() && matches!(s.trim(), "y" | "Y" | "yes")
 }
 
-/// Read a secret without echo (raw mode, masked).
+/// Read a secret without echo.
 fn read_secret(prompt: &str) -> Result<String> {
-    use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-    if !std::io::stdin().is_terminal() {
-        let mut s = String::new();
-        std::io::stdin().read_line(&mut s)?;
-        return Ok(s.trim().to_string());
-    }
-    eprint!("{prompt}");
-    let _ = std::io::stderr().flush();
-    crossterm::terminal::enable_raw_mode()?;
-    let mut s = String::new();
-    let res = loop {
-        match event::read() {
-            Ok(Event::Key(k)) if k.kind != KeyEventKind::Release => match k.code {
-                KeyCode::Enter => break Ok(()),
-                KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => {
-                    break Err(anyhow::anyhow!("cancelled"));
-                }
-                KeyCode::Backspace => {
-                    s.pop();
-                }
-                KeyCode::Char(c) => s.push(c),
-                _ => {}
-            },
-            Ok(Event::Paste(p)) => s.push_str(p.trim()),
-            Ok(_) => {}
-            Err(e) => break Err(e.into()),
-        }
-    };
-    let _ = crossterm::terminal::disable_raw_mode();
-    eprintln!();
-    res.map(|()| s)
+    genie_cli::connect::read_secret(prompt)
 }
 
 // ---------------------------------------------------------------- daemon

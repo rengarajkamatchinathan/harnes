@@ -1,6 +1,6 @@
 //! Single-session export (04 §9): JSON `{info, messages, parts, artifacts}` and Markdown.
 //! `sanitize` redacts file contents, attachments, tool outputs and blob references for
-//! bug reports. Export-all (.zip) and import are not implemented yet (README gaps).
+//! bug reports. Export-all (.zip) and import with id remapping: [`crate::transfer`].
 
 use rusqlite::Connection;
 use serde_json::{Value, json};

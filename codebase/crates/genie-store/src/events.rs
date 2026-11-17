@@ -390,6 +390,18 @@ pub fn inbox_set_state(conn: &Connection, id: &str, state: InboxState) -> Result
     Ok(())
 }
 
+/// Pending items of every session whose `source` starts with `prefix`, oldest first
+/// (subagent reports waiting for delivery after a restart).
+pub fn inbox_pending_from(conn: &Connection, prefix: &str) -> Result<Vec<InboxItem>> {
+    let mut st = conn.prepare(&format!(
+        "SELECT {INBOX_COLS} FROM inbox WHERE state = 'pending' AND substr(source, 1, ?2) = ?1
+         ORDER BY created, id"
+    ))?;
+    let len = i64::try_from(prefix.chars().count()).unwrap_or(i64::MAX);
+    let rows = st.query_map(params![prefix, len], inbox_row)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Pending items in arrival order (rebuilt into the actor's inbox on restart).
 pub fn inbox_pending(conn: &Connection, session: &str) -> Result<Vec<InboxItem>> {
     let mut st = conn.prepare(&format!(

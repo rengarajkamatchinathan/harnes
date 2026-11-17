@@ -89,6 +89,8 @@ pub struct DaemonState {
     pump_started: AtomicBool,
     services: Option<Arc<Services>>,
     background_started: AtomicBool,
+    /// Terminal tabs (02 §6.7).
+    terminals: crate::terminal::Terminals,
 }
 
 /// Time a new connection has to send `initialize`.
@@ -148,6 +150,7 @@ impl DaemonState {
             pump_started: AtomicBool::new(false),
             services,
             background_started: AtomicBool::new(false),
+            terminals: crate::terminal::Terminals::default(),
         }
     }
 
@@ -158,6 +161,14 @@ impl DaemonState {
 
     pub(crate) fn root_scope(&self) -> &TaskScope {
         &self.root
+    }
+
+    pub(crate) fn registry(&self) -> &Arc<Registry> {
+        &self.registry
+    }
+
+    pub(crate) fn terminals(&self) -> &crate::terminal::Terminals {
+        &self.terminals
     }
 
     /// Start the services' background tasks once (first connection or daemon start).
@@ -298,7 +309,11 @@ impl DaemonState {
         }
     }
 
-    fn listed(&self, change: ListedChange, session: genie_protocol::message::SessionSummary) {
+    pub(crate) fn listed(
+        &self,
+        change: ListedChange,
+        session: genie_protocol::message::SessionSummary,
+    ) {
         self.workspace_send(m::SessionListed::NAME, &SessionListed { change, session });
     }
 
@@ -387,6 +402,10 @@ pub(crate) struct Conn {
 }
 
 impl Conn {
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
     pub(crate) fn is_headless(&self) -> bool {
         self.client.client_kind == genie_protocol::ClientKind::Headless
     }
@@ -807,6 +826,10 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
     if let Some(res) = crate::code::dispatch(state, conn, &r) {
         return res;
     }
+    // Terminal tabs (02 §6.7).
+    if let Some(res) = crate::terminal::dispatch(state, conn, &r) {
+        return Some(res);
+    }
     let result: Result<Value, RpcError> = match r.method.as_str() {
         m::PING => empty(),
         m::DAEMON_STATUS => to_result(&state.status()),
@@ -870,6 +893,7 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
             );
             state.leases.forget(&p.session_id);
             crate::code::session_deleted(state, &p.session_id);
+            crate::terminal::session_deleted(state, &p.session_id);
             state.listed(ListedChange::Deleted, info.summary);
             empty()
         }),
@@ -1402,10 +1426,18 @@ async fn forward(
     let max_bytes = state.cfg.sub_queue_max_bytes;
     let max_msgs = state.cfg.sub_queue_max_msgs;
     let mut last_seq = after;
+    // A subagent's session: its events carry the parent (02 §3.3 `subagent_of`).
+    let subagent_of = state
+        .runtime()
+        .and_then(|rt| rt.subagents.as_ref())
+        .and_then(|h| h.parent_of(&session));
     while let Some(item) = sub.next().await {
         match item {
             SubItem::Event(env) => {
-                let wire = env.to_wire();
+                let mut wire = env.to_wire();
+                if wire.subagent_of.is_none() {
+                    wire.subagent_of.clone_from(&subagent_of);
+                }
                 // Live asks: forward to the driver as a request (02 §7 step 1).
                 match &wire.event {
                     SessionEvent::PermissionAsked(a)

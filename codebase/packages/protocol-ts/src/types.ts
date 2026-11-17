@@ -3,6 +3,27 @@
 /** What the turn is doing right now (spinner text). */
 export type Activity = "thinking" | "retrying" | "compacting" | "interrupting" | "waiting_for_children" | "unknown";
 
+export interface AgentInfo {
+  description: string;
+  model?: string | null;
+  name: string;
+  path?: string | null;
+  source: AgentSourceKind;
+}
+
+export interface AgentListResult {
+  agents: AgentInfo[];
+  problems?: AgentProblemInfo[];
+}
+
+/** A definition file that failed to parse. */
+export interface AgentProblemInfo {
+  message: string;
+  path: string;
+}
+
+export type AgentSourceKind = "builtin" | "user" | "project" | "unknown";
+
 export interface Annotations {
   destructive_hint?: boolean | null;
   read_only_hint?: boolean | null;
@@ -519,6 +540,16 @@ export interface ExportAllParams {
   path: string;
 }
 
+/** `export.all` (SA-17): what went into the zip. */
+export interface ExportAllResult {
+  artifacts: number;
+  blobs: number;
+  memories: number;
+  path: string;
+  projects: number;
+  sessions: number;
+}
+
 export type ExportFormat = "json" | "markdown" | "unknown";
 
 export interface ExportParams {
@@ -614,7 +645,12 @@ export interface IdResult {
   id: string;
 }
 
-/** Importer (D53, 07 §5); the report shapes are owned by spec 07. */
+/**
+ * Importer (D53, 07 §5); the report shapes are owned by spec 07. `options`:
+ * `{cwd?, source?: "claude-code"|"claude-desktop"|"opencode", level?: "user"|"project",
+ * selected?: [item id], confirm_append?: bool}`. `scan`/`preview` return
+ * `{items: [...]}`, `apply` returns the saved report `{date, items, path}`.
+ */
 export interface ImportParams {
   options?: unknown;
 }
@@ -1208,6 +1244,19 @@ export interface SessionEventEnvelope {
 }
 
 export interface SessionIdParams {
+  session_id: string;
+}
+
+/** `session.import`: the session JSON from a file path or a blob (`blob.put.*`). */
+export interface SessionImportParams {
+  blob_id?: string | null;
+  path?: string | null;
+}
+
+export interface SessionImportResult {
+  messages: number;
+  /** Some ids already existed and were replaced by new ones. */
+  remapped: boolean;
   session_id: string;
 }
 

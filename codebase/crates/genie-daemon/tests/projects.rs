@@ -315,6 +315,53 @@ async fn project_methods_and_files() {
         .read(|c| genie_store::retrieval::project_stats(c, &p))
         .unwrap();
     assert_eq!(chunks, 1);
+
+    // Same name again: identical content is a no-op, changed content re-indexes in place.
+    let same = c
+        .call::<m::ProjectFileAdd>(ProjectFileAddParams {
+            project_id: p.clone(),
+            blob_id: blob.clone(),
+            name: "notes.md".into(),
+        })
+        .await
+        .unwrap()
+        .file_id;
+    assert_eq!(same, f);
+    let changed = upload(
+        &c,
+        b"# Notes\n\nThe launch moved to Monday.\n\n# Risks\n\nWeather.\n",
+        "text/markdown",
+    )
+    .await;
+    let again = c
+        .call::<m::ProjectFileAdd>(ProjectFileAddParams {
+            project_id: p.clone(),
+            blob_id: changed.clone(),
+            name: "notes.md".into(),
+        })
+        .await
+        .unwrap()
+        .file_id;
+    assert_eq!(again, f, "same file, updated");
+    let files = mem
+        .store
+        .read(|cn| genie_store::projects::files(cn, &p))
+        .unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].blob_id.as_deref(), Some(changed.as_str()));
+    let text: Vec<String> = mem
+        .store
+        .read(|cn| {
+            let mut st = cn.prepare("SELECT text FROM kchunk WHERE file_id = ?1")?;
+            let rows = st.query_map([&f], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .unwrap();
+    assert!(text.iter().any(|t| t.contains("Monday")), "{text:?}");
+    assert!(!text.iter().any(|t| t.contains("Friday")), "{text:?}");
+    // The old blob is no longer referenced.
+    assert_eq!(mem.store.blob_row(&blob).unwrap().unwrap().refcount, 0);
+
     // A binary file is refused with a reason; unknown ids are not found.
     let bin = upload(&c, &[0, 1, 2, 3, 0, 9], "application/zip").await;
     let e = c
@@ -363,6 +410,26 @@ async fn project_methods_and_files() {
 async fn memory_methods_and_state() {
     let mem = daemon();
     let c = connect(&mem).await;
+    let mut rx = c.take_incoming().unwrap();
+    c.call::<m::WorkspaceSubscribe>(Default::default())
+        .await
+        .unwrap();
+    // `memory.changed` on the workspace feed (D31) after each change.
+    async fn changed(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<genie_client::connection::Incoming>,
+    ) -> genie_protocol::event::MemoryChanged {
+        loop {
+            let i = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("memory.changed in time")
+                .expect("open");
+            if let genie_client::connection::Incoming::Notification(n) = i
+                && n.method == "memory.changed"
+            {
+                return serde_json::from_value(n.params).unwrap();
+            }
+        }
+    }
     let (a, _b) = mem
         .store
         .write(|tx| {
@@ -398,6 +465,15 @@ async fn memory_methods_and_state() {
             .text,
         "Likes green tea"
     );
+    let note = changed(&mut rx).await;
+    assert_eq!(
+        (
+            note.memory_id.as_str(),
+            note.op.as_str(),
+            note.scope.as_str()
+        ),
+        (a.id.as_str(), "update", "global")
+    );
 
     c.call::<m::MemorySetState>(MemorySetStateParams {
         state: MemoryState::Paused,
@@ -417,6 +493,11 @@ async fn memory_methods_and_state() {
     })
     .await
     .unwrap();
+    let note = changed(&mut rx).await;
+    assert_eq!(
+        (note.op.as_str(), note.scope.as_str()),
+        ("delete", "global")
+    );
     let e = c
         .call::<m::MemoryDelete>(MemoryIdParams { memory_id: a.id })
         .await
@@ -425,6 +506,8 @@ async fn memory_methods_and_state() {
     c.call::<m::MemoryReset>(MemoryScopeParams::default())
         .await
         .unwrap();
+    let note = changed(&mut rx).await;
+    assert_eq!((note.memory_id.as_str(), note.scope.as_str()), ("*", "all"));
     let all = c
         .call::<m::MemoryList>(MemoryScopeParams::default())
         .await

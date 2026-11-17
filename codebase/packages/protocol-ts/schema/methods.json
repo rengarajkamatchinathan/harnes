@@ -326,6 +326,30 @@
     },
     {
       "direction": "request",
+      "ident": "SessionImport",
+      "name": "session.import",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionImportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SessionImportResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "AgentsList",
+      "name": "agents.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CwdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/AgentListResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "PermissionPending",
       "name": "permission.pending",
       "needs_lease": false,
@@ -1413,7 +1437,7 @@
         "$ref": "#/$defs/ExportAllParams"
       },
       "result": {
-        "$ref": "#/$defs/Empty"
+        "$ref": "#/$defs/ExportAllResult"
       }
     },
     {
@@ -1591,6 +1615,18 @@
       "needs_lease": false,
       "params": {
         "$ref": "#/$defs/TerminalExited"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "MemoryChangedNote",
+      "name": "memory.changed",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/MemoryChanged"
       },
       "result": {
         "type": "null"

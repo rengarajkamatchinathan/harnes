@@ -23,7 +23,8 @@ crates/
                    `providers` (credentials, sign-in, models, catalog, usage, budget)
   genie-client     endpoint layout, NDJSON framing, Connection, ensure (spawn / wait / retry)
   genie-process    kill-trees: Job Object (Windows) / process group (Unix), subreaper; pipe mode
-                   (piped stdio, env policy, head/tail/spill capture, deadlines, spawn hook) (06 §13.4)
+                   (piped stdio, env policy, head/tail/spill capture, deadlines, spawn hook) (06 §13.4);
+                   PTY mode (feature `pty`: portable-pty, replay ring, vt100 checkpoint) (D55)
   genie-audit      tracing → rotating log files (10 × 10 MiB); org audit stream → rotating JSONL
   genie-testkit    in-memory transport
   genie-secrets    secret backends: OS keychain (`keyring`), `secrets.enc` (Argon2id +
@@ -35,7 +36,8 @@ crates/
   genie-catalog    model catalog: bundled snapshot, signed cache + ETag refresh, discovery
                    parsers, overrides/policy, effort map, pricing (spec 03 §8)
   genie-config     settings layers + schema/UI metadata, managed policy (sources, signed URL,
-                   merge), workspace trust + definition-hash approvals (06 §14, 08 §4–5)
+                   merge), workspace trust + definition-hash approvals (06 §14, 08 §4–5);
+                   the importer core (`import`, 07 §5) shared by `genie import` and `import.*`
   genie-permissions  rule grammar, evaluator (policy deny → deny → ask → allow → mode),
                    modes + policy floor, taint, "always" saving, read-only/arity tables (06 §5)
   genie-mcp        MCP client: stdio + Streamable HTTP, lifecycle/status machine, tools/resources/
@@ -53,7 +55,7 @@ crates/
   genie-{sandbox,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
-                   `genie chat`, importer, `hook-adapter`; also runs `genie daemon`
+                   `genie chat`, `genie import`, `hook-adapter`; also runs `genie daemon`
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
 xtask              `cargo xtask check` = check-deps (01 §2.1 rules 1–3) + check-spawn (rule 4)
                    + schema drift/compat; `cargo xtask schema [--release]` regenerates;
@@ -209,9 +211,9 @@ remote + tamper + cache, trust decision table, approvals), unit tests in each mo
 | 4.3 | 0 / 1 / 2 / 3; `no_provider_configured` and other turn errors worded by `errors::turn_error` | `headless::Run::outcome` |
 | 4.4 | asks pause and wait (stderr notice with `genie approvals` hint; CI hint when `CI=true`); `--on-ask deny` denies at once; `--ask-timeout` denies, interrupts, exit 3; asks answered from any client end the wait | `headless::Run::apply` |
 | 4.5 | shared daemon by default, `--standalone` private daemon (stdin lease); waits for background subagents and follow-up turns (D47) and `--max-turns`; trust notice / `--trust` → `trust.set once` | `connect`, `headless` |
-| 5.1 | Claude Code (user/project/local settings: permissions, `defaultMode`, env with secrets split out, `additionalDirectories`; `~/.claude.json` MCP user + this project's local; `CLAUDE(.local).md` → `GENIE(.local).md` `@`-import; skills/agents/commands with `!cmd` flagged; hooks → `genie hook-adapter claude`), Claude Desktop (`mcpServers`; extensions → connector suggestions), OpenCode (`opencode.json(c)` global + project: providers with keys → keychain / `{env:…}` refs, model, permissions, MCP local/remote, agents, commands, instructions; `.opencode/{agent,command}/*.md`) | `import::sources` |
-| 5.2 | scan → preview (import / skip / conflict, per-key diagnostics: unsupported, semantic difference, secret detected, needs trust) → apply; secrets only through `SecretSink`; GENIE.md append needs confirmation; report `<genie home>/imports/<date>.json`; idempotent by id (source path) + content hash; deferred items retried | `import::{preview,apply}`, `cmd::import_cmd` |
-| 5.3 | OpenCode last-match-wins → classes; allow-after-deny dropped with a diagnostic, deny kept (SA-40); ask-after-deny kept + diagnostic; allow-after-ask diagnostic; key order preserved without `serde_json/preserve_order` | `import::perms` |
+| 5.1 | Claude Code (user/project/local settings: permissions, `defaultMode`, env with secrets split out, `additionalDirectories`; `~/.claude.json` MCP user + this project's local; `CLAUDE(.local).md` → `GENIE(.local).md` `@`-import; skills/agents/commands with `!cmd` flagged; hooks → `genie hook-adapter claude`), Claude Desktop (`mcpServers`; extensions → connector suggestions), OpenCode (`opencode.json(c)` global + project: providers with keys → keychain / `{env:…}` refs, model, permissions, MCP local/remote, agents, commands, instructions; `.opencode/{agent,command}/*.md`) | `genie_config::import::sources` |
+| 5.2 | scan → preview (import / skip / conflict, per-key diagnostics: unsupported, semantic difference, secret detected, needs trust) → apply; secrets only through `SecretSink`; GENIE.md append needs confirmation; report `<genie home>/imports/<date>.json`; idempotent by id (source path) + content hash; deferred items retried | `genie_config::import::{preview,apply}`, `cmd::import_cmd` |
+| 5.3 | OpenCode last-match-wins → classes; allow-after-deny dropped with a diagnostic, deny kept (SA-40); ask-after-deny kept + diagnostic; allow-after-ask diagnostic; key order preserved without `serde_json/preserve_order` | `genie_config::import::perms` |
 
 Tests: unit tests for the TUI model/view/markdown/theme/commands, importer (fixture dirs only),
 hook adapter and args; `apps/cli/tests/headless.rs` runs the real daemon in-process over the
@@ -221,10 +223,8 @@ output, exit codes 0/1/2/3, `--on-ask deny`, `--ask-timeout`, an ask answered vi
 
 #### Spec 07 gaps
 
-- **Engine-side pieces the CLI can't supply:** the daemon answers `not_implemented` for
-  `import.*`; the CLI wires each one and prints "not available in this
-  engine build yet". `session.get` returns an empty `path`, so `genie chat open` replays the
-  event log instead of printing the branch.
+- **`session.get`** returns an empty `path` without a conversation store, so `genie chat open`
+  replays the event log instead of printing the branch.
 - **Headless flags:** `--allow/--deny`, `--settings`, `--add-dir` and `--worktree <name>` go
   out on `session.create` (session-only layer, `worktree_name`); the daemon now creates the
   worktree (see "Code mode" below).
@@ -238,10 +238,10 @@ output, exit codes 0/1/2/3, `--on-ask deny`, `--ask-timeout`, an ask answered vi
   `tui::markdown` is a small block-stable renderer with the heal step. The OSC 11 palette query
   is not sent (light/dark from `COLORFGBG`, default dark). No full-screen mode, images or
   terminal Mermaid (by spec).
-- **Importer:** runs in the CLI, not behind `import.scan/preview/apply` (the daemon side can
-  call `genie_cli::import` later or the module can move to a crate). No keychain write path from
-  the CLI, so secrets are reported (`secret not imported`) and retried on the next run. Preview
-  applies all non-skipped items (no per-item picker in the CLI yet). No first-run offer.
+- **Importer:** `genie import` runs the shared core (`genie_config::import`) locally, not through
+  `import.*`, so it has no keychain write path: secrets are reported (`secret not imported`) and
+  retried on the next run (the daemon's `import.apply` stores them). Preview applies all
+  non-skipped items (no per-item picker in the CLI yet). No first-run offer.
 - **Not implemented:** `genie update` (prints a notice), the `/rewind` picker UI, `@`-mentions
   sent as plain text (not `file_ref` parts), images pasted as data (only file paths),
   `/resume` picker inside the TUI (lists sessions; `/resume <id>` switches), ACP (v2).
@@ -564,6 +564,38 @@ advisory ignores with reasons (see gaps).
 - **Windows token file** relies on the per-user `%LOCALAPPDATA%` ACL; no explicit DACL is set.
 - **Not in this milestone:** desktop app, `packages/ui` and the Platform-adapter lint rule (spec 05).
 
+### Terminal tab, `tool_search`, export/import and engine gaps (D55, 02 §6.7, 06 §7, 04 §9, 07 §5)
+
+| § | What | Where |
+|---|---|---|
+| D55 / 06 §13.4 PTY mode | `Pty::spawn(PtySpec)` on `portable-pty` (Unix PTY / ConPTY); the child is a session leader (Unix) or in a Job Object (Windows); reader thread → **replay ring** (2 MiB default, absolute offsets) + VT screen (`vt100`) + live fan-out under one lock, so `attach(offset)` returns replay up to `end_offset` and a receiver that starts exactly there; **bounded writer queue** (a child that stops reading gives `WouldBlock`, never a blocked caller: the Linux blocked-writer fix); wait thread publishes `Exited` after a 300 ms reader drain; `resize` changes PTY and VT screen together; **kill-tree**: foreground group (`tcgetpgrp`) + shell group + every process of the session (Linux `/proc`, macOS `proc_listallpids`), Job Object terminate on Windows; `Drop` kills | `genie-process::pty` |
+| KB ch.16 reattach | offset inside the ring → replay bytes; offset older than the ring → `truncated` + a **VT checkpoint** (`state_formatted`: screen, attributes, cursor, input modes) and an empty replay; clients reset (`ESC c`) and write the checkpoint | `Pty::attach` |
+| 02 §6.7 | `terminal.open {session_id, cwd?, shell?, cols, rows}` (Code sessions: the session folder/worktree, `cwd` confined inside it; D45 shell choice as a login shell; env = inherited minus `GENIE_*`), `terminal.attach {offset}` → `{truncated, checkpoint_b64?, replay_b64, end_offset}` then ephemeral `terminal.output {terminal_id, start, end, data_b64}` events to the attaching connection (gap-free offsets; a lagging stream re-reads from the ring; re-attach replaces the stream), `terminal.input`, `terminal.resize`, `terminal.close` (kill-tree); `terminal.exited {terminal_id, code}` on the workspace feed; every open terminal holds an `Engine::terminal()` guard (no idle exit); `session.delete` closes the session's terminals | `genie-daemon::terminal` |
+| 06 §7 `tool_search` | when the turn's MCP definitions exceed 10 % of the model's context window (4 chars/token), they are left out of the request; `tool_search {query \| select:a,b, max_results?}` (keyword ranking over names + descriptions) returns the matching definitions and loads them for the session; loaded tools join the request from the next step; the description lists the deferred names; deferred tools still resolve and authorise like any tool | `genie-core::runtime::tool_search`, hooks in `turn.rs` |
+| SA-17 / 04 §9 | `export.all {path, include_blobs}` → zip with `manifest.json`, `sessions/<id>.json`, `projects/<id>.json`, `memory.json`, `blobs/<sha256>` (decrypted), `artifacts/<id>/v<n>.<ext>`; written to a 0600 temp file next to `path` and renamed; policy `export.allowed: false` → `policy_blocked`; result `{path, sessions, projects, memories, blobs, artifacts}` | `genie-store::transfer::Store::export_all`, `genie-daemon::transfer` |
+| 04 §9 import | `session.import {path \| blob_id}`: one session JSON in one transaction; ids kept when free, **remapped** (session, messages, parts, artifacts) when taken, with every reference rewritten (parents, leaf, parts, artifact versions); unknown blobs / `[redacted]` dropped, sanitized versions skipped, project link kept only if the project exists; the session joins the registry and `session.listed` | `genie-store::transfer::import_session`, `genie-daemon::transfer` |
+| 07 §5 | the importer moved to `genie_config::import` (CLI re-exports it, behaviour and tests unchanged); `import.scan/preview/apply {options: {cwd?, source?, level?, selected?, confirm_append?}}` → `{report: {items}}` / the saved report with `path`; secrets go to the D26 backend (`import:<name>`) | `genie-config::import`, `genie-daemon::transfer` |
+| 06 §11 | `agents.list {cwd?}` → built-in + user + trusted project agents (hidden ones left out) with source, model, path and parse problems; the CLI's `/agents` uses it | `genie-daemon::transfer`, `apps/cli/src/tui/run.rs` |
+| 06 §11 / 02 §3.3 | child sessions carry `subagent_of` on every event the daemon forwards; `session.listed` created/deleted for children on the workspace feed | `SubagentHub::parent_of`, `server::forward`, `Registry::set_listener` |
+| 06 §11 outbox | the report is written as a pending `inbox` row of the parent (`source: subagent:<child>`) in one store transaction before delivery, marked `admitted` once handed to the parent; on daemon start pending reports are delivered as new parent turns | `SubagentHub::{save_report, recover_reports}`, `genie-store::events::inbox_pending_from` |
+| 06 §13.1 | `session.interrupt {stop_subagents: true}` also kills the session's background shell jobs (cwd kept) | `ShellRuntime::kill_session_jobs`, `genie-daemon::agents::stop_subagents` |
+| D31 | `memory.update/delete/reset` publish `memory.changed {memory_id, op, scope}` on the workspace feed (`reset` → `memory_id: "*"`) | `genie-daemon::projects::memory_changed` |
+| D32 | `project.file.add` with a name the project already has: same blob → no-op, changed content → file updated in place (same id), text re-extracted, chunks replaced, embeddings re-queued, cap checked without the old version | `ProjectsHub::add_file`, `genie-store::projects::update_file` |
+| 07 §2 / §4 | `--enable-browser` (session-only layer); a locked daemon (`secrets.enc`) gets the passphrase from the terminal (masked, 3 tries) → `secrets.unlock` → reconnect once the engine is back; non-TTY runs point to `GENIE_PASSPHRASE` | `args::RunArgs::overlay`, `connect::{unlock_with, read_secret}` |
+| Protocol (additive) | `session.import`, `agents.list`, `export.all` result `ExportAllResult` (was `{}`), workspace notification `memory.changed` | `genie-protocol` |
+
+Tests: `genie-process/tests/pty.rs` (real `sh` on a PTY: live events with contiguous offsets, resize seen by
+`stty size`, reattach from an offset, truncated reattach → checkpoint that repaints an identical screen,
+exit code, kill-tree takes a foreground job and a background job); `genie-daemon/tests/terminal.rs` (open in
+a subfolder, attach + output, resize, reattach, `exit 3` → `terminal.exited`, guard count, close kills the
+shell, session delete closes, Chat refused); `genie-core/tests/turn.rs` (`tool_search` deferral turn and the
+small-set case); `genie-store/tests/transfer.rs` + `genie-daemon/tests/transfer.rs` (zip layout, import keeps
+then remaps ids, blobs, sanitized input, `session.list`, `import.scan/preview/apply` + idempotency,
+`agents.list`); `genie-core/tests/subagents.rs` (outbox row admitted, restart delivery, `parent_of`);
+`genie-daemon` unit test for child `session.listed`; `genie-tools/tests/shell.rs`
+(`kill_session_jobs`); `genie-daemon/tests/projects.rs` (`memory.changed`, file re-index);
+`apps/cli` unit tests (`--enable-browser`, passphrase retries against a fake locked daemon).
+
 ### Projects, artifacts, memory, retrieval gaps and deviations
 
 - **Artifact language** (`artifact_create.language`) is echoed to the model but not stored (no
@@ -581,13 +613,18 @@ advisory ignores with reasons (see gaps).
   after 1 h idle); `name` in `blob.put.begin` is not stored.
 - **Excerpts** are stored with the user message (so they stay in history and in `session.get`);
   `session.search` returns title hits with an empty `message_id`.
-- **Memory:** Code sessions use global memory only (no workspace scope yet); `memory.*`
-  methods publish no `memory.changed` (that is a session event); sensitive-category filtering
+- **Memory:** Code sessions use global memory only (no workspace scope yet); `memory.changed`
+  from `memory.*` methods goes to the workspace feed (it has no session); sensitive-category filtering
   is left to the prompt guidance. Policy keys `memory.enabled`, `artifacts.enabled`,
   `chatSearch.enabled` are read once at daemon start (our names).
-- **Not implemented:** `export.all` (SA-17 zip), session import, custom instructions ("Your
-  Genie") as a baseline source, project file update/re-index on change, reading `kchunk` text
-  for full mode (file text is re-extracted and cached in memory).
+- **Not implemented:** custom instructions ("Your Genie") as a baseline source, reading `kchunk`
+  text for full mode (file text is re-extracted and cached in memory). A project file "changes"
+  when it is re-added under the same name (files are uploaded blobs; no source path is watched).
+- **Export/import:** `export.all` runs synchronously in the request (large stores block that
+  connection's request until done); the "explicit confirmation" is the client's job. An imported
+  session has no event log (served from its messages; `session.subscribe` replays nothing) and
+  no workspace/worktree; its cost totals are kept, `usage_daily` is not. Importing a zip as a whole
+  is not offered (import its `sessions/<id>.json`).
 
 ### Engine wiring gaps and deviations
 
@@ -608,10 +645,9 @@ advisory ignores with reasons (see gaps).
   `apps/cli/src/tui/commands.rs` before sending, so the engine expansion serves other clients.
 - **Skills directory** has no HTTP transport (`directory.list/install` for skills report it as
   unavailable); `skill.upload` reads the blob from the store.
-- **Background jobs** are not killed on interrupt-with-stop (`stop_subagents`); a daemon restart
-  leaves `background_job` rows without `ended`.
+- **Background jobs:** a daemon restart leaves `background_job` rows without `ended`.
 - **Browser:** `browser_screenshot` returns a blob reference (no image part in the tool result
-  yet); there is no `--enable-browser` CLI flag (the wire field exists); "always" answers for
+  yet); "always" answers for
   sites are saved as `Browser(site:…)` permission rules, not as `browser.sites` states;
   `attachment_path` is not implemented; `browser.popout` is not routed.
 - **`add_dirs`** is stored and fed to the evaluator; worktrees are created (see "Code mode").
@@ -638,10 +674,11 @@ advisory ignores with reasons (see gaps).
 
 ### Spec 02 gaps and deviations
 
-- **Methods owned by other specs** (terminal, import/`export.all`,
-  `browser.popout`) are typed in the table and generated
-  into TS, but the daemon answers `method_not_found` with `data.reason = "not_implemented"`
-  until their subsystem lands.
+- **`browser.popout`** is typed in the table and generated into TS, but the daemon answers
+  `method_not_found` with `data.reason = "not_implemented"`.
+- **`terminal.output`** goes to the connection that called `terminal.attach` (like
+  `browser.frame`), not through the session bus, so a busy terminal never forces session
+  subscribers to resync; `memory.changed` is also a workspace notification (additive).
 - **Session metadata is in memory** (`genie-daemon::registry`); `session.get` returns the
   active path from the runtime's conversation store (no `siblings` yet). `session.fork` creates an
   empty child with the same settings; `prompt` with `parent_id` (edit → branch) is refused.
@@ -657,9 +694,9 @@ advisory ignores with reasons (see gaps).
 
 ### Spec 06 gaps and deviations
 
-- **Out of scope here (typed extension points only):** `tool_search` deferral (§7). (Code tools,
-  checkpoints: "Code mode"; artifacts, `chat_search` / `project_search`: "Projects, artifacts…";
-  subagents §11 and hooks §12: "Spec 06 §11–§12".)
+- **`tool_search`:** only MCP tools (`mcp__*`) are deferrable; ranking is keyword matching (no
+  embeddings); the decision is per turn and the loaded set lives in daemon memory per session;
+  `tools.list` still lists every tool.
 - **Native compaction** (`capabilities.native_compaction`) is not used; we always write our own
   summary. Re-injection after compaction covers the rebuilt baseline only (skills, artifact
   refs, read-state, grants, todo, MCP resources come with their subsystems). If the summary
@@ -689,9 +726,11 @@ advisory ignores with reasons (see gaps).
 
 ### Spec 06 §11–§12 gaps and deviations
 
-- **Outbox:** the report is pushed into the parent's in-memory inbox after the child's turn
-  settles, not in the same store transaction as the child's terminal event; a daemon crash in
-  between loses the report (the child transcript survives). The inbox itself is not durable yet.
+- **Outbox:** the report row is written in its own store transaction just before delivery, not
+  in the same transaction as the child's terminal event (`turn.settled` is committed by the
+  child's actor before the hub sees it, and the report needs `subagent.end` hooks first); a crash
+  in that window loses the report (the child transcript survives). "Delivered" means handed to
+  the parent's in-memory inbox; the session inbox itself is not durable yet.
 - **Waiting:** a parent turn always waits for running children at `finish = stop` (no explicit
   "end now" signal for the model yet); interrupting without `stop_subagents` is how a parent
   lets children finish in the background.
@@ -699,13 +738,11 @@ advisory ignores with reasons (see gaps).
   reported in `subagent.ended.cost`; it is not added to the parent session's totals.
 - **Cache key:** each child uses its own session id as `prompt_cache_key` (the parent's
   prefix differs anyway because the agent body replaces the base prompt).
-- **Asks:** "always" from a child ask releases only the child's own pending asks; child events
-  don't carry `subagent_of`; the child's state is `paused` / `awaiting_ask` while the parent
+- **Asks:** "always" from a child ask releases only the child's own pending asks; the child's state is `paused` / `awaiting_ask` while the parent
   holds its ask, the parent's status doesn't change.
-- **Not implemented:** preloading agent `skills`, an `agents.list` method (the CLI's `/agents`
-  has no engine source), the desktop picker, `.claude/agents` beyond the importer, workspace-feed
-  `session.listed` for child sessions, child sessions persisting across a daemon restart (the
-  hub's child map is in memory).
+- **Not implemented:** preloading agent `skills`, the desktop picker, `.claude/agents` beyond
+  the importer, child sessions persisting across a daemon restart (the hub's child map is in
+  memory, so `subagent_of` is known only for children of this daemon run).
 - **Hooks:** a hook `allow` on `tool.before` / `permission.request` also answers a policy
   `permissions.ask` (the authorizer's ask does not say where it came from; policy can disable
   hooks or set `hooks.managedOnly`). `tool.before` runs before the tool's own authorisation, so
@@ -732,8 +769,7 @@ advisory ignores with reasons (see gaps).
   (`genie-daemon::SecretsKeyStore`). Recovery-key UI/`.txt` download is UI work (spec 05).
 - **Blobs**: `put_blob` takes the whole buffer (two passes would be needed for streaming input
   because the address is the plaintext hash); no streaming writer yet.
-- **Not implemented:** long resumable data migrations (kv cursor jobs); export-all `.zip` (SA-17),
-  session import with id remapping (shadow git §10 lives in
+- **Not implemented:** long resumable data migrations (kv cursor jobs) (shadow git §10 lives in
   `genie-tools::code::snapshot` + `genie-core::runtime::checkpoint`, see "Code mode");
   the in-memory `Store` for incognito (§8); the daily scheduler that calls `run_maintenance`.
 - **Build:** `rusqlite` uses `bundled-sqlcipher-vendored-openssl` (macOS has no OpenSSL headers);
@@ -748,8 +784,8 @@ advisory ignores with reasons (see gaps).
   "Mobile and desktop" platform, device-code flow enabled). `authority` / `tenant` can be set
   under `providers.azure-foundry` (https or loopback only).
 - **Locked phase restarts the engine in-process:** the unlocking client gets `{ok}`, then
-  `daemon.restarting`, and must reconnect (as for `daemon.restart`). No passphrase prompt in
-  the CLI yet (spec 07); `GENIE_PASSPHRASE` works. No passphrase change / backend switch
+  `daemon.restarting`, and must reconnect (as for `daemon.restart`); the CLI prompts for the passphrase on a
+  terminal and reconnects, `GENIE_PASSPHRASE` works everywhere. No passphrase change / backend switch
   method (a `FileVault::change_passphrase` exists); switching backends doesn't migrate
   entries; `secrets.backend` is read from the user settings file at start only.
 - **Keychain limits:** Windows Credential Manager caps a blob at 2,560 bytes (large OAuth grants
@@ -816,8 +852,8 @@ advisory ignores with reasons (see gaps).
   `cmd /c` or the full name); the Job Object assignment race from 01 still applies to pipe mode.
 - **genie-process:** stdout and stderr are two pipes interleaved at chunk granularity (opencode-pty
   uses one); pipe mode is written against opencode-pty's documented semantics, not copied, so no MIT
-  notice is needed yet; PTY mode, constant-time token compare and the Linux blocked-writer fix belong to
-  the PTY port (D55). Environment scrubbing beyond `GENIE_*` (e.g. provider keys) is not done because
+  notice is needed yet; the constant-time token compare belongs to the daemon transport (opencode-pty's
+  own daemon/protocol is not ported: PTYs run in-process as a library, KB ch.16 "library mode first"). Environment scrubbing beyond `GENIE_*` (e.g. provider keys) is not done because
   user commands may legitimately need them.
 - The `genie-mcp-fake-server` test binary is built with the workspace (it is tiny and only used by
   tests).
@@ -983,3 +1019,21 @@ advisory ignores with reasons (see gaps).
 - **Not run here:** the workflows themselves (local only), the OS matrix, signing, and
   `dist` for non-host targets. Locally verified: `cargo xtask ci` (all steps), `dist` on
   macOS arm64, `feed build`/`verify` round trip, rollback rejection and expiry.
+
+### Terminal tab (D55) gaps and deviations
+
+- **VT engine:** the checkpoint comes from the pure-Rust `vt100` crate (MIT) instead of
+  libghostty-vt (Zig in CI); it repaints the visible screen, cursor, attributes and input modes,
+  not scrollback. The screen does not answer terminal queries (DA/DSR/OSC colour queries) for
+  the child; xterm.js in the client answers them through `terminal.input`.
+- **Not ported from opencode-pty:** the separate process daemon, ownership/hand-off across
+  engine restarts (terminals die with the daemon), controller/observer roles, title and
+  foreground-process tracking, `read_rows`.
+- **Windows:** ConPTY + Job Object code paths type-check but have not been run; the Job Object
+  is assigned right after spawn (the 01 race applies). Tests are `#[cfg(unix)]`.
+- **Lease:** terminal methods are not lease-gated (the method table says `false`); any client
+  attached to the session can type into its terminals.
+- **macOS kill-tree** scans all pids with `proc_listallpids` + `getsid`; processes that
+  `setsid()` themselves (daemonising tools) escape on every platform.
+- **New external dependencies:** `portable-pty` 0.9 (MIT, wezterm), `vt100` 0.18 (MIT); `zip`
+  (already in the tree) now also writes in `genie-store`.
