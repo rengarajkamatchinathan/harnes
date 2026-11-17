@@ -10,6 +10,7 @@ import { AskCard } from "./AskCard";
 import { Composer } from "./Composer";
 import { Transcript } from "./Transcript";
 import { RewindDialog, WorktreeFooter } from "../code/CodeExtras";
+import { NewCodeSession } from "../code/NewCodeSession";
 
 const MODES: Mode[] = ["default", "accept_edits", "plan", "bypass"];
 
@@ -37,6 +38,7 @@ function EmptyChat() {
       )}
       <div className="chat__empty">
         <h1>{kind === "code" ? t("code.newSession") : t("chat.emptyTitle")}</h1>
+        {kind === "code" && <NewCodeButton />}
         {noProvider && (
           <Button variant="primary" onClick={() => app.openDeepLink("genie://settings/providers")}>
             {t("chat.addProvider")}
@@ -57,6 +59,18 @@ function EmptyChat() {
         </div>
       )}
     </div>
+  );
+}
+
+function NewCodeButton() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button variant="primary" icon="folder" onClick={() => setOpen(true)}>
+        {t("code.newSession")}
+      </Button>
+      {open && <NewCodeSession onClose={() => setOpen(false)} />}
+    </>
   );
 }
 

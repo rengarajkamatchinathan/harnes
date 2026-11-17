@@ -20,7 +20,7 @@ path = "src/main.rs"
 default = []
 # Linux needs the WebKitGTK 4.1 development packages to build the webview. They are not
 # required for the relay, so plain `cargo build --workspace` works on a bare Linux box;
-# the real app is built with `--features linux-webview` (see apps/desktop/README.md).
+# the real app is built with `--features linux-webview` (see README.md, Spec 05).
 linux-webview = ["dep:tauri", "dep:tauri-build"]
 
 [dependencies]
