@@ -12,7 +12,9 @@
 mod keystore;
 mod lease;
 mod listener;
+mod providers;
 mod registry;
+pub mod secrets;
 mod server;
 mod services;
 mod token;
@@ -27,12 +29,13 @@ use genie_client::Endpoint;
 use genie_core::config::ConfigHub;
 use genie_core::journal::StoreJournal;
 use genie_core::runtime::mcp::{McpHub, McpPorts};
-use genie_core::runtime::models::CatalogResolver;
 use genie_core::runtime::permissions::PermissionAuthorizer;
 use genie_core::runtime::{ConversationStore, ModelResolver, NoModels, RuntimeBuilder};
 use genie_core::{Engine, EngineBuilder, TaskScope};
 
 pub use keystore::PlaceholderKeyStore;
+pub use providers::{Feed, HttpFeed, ProviderHub};
+pub use secrets::{Secrets, SecretsChoice, SecretsKeyStore};
 
 pub use lease::LEASE_GRACE;
 pub use registry::Registry;
@@ -65,6 +68,8 @@ pub struct DaemonConfig {
     /// Subscription queue bounds (SA-10).
     pub sub_queue_max_bytes: usize,
     pub sub_queue_max_msgs: usize,
+    /// Secrets backend (D26): keychain / `secrets.enc`; tests inject a memory backend.
+    pub secrets: SecretsChoice,
 }
 
 impl DaemonConfig {
@@ -79,6 +84,7 @@ impl DaemonConfig {
             lease_grace: LEASE_GRACE,
             sub_queue_max_bytes: SUB_QUEUE_MAX_BYTES,
             sub_queue_max_msgs: SUB_QUEUE_MAX_MSGS,
+            secrets: SecretsChoice::Auto,
         }
     }
 }
@@ -122,14 +128,18 @@ fn create_run_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Open the channel's store (spec 04). The data key comes from the placeholder keystore
-/// until spec 08's keychain lands.
-pub fn open_store(ep: &Endpoint) -> Result<Arc<genie_store::Store>, genie_store::StoreError> {
+/// Open the channel's store (spec 04) with the data key from `keys` (the keychain or
+/// `secrets.enc`, 04 §2). A key left in the old placeholder file is migrated first.
+pub fn open_store(
+    ep: &Endpoint,
+    keys: &dyn genie_store::KeyStore,
+) -> Result<Arc<genie_store::Store>, genie_store::StoreError> {
     let name = format!("genie{}.db", ep.channel.dir_suffix());
     let opts = genie_store::StoreOptions::new(ep.data_dir.clone(), name);
-    // TODO(spec 08): the OS keychain instead of `PlaceholderKeyStore`.
-    let keys = PlaceholderKeyStore::new(&ep.data_dir);
-    genie_store::Store::open_with_keystore(&opts, &keys).map(Arc::new)
+    if let Err(e) = secrets::migrate_placeholder(&ep.data_dir, keys) {
+        tracing::error!(error = %e, "placeholder keystore migration failed; file kept");
+    }
+    genie_store::Store::open_with_keystore(&opts, keys).map(Arc::new)
 }
 
 /// The org audit stream (08 §6): local rotating JSONL in `<data dir>/audit/` (or the
@@ -190,14 +200,8 @@ fn build_engine(
     ep: &Endpoint,
     root: &TaskScope,
     registry: Arc<registry::Registry>,
+    secrets: Arc<Secrets>,
 ) -> (Engine, Option<Arc<dyn ConversationStore>>, Services) {
-    let models: Arc<dyn ModelResolver> = match CatalogResolver::live() {
-        Ok(r) => Arc::new(r),
-        Err(e) => {
-            tracing::error!(error = %e, "HTTP client unavailable; turns will fail");
-            Arc::new(NoModels)
-        }
-    };
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok();
@@ -224,13 +228,28 @@ fn build_engine(
         services.audit = build_auditor(ep, &hub.policy());
         services.policy = Some(std::sync::Mutex::new(pm));
     }
-    let store = match open_store(ep) {
+    let store = match open_store(ep, &SecretsKeyStore(secrets.backend())) {
         Ok(s) => Some(s),
         Err(e) => {
             tracing::error!(error = %e, "store unavailable; sessions are not persisted");
             None
         }
     };
+    // Providers, credentials and the catalog (03 §8, §10); the model resolver reads both.
+    let providers = Arc::new(
+        ProviderHub::new(secrets, ep.data_dir.clone())
+            .with_config(hub.clone())
+            .with_store(store.clone())
+            .with_audit(services.audit.clone()),
+    );
+    let models: Arc<dyn ModelResolver> = match providers.resolver() {
+        Ok(r) => Arc::new(r),
+        Err(e) => {
+            tracing::error!(error = %e, "HTTP client unavailable; turns will fail");
+            Arc::new(NoModels)
+        }
+    };
+    services.providers = Some(providers);
     let turns = Arc::new(genie_core::runtime::active::ActiveTurns::new());
     let mut rb = RuntimeBuilder::new(registry.clone(), models.clone()).turns(turns.clone());
     let mut eb = EngineBuilder::new();
@@ -393,9 +412,20 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     let token = token::generate()?;
     token::write(&ep.token_path(), &token)?;
 
+    // Secrets (D26): keychain or `secrets.enc`; a locked file waits for `secrets.unlock`.
+    let secrets = Secrets::open(&cfg.secrets, &ep);
+    secrets.unlock_from_env();
+    if secrets.is_locked()
+        && let Some(reason) = secrets::locked_phase(&cfg, &token, secrets.clone()).await?
+    {
+        let _ = std::fs::remove_file(ep.token_path());
+        drop(lock);
+        return Ok(reason);
+    }
+
     let root = TaskScope::root();
     let registry = Arc::new(registry::Registry::default());
-    let (engine, conversation, services) = build_engine(&ep, &root, registry.clone());
+    let (engine, conversation, services) = build_engine(&ep, &root, registry.clone(), secrets);
     let services = Arc::new(services);
     match engine.recover_on_start() {
         Ok(n) if n > 0 => tracing::info!(interrupted = n, "marked crashed turns interrupted"),

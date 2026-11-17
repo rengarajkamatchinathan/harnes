@@ -1,8 +1,8 @@
 //! Provider credentials model (03 §10.1): several labelled credentials per provider, one
 //! active; an explicitly selected stored credential beats environment variables.
 //!
-//! Only the model, the store port and an in-memory store live here for now. The keychain
-//! (`keyring`) and `secrets.enc` (XChaCha20-Poly1305 + Argon2id) backends are spec 08.
+//! The model, the store port and an in-memory store live here; the persistent store on
+//! top of the keychain / `secrets.enc` is [`crate::store::BackendStore`].
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -44,6 +44,8 @@ pub struct CredentialMeta {
     pub label: String,
     pub kind: CredentialKind,
     pub source: CredentialSource,
+    /// Last 4 characters of a key or the signed-in account; never the secret.
+    pub hint: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,10 +94,18 @@ pub fn resolve(
                 label: var.to_string(),
                 kind: CredentialKind::Key,
                 source: CredentialSource::Environment(var.to_string()),
+                hint: key_hint(&v),
             },
             secret: SecretString::from(v),
         })
     })
+}
+
+/// Last 4 characters of a long enough key (shown in Settings), else nothing.
+pub fn key_hint(key: &str) -> Option<String> {
+    let k = key.trim();
+    let n = k.chars().count();
+    (n >= 12).then(|| k.chars().skip(n - 4).collect())
 }
 
 #[derive(Default)]
@@ -169,6 +179,7 @@ mod tests {
             label: id.into(),
             kind: CredentialKind::Key,
             source: CredentialSource::Keychain,
+            hint: None,
         }
     }
 

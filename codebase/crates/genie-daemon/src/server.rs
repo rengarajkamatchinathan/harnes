@@ -244,7 +244,7 @@ impl DaemonState {
             protocol: PROTOCOL_VERSION.to_string(),
             capabilities: DaemonCapabilities { features: vec![] },
             restart_pending: restart_pending.then_some(true),
-            locked: None,
+            locked: self.services.as_ref().and_then(|s| s.locked_info()),
         }
     }
 

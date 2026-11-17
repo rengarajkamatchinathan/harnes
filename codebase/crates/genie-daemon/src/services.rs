@@ -45,6 +45,8 @@ pub struct Services {
     pub browser: Option<Arc<genie_browser::Browser>>,
     pub browser_backend: Option<Arc<dyn genie_browser::BrowserBackend>>,
     pub browser_host: Option<Arc<genie_core::runtime::browser::EngineBrowserHost>>,
+    /// Secrets unlock, providers, credentials, models, catalog, usage (02 §6.1, §6.5).
+    pub providers: Option<Arc<crate::providers::ProviderHub>>,
 }
 
 pub(crate) enum Handled {
@@ -128,6 +130,12 @@ impl Services {
         conn: &Arc<Conn>,
         r: &Request,
     ) -> Handled {
+        // First: the locked-secrets gate and the provider methods.
+        if let Some(p) = &self.providers
+            && let Some(h) = p.dispatch(state, conn, r)
+        {
+            return h;
+        }
         if r.method.starts_with("browser.") {
             return match &self.browser {
                 Some(b) => self.browser_async(b.clone(), state, conn, r),
@@ -551,7 +559,15 @@ impl Services {
     /// Background work: hub events → MCP reconcile + `config.changed`/`policy.changed`;
     /// MCP status → `mcp.status`; settings files polled (content-hash suppressed) and
     /// managed policy re-read.
+    /// `InitializeResult.locked` (02 §2).
+    pub(crate) fn locked_info(&self) -> Option<genie_protocol::handshake::LockedInfo> {
+        self.providers.as_ref().and_then(|p| p.locked_info())
+    }
+
     pub(crate) fn start(self: &Arc<Self>, state: &Arc<DaemonState>) {
+        if let Some(p) = &self.providers {
+            p.start(state);
+        }
         let scope = state.root_scope().child("services");
         if let Some(hub) = &self.hub {
             let mut rx = hub.subscribe();

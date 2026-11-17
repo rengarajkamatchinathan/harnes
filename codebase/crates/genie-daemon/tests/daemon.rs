@@ -198,6 +198,9 @@ fn real_cfg(dir: &std::path::Path, idle: Duration) -> DaemonConfig {
     let mut cfg = DaemonConfig::new(Endpoint::in_dir(dir, Channel::Dev).unwrap());
     cfg.idle_timeout = idle;
     cfg.write_logs = false;
+    // Never the real OS keychain in automated tests.
+    cfg.secrets =
+        genie_daemon::SecretsChoice::Backend(Arc::new(genie_secrets::MemoryBackend::new()));
     cfg
 }
 
