@@ -199,7 +199,7 @@ let mermaidP: Promise<Mermaid> | null = null;
 let theme = "default";
 let chain: Promise<unknown> = Promise.resolve();
 let seq = 0;
-export function preloadMermaid(dark: boolean): Promise<unknown> {
+export function preloadMermaid(dark: boolean): Promise<Mermaid> {
   theme = dark ? "dark" : "default";
   mermaidP ??= import("mermaid").then((m) => {
     const mm = m.default as unknown as Mermaid;

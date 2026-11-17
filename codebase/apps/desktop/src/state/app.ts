@@ -169,6 +169,13 @@ export class App extends Emitter {
     }
   }
 
+  /** `secrets.unlock` succeeded: the engine is usable now (D26). */
+  markUnlocked() {
+    this.status = { ...this.status, locked: undefined };
+    this.changedNow();
+    void this.onReady();
+  }
+
   private async onReady() {
     if (this.everReady) {
       // The relay resubscribed sessions and the workspace feed itself (02 §3.1).
@@ -350,7 +357,9 @@ export class App extends Emitter {
 
   onConfigChanged(f: Listener<string[]>) {
     this.configListeners.add(f);
-    return () => this.configListeners.delete(f);
+    return () => {
+      this.configListeners.delete(f);
+    };
   }
 
   toast(t: Omit<Toast, "id">) {

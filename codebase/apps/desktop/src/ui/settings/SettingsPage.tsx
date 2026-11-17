@@ -1,0 +1,169 @@
+// Settings (05 §4, D34): full page replacing the main column; section nav, search over all
+// settings, deep links; schema-generated controls from `config.schema` with live apply,
+// inline "Saved"/validation errors, restart banner, admin locks, scope picker (Code only).
+import { useEffect, useMemo, useState } from "react";
+import type { ConfigGetResult, ConfigScope } from "@genie/protocol";
+import type { ReactNode } from "react";
+import { Banner, Button, Field, Icon, Input, Segmented, Select, Switch, Textarea } from "@genie/ui";
+import { t } from "../../i18n";
+import { useApp, useAsync } from "../context";
+import { coerce, controlFor, description, keySchema, matches, sectionOf, SECTIONS, uiKeys, type Control, type KeyMeta, type SectionId } from "./schema";
+import { AccountSection, AppearanceSection, CapabilitiesSection, ConnectorsSection, DeveloperSection, GenieSection, GeneralExtras, PermissionsSection, PrivacySection, UsageSection } from "./Sections";
+import { ProvidersSection } from "./ProvidersSection";
+
+export function SettingsPage() {
+  const app = useApp();
+  const section = (SECTIONS.includes(app.ui.settingsSection as SectionId) ? app.ui.settingsSection : "general") as SectionId;
+  const [q, setQ] = useState("");
+  const schema = useAsync(() => app.client.config.schema({}), []);
+  const policy = useAsync(() => app.client.policy.effective({}), []);
+  const org = (policy.data?.values?.["org.name"] as string | undefined) ?? "your organisation";
+  const keys = useMemo(() => uiKeys(schema.data?.ui), [schema.data]);
+  const [restart, setRestart] = useState(false);
+
+  const shown = q ? keys.filter((k) => matches(q, k, keySchema(schema.data?.schema, k.key))) : keys.filter((k) => sectionOf(k.key) === section);
+
+  return (
+    <div className="settings">
+      <nav className="settings__nav" aria-label={t("settings.title")}>
+        <Button variant="ghost" icon="chevronLeft" onClick={() => app.setUi({ view: "main" })}>
+          {t("settings.back")}
+        </Button>
+        <label className="search">
+          <Icon name="search" />
+          <span className="g-sr-only">{t("settings.search")}</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("settings.search")} />
+        </label>
+        {SECTIONS.map((s) => (
+          <button key={s} className={`settings__navitem ${!q && s === section ? "is-active" : ""}`} aria-current={!q && s === section ? "page" : undefined} onClick={() => (setQ(""), app.setUi({ settingsSection: s, settingsItem: null }))}>
+            {t(`settings.section.${s}` as Parameters<typeof t>[0])}
+          </button>
+        ))}
+      </nav>
+      <div className="settings__body">
+        <div className="page__inner">
+          <h1>{q ? t("settings.search") : t(`settings.section.${section}` as Parameters<typeof t>[0])}</h1>
+          {restart && <Banner tone="warning">{t("settings.restart")}</Banner>}
+          {schema.error ? <Banner tone="danger">{app.describeError(schema.error)}</Banner> : null}
+          {section === "appearance" && !q && <AppearanceSection />}
+          {shown.length > 0 && <SchemaFields metas={shown} schema={schema.data?.schema} org={org} onRestart={() => setRestart(true)} />}
+          {q && !shown.length && <p className="muted">{t("settings.noMatch", { q })}</p>}
+          {!q && (
+            <>
+              {section === "general" && <GeneralExtras />}
+              {section === "genie" && <GenieSection />}
+              {section === "providers" && <ProvidersSection />}
+              {section === "capabilities" && <CapabilitiesSection />}
+              {section === "connectors" && <ConnectorsSection />}
+              {section === "permissions" && <PermissionsSection />}
+              {section === "usage" && <UsageSection />}
+              {section === "privacy" && <PrivacySection />}
+              {section === "developer" && <DeveloperSection />}
+              {section === "account" && <AccountSection />}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SchemaFields({ metas, schema, org, onRestart }: { metas: KeyMeta[]; schema: unknown; org: string; onRestart: () => void }) {
+  const app = useApp();
+  const session = app.ui.activeSession ? app.sessions.get(app.ui.activeSession) : null;
+  const cwd = app.ui.mode === "code" ? (session?.workspace_id ?? null) : null;
+  const [scope, setScope] = useState<ConfigScope>("user");
+  const [values, setValues] = useState<ConfigGetResult | null>(null);
+  const keyList = metas.map((m) => m.key).join(",");
+  useEffect(() => {
+    const load = () =>
+      app.client.config
+        .get({ keys: keyList.split(","), cwd, scope: null })
+        .then(setValues)
+        .catch(() => setValues({ values: {}, sources: {}, locked: [] }));
+    void load();
+    return app.onConfigChanged(() => void load());
+  }, [app, keyList, cwd]);
+  const scopable = !!cwd && metas.some((m) => m.scopes.length > 1);
+  const basic = metas.filter((m) => !m.advanced);
+  const advanced = metas.filter((m) => m.advanced);
+  const render = (m: KeyMeta) => (
+    <SchemaField
+      key={m.key}
+      meta={m}
+      schema={keySchema(schema, m.key)}
+      value={values?.values[m.key]}
+      source={values?.sources[m.key]}
+      locked={values?.locked.includes(m.key) ? t("settings.managedBy", { org }) : null}
+      scope={m.scopes.includes(scope) ? scope : "user"}
+      cwd={cwd}
+      onRestart={onRestart}
+    />
+  );
+  return (
+    <div className="stack">
+      {scopable && (
+        <div className="row">
+          <span>{t("settings.scope")}</span>
+          <Segmented label={t("settings.scope")} value={scope} onChange={(v) => setScope(v)} options={(["user", "project", "local"] as const).map((s) => ({ value: s, label: t(`settings.scope.${s}`) }))} />
+        </div>
+      )}
+      {basic.map(render)}
+      {advanced.length > 0 && (
+        <details>
+          <summary>{t("settings.advanced")}</summary>
+          {advanced.map(render)}
+        </details>
+      )}
+    </div>
+  );
+}
+
+function SchemaField({ meta, schema, value, source, locked, scope, cwd, onRestart }: { meta: KeyMeta; schema: Record<string, unknown> | undefined; value: unknown; source?: string; locked: string | null; scope: ConfigScope; cwd: string | null; onRestart: () => void }) {
+  const app = useApp();
+  const control: Control = controlFor(schema);
+  const [draft, setDraft] = useState<unknown>(value);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const id = `set-${meta.key}`;
+  useEffect(() => setDraft(control.kind === "json" ? JSON.stringify(value ?? null, null, 2) : control.kind === "list" ? ((value as string[] | undefined) ?? []).join("\n") : value), [value, control.kind]);
+
+  const commit = async (raw: unknown) => {
+    setError(null);
+    setSaved(false);
+    try {
+      const v = coerce(control, raw);
+      await app.client.config.set({ key: meta.key, value: v, scope, cwd });
+      setSaved(true);
+      if (meta.restart) onRestart();
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : app.describeError(e));
+    }
+  };
+
+  let input: ReactNode;
+  switch (control.kind) {
+    case "boolean":
+      input = <Switch id={id} checked={!!draft} disabled={!!locked} onChange={(v) => (setDraft(v), void commit(v))} aria-label={meta.title} />;
+      break;
+    case "enum":
+      input = <Select id={id} disabled={!!locked} value={String(draft ?? "")} onChange={(v) => (setDraft(v), void commit(v))} options={[{ value: "", label: "—", disabled: true }, ...control.options.map((o) => ({ value: o, label: o }))]} />;
+      break;
+    case "number":
+      input = <Input id={id} type="number" disabled={!!locked} value={String(draft ?? "")} onChange={(e) => setDraft(e.target.value)} onBlur={() => void commit(draft)} />;
+      break;
+    case "list":
+    case "json":
+      input = <Textarea id={id} disabled={!!locked} className="mono" value={String(draft ?? "")} onChange={(e) => setDraft(e.target.value)} onBlur={() => void commit(draft)} rows={control.kind === "json" ? 6 : 3} />;
+      break;
+    default:
+      input = <Input id={id} disabled={!!locked} value={String(draft ?? "")} onChange={(e) => setDraft(e.target.value)} onBlur={() => draft !== value && void commit(draft)} />;
+  }
+  return (
+    <Field label={meta.title} htmlFor={id} description={description(schema)} error={error} saved={saved} locked={locked} extra={source && source !== "default" && source !== "user" ? <span className="muted">({source})</span> : undefined}>
+      {input}
+    </Field>
+  );
+}
+

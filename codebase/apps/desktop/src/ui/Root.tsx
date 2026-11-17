@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { applyAppearance, Banner, Button, Card, Input, Spinner } from "@genie/ui";
 import { t } from "../i18n";
 import { preloadOnIdle } from "../markdown/markdown";
@@ -129,9 +129,7 @@ function Unlock() {
       const r = await app.client.secrets.unlock({ passphrase: pass });
       if (!r.ok) setErr(t("unlock.wrong"));
       else {
-        app.status = { ...app.status, locked: undefined };
-        await app.platform.retry();
-        app.changedNow();
+        app.markUnlocked();
       }
     } catch (e) {
       setErr(app.describeError(e));
@@ -173,6 +171,6 @@ export function Splash({ text }: { text: string }) {
   );
 }
 
-function Center({ children }: { children: React.ReactNode }) {
+function Center({ children }: { children: ReactNode }) {
   return <div className="center-screen">{children}</div>;
 }
