@@ -241,6 +241,7 @@ fn build_engine(
     // Shell (Code, 06 §13) with background jobs bound to the engine below; web tools
     // (Chat + Code, 06 §8) tainting the turn.
     let jobs = genie_core::runtime::host::EngineJobs::new(store.clone());
+    let rb_taints = rb.taints();
     let shell_scope = root.child("shell");
     let shell = Arc::new(genie_tools::shell::ShellRuntime::new(
         genie_tools::shell::ShellConfig::new(
@@ -253,15 +254,58 @@ fn build_engine(
     rb = rb
         .shell(shell.clone())
         .web(genie_tools::web::WebConfig::default());
-    {
-        let sh = shell.clone();
-        eb = eb.on_session_end(Arc::new(move |id: &str, evicted: bool| {
-            // An evicted actor keeps its running jobs; they report back when done.
-            if !evicted || sh.running_jobs(id).is_empty() {
-                sh.end_session(id);
+
+    // The agent browser (06 §10): built now, Chrome launched on first use.
+    let browser_host = {
+        let btasks = root.child("browser").tracker();
+        let backend: Arc<dyn genie_browser::BrowserBackend> =
+            Arc::new(genie_browser::SystemChromeBackend::new(
+                genie_browser::backend::SystemChromeConfig::new(&ep.data_dir),
+                btasks.clone(),
+            ));
+        let mut host = genie_core::runtime::browser::EngineBrowserHost::new(
+            turns.clone(),
+            rb_taints.clone(),
+            registry.clone(),
+        );
+        host.models = Some(models.clone());
+        host.store = store.clone();
+        host.conversation = store.as_ref().map(|s| {
+            Arc::new(genie_core::runtime::StoreConversation::new(s.clone()))
+                as Arc<dyn genie_core::runtime::ConversationStore>
+        });
+        let host = Arc::new(host);
+        let sites = Arc::new(genie_browser::SitePolicy::new());
+        if let Some(h) = &hub {
+            let p = h.policy();
+            sites.set_admin(
+                p.strings("browser.siteAllowlist"),
+                p.strings("browser.siteBlocklist"),
+            );
+            if let Some(v) = h.value(None, "browser.sites")
+                && let Ok(list) =
+                    serde_json::from_value::<Vec<genie_protocol::api::browser::SitePermission>>(v)
+            {
+                for s in &list {
+                    sites.set(s);
+                }
             }
-        }));
-    }
+        }
+        let browser = genie_browser::Browser::new(
+            backend.clone(),
+            host.clone(),
+            sites,
+            genie_browser::BrowserConfig {
+                downloads_dir: Some(ep.data_dir.join("browser").join("downloads")),
+                ..Default::default()
+            },
+            btasks,
+        );
+        rb = rb.browser(&browser);
+        services.browser = Some(browser);
+        services.browser_backend = Some(backend);
+        Some(host)
+    };
     if let Some(hub) = &hub {
         let p = hub.policy();
         rb = rb.web_search(Some(genie_tools::web::SearchPolicy {
@@ -310,8 +354,27 @@ fn build_engine(
     let runner = rb.build();
     let conversation = runner.conversation();
     services.runtime = Some(runner.runtime().clone());
+    {
+        let sh = shell.clone();
+        let br = services.browser.clone();
+        let scope = root.child("session-end");
+        eb = eb.on_session_end(Arc::new(move |id: &str, evicted: bool| {
+            // An evicted actor keeps its running jobs; they report back when done.
+            if !evicted || sh.running_jobs(id).is_empty() {
+                sh.end_session(id);
+            }
+            if let Some(b) = br.clone() {
+                let id = id.to_string();
+                scope.spawn(async move { b.end_session(&id).await });
+            }
+        }));
+    }
     let engine = eb.turn_runner(Arc::new(runner)).build(root);
     jobs.bind(engine.clone());
+    if let Some(h) = &browser_host {
+        h.bind(engine.clone());
+    }
+    services.browser_host = browser_host;
     (engine, Some(conversation), services)
 }
 
@@ -350,6 +413,12 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
         Some(services.clone()),
     ));
     state.start_background();
+    if let Some(h) = &services.browser_host {
+        let weak = Arc::downgrade(&state);
+        h.set_can_answer(Arc::new(move |sid, kind| {
+            weak.upgrade().is_some_and(|st| st.can_render(sid, kind))
+        }));
+    }
     let listener = listener::bind(&ep.address)?;
     tracing::info!(
         address = %ep.address, version = %cfg.engine_version, channel = %ep.channel,
@@ -399,6 +468,9 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     engine.shutdown();
     if let Some(m) = &services.mcp {
         m.shutdown();
+    }
+    if let Some(b) = &services.browser_backend {
+        let _ = tokio::time::timeout(SHUTDOWN_GRACE, b.shutdown()).await;
     }
     root.cancel();
     if !root.close_and_wait(SHUTDOWN_GRACE).await {

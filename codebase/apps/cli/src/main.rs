@@ -240,6 +240,7 @@ fn overlay_from(run: &RunArgs) -> Option<genie_protocol::api::session::SessionSe
         deny: run.deny.clone(),
         settings_path: run.settings.as_ref().map(abs),
         add_dirs: run.add_dir.iter().map(abs).collect(),
+        enable_browser: false,
     })
 }
 

@@ -1698,4 +1698,120 @@ mod wiring {
         assert_eq!(asks, 0);
         assert_eq!(ended(&ev)[0].outcome, ToolOutcome::Ok);
     }
+
+    fn checkout_recording() -> Value {
+        let all: Vec<Value> = serde_json::from_str(include_str!(
+            "../../genie-browser/tests/fixtures/checkout.json"
+        ))
+        .unwrap();
+        Value::Array(
+            all.into_iter()
+                .filter(|e| e.get("after_click").is_none())
+                .collect(),
+        )
+    }
+
+    #[tokio::test]
+    async fn browser_navigate_asks_for_the_site_through_the_real_authorizer() {
+        let d = tempfile::tempdir().unwrap();
+        let h = hub(d.path());
+        let settings: Arc<dyn SettingsSource> = Arc::new(Settings);
+        let turns = Arc::new(ActiveTurns::new());
+        let tasks = tokio_util::task::TaskTracker::new();
+        let (fake, wire) = genie_browser::testing::FakeCdp::new(&tasks);
+        fake.load(&checkout_recording());
+        let client =
+            genie_browser::CdpClient::connect_with_timeout(wire, &tasks, Duration::from_secs(5));
+        let mut t = harness_with(
+            vec![
+                reply(
+                    &[tool_block(
+                        0,
+                        "toolu_a",
+                        "browser_navigate",
+                        json!({"url": "https://shop.example/checkout"}),
+                    )],
+                    "tool_use",
+                ),
+                text(&["done"]),
+            ],
+            |_| {},
+            vec![],
+            None,
+            settings.clone(),
+            |b, _, _| {
+                let host = genie_core::runtime::browser::EngineBrowserHost::new(
+                    turns.clone(),
+                    b.taints(),
+                    settings.clone(),
+                );
+                let browser = genie_browser::Browser::new(
+                    Arc::new(genie_browser::testing::FakeBackend::new(client)),
+                    Arc::new(host),
+                    Arc::new(genie_browser::SitePolicy::new()),
+                    genie_browser::BrowserConfig::default(),
+                    tasks.clone(),
+                );
+                b.turns(turns.clone())
+                    .browser(&browser)
+                    .authorizer(Arc::new(PermissionAuthorizer::new(
+                        h.clone(),
+                        settings.clone(),
+                    )))
+            },
+        );
+        let _a = t.s.attach();
+        t.s.prompt("check out", Delivery::Steer).unwrap();
+        let ev = t
+            .until(|e| matches!(e, SessionEvent::PermissionAsked(_)))
+            .await;
+        let SessionEvent::PermissionAsked(a) = ev.last().unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(a.ask.tool.as_deref(), Some("browser_navigate"));
+        assert_eq!(a.ask.resource.as_deref(), Some("shop.example"));
+        assert_eq!(a.ask.save_suggestions[0].rule, "Browser(site:shop.example)");
+        t.s.answer_ask(
+            &a.ask.id,
+            serde_json::to_value(AskAnswer::decision(Decision::Once)).unwrap(),
+        )
+        .unwrap();
+        let ev = t.settle().await;
+        assert_eq!(ended(&ev)[0].outcome, ToolOutcome::Ok);
+        let res =
+            t.bodies()[1]["messages"].as_array().unwrap()[2]["content"][0]["content"].to_string();
+        assert!(res.contains("Place order"), "{res}");
+    }
+
+    #[test]
+    fn browser_tools_map_to_read_or_act() {
+        let req = |tool: &str| genie_core::runtime::AuthzRequest {
+            session_id: "x".into(),
+            turn_id: "t".into(),
+            tool: tool.into(),
+            kind: ToolKind::Mutating,
+            resource: Some("shop.example".into()),
+            preview: None,
+            save_suggestions: vec![],
+            mode: Mode::Default,
+            taint: None,
+        };
+        use genie_core::runtime::permissions::action_for;
+        use genie_permissions::{Action, BrowserAction};
+        assert!(matches!(
+            action_for(&req("browser_read"), None),
+            Action::Browser { action: BrowserAction::Read, ref site } if site == "shop.example"
+        ));
+        assert!(matches!(
+            action_for(&req("browser_navigate"), None),
+            Action::Browser {
+                action: BrowserAction::Navigate,
+                ..
+            }
+        ));
+        assert!(matches!(
+            action_for(&req("browser_click"), None),
+            Action::Browser { action: BrowserAction::Act(ref a), .. } if a == "click"
+        ));
+    }
 }

@@ -72,16 +72,29 @@ fn daemon() -> Mem {
         hub.clone(),
         registry.clone(),
     );
+    let tasks = tokio_util::task::TaskTracker::new();
+    let (_fake, wire) = genie_browser::testing::FakeCdp::new(&tasks);
+    let client =
+        genie_browser::CdpClient::connect_with_timeout(wire, &tasks, Duration::from_secs(5));
+    let browser = genie_browser::Browser::new(
+        Arc::new(genie_browser::testing::FakeBackend::new(client)),
+        Arc::new(genie_browser::NoHost),
+        Arc::new(genie_browser::SitePolicy::new()),
+        genie_browser::BrowserConfig::default(),
+        tasks,
+    );
     let runtime = RuntimeBuilder::new(registry.clone(), Arc::new(NoModels))
         .skills(skills.clone())
+        .browser(&browser)
         .build();
     let engine = EngineBuilder::new()
         .turn_runner(Arc::new(Runner))
         .build(&root);
     let services = Services {
-        hub: Some(hub),
         runtime: Some(runtime.runtime().clone()),
         skills: Some(skills),
+        hub: Some(hub.clone()),
+        browser: Some(browser),
         ..Services::default()
     };
     let state = Arc::new(DaemonState::with_services(
@@ -336,4 +349,94 @@ async fn ask_the_attached_client_cannot_render_raises_a_notification() {
         .unwrap();
     let n = desk.note(m::UserNotification::NAME).await;
     assert_eq!(n.params["session_id"], json!(sid));
+}
+
+async fn names(conn: &Connection, sid: String) -> Vec<String> {
+    conn.call::<m::ToolsList>(SessionIdParams { session_id: sid })
+        .await
+        .unwrap()
+        .tools
+        .into_iter()
+        .map(|t| t.name)
+        .collect()
+}
+
+async fn create(conn: &Connection, overlay: Option<SessionSettingsOverlay>) -> String {
+    conn.call::<m::SessionCreate>(CreateParams {
+        kind: SessionKind::Chat,
+        model: "m".into(),
+        settings: overlay,
+        ..Default::default()
+    })
+    .await
+    .unwrap()
+    .session_id
+}
+
+#[tokio::test]
+async fn browser_tools_are_off_in_headless_sessions_and_sites_persist() {
+    let mem = daemon();
+    let head = connect(&mem, "head", ClientKind::Headless, vec![]).await;
+    let sid = create(&head.conn, None).await;
+    assert!(
+        !names(&head.conn, sid)
+            .await
+            .iter()
+            .any(|n| n == "browser_open")
+    );
+    let sid = create(
+        &head.conn,
+        Some(SessionSettingsOverlay {
+            enable_browser: true,
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert!(
+        names(&head.conn, sid)
+            .await
+            .iter()
+            .any(|n| n == "browser_open")
+    );
+    let cli = connect(&mem, "cli", ClientKind::Cli, vec![AskKind::Permission]).await;
+    let sid = create(&cli.conn, None).await;
+    assert!(
+        names(&cli.conn, sid)
+            .await
+            .iter()
+            .any(|n| n == "browser_open")
+    );
+
+    cli.conn
+        .call::<m::BrowserSitesSet>(genie_protocol::api::browser::SitePermission {
+            origin: "shop.example".into(),
+            state: genie_protocol::api::browser::SiteState::Read,
+        })
+        .await
+        .unwrap();
+    let list = cli
+        .conn
+        .call::<m::BrowserSitesList>(Empty {})
+        .await
+        .unwrap();
+    assert!(list.sites.iter().any(|s| s.origin == "shop.example"));
+    let got = cli
+        .conn
+        .call::<m::ConfigGet>(ConfigGetParams {
+            keys: Some(vec!["browser.sites".into()]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(
+        got.values["browser.sites"]
+            .to_string()
+            .contains("shop.example")
+    );
+    let st = cli
+        .conn
+        .call::<m::BrowserStatusMethod>(Empty {})
+        .await
+        .unwrap();
+    assert!(st.running);
 }

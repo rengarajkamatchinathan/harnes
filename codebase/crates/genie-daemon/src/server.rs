@@ -249,7 +249,7 @@ impl DaemonState {
     }
 
     /// Whether a client subscribed to `session` can show asks of `kind`.
-    fn can_render(&self, session: &str, kind: genie_protocol::ask::AskKind) -> bool {
+    pub fn can_render(&self, session: &str, kind: genie_protocol::ask::AskKind) -> bool {
         self.conns
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -385,6 +385,10 @@ impl Conn {
         if let Some(l) = notification_line(method, params) {
             self.send_line(l);
         }
+    }
+
+    pub(crate) fn notify_event(&self, env: &genie_protocol::event::SessionEventEnvelope) {
+        self.notify(m::EVENT, env);
     }
 
     pub(crate) fn scope(&self) -> &TaskScope {
@@ -774,7 +778,7 @@ fn not_implemented(method: &str) -> RpcError {
 /// must answer before replaying).
 fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Response> {
     if let Some(s) = &state.services {
-        match s.dispatch(conn, &r) {
+        match s.dispatch(state, conn, &r) {
             Handled::Now(res) => {
                 return Some(match res {
                     Ok(v) => Response::ok(r.id, v),
@@ -825,9 +829,10 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
         n if n == m::SessionGet::NAME => {
             params::<m::SessionGet>(&r).and_then(|p| session_get(state, &p.session_id))
         }
-        n if n == m::SessionCreate::NAME => {
-            params::<m::SessionCreate>(&r).and_then(|p| session_create(state, &p, None))
-        }
+        n if n == m::SessionCreate::NAME => params::<m::SessionCreate>(&r).and_then(|p| {
+            let headless = conn.client.client_kind == genie_protocol::ClientKind::Headless;
+            session_create(state, &p, None, headless)
+        }),
         n if n == m::SessionUpdate::NAME => {
             params::<m::SessionUpdate>(&r).and_then(|p| session_update(state, conn, p))
         }
@@ -901,7 +906,7 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
                 incognito: src.incognito,
                 ..Default::default()
             };
-            session_create(state, &cp, Some(p.session_id))
+            session_create(state, &cp, Some(p.session_id), false)
         }),
 
         n if n == m::PermissionPending::NAME => params::<m::PermissionPending>(&r).and_then(|p| {
@@ -956,7 +961,11 @@ fn handle(state: &DaemonState, session: &str) -> Result<SessionHandle, RpcError>
 }
 
 /// Check the driver lease for a mutating command; acquire it if vacant (02 §5).
-fn with_lease(state: &Arc<DaemonState>, conn: &Arc<Conn>, session: &str) -> Result<(), RpcError> {
+pub(crate) fn with_lease(
+    state: &Arc<DaemonState>,
+    conn: &Arc<Conn>,
+    session: &str,
+) -> Result<(), RpcError> {
     if !state.registry.exists(session) {
         return Err(not_found("session"));
     }
@@ -1030,6 +1039,7 @@ fn session_create(
     state: &Arc<DaemonState>,
     p: &sp::CreateParams,
     parent: Option<String>,
+    headless: bool,
 ) -> Result<Value, RpcError> {
     if p.model.trim().is_empty() {
         return Err(RpcError::invalid_params("model is required"));
@@ -1051,6 +1061,7 @@ fn session_create(
             .map(|w| std::path::PathBuf::from(crate::services::canonical(w))),
         overlay,
         worktree_name: p.worktree_name.clone(),
+        headless,
     };
     let h = state.engine.create_session();
     let info = state.registry.create_with(h.id(), p, parent.clone(), extra);
@@ -1085,6 +1096,7 @@ fn overlay(
         allow: o.allow.clone(),
         deny: o.deny.clone(),
         add_dirs: o.add_dirs.clone(),
+        enable_browser: o.enable_browser,
         ..Default::default()
     };
     if let Some(path) = o.settings_path.as_deref().filter(|p| !p.is_empty()) {

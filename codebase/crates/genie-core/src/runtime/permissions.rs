@@ -379,12 +379,14 @@ pub fn action_for(req: &AuthzRequest, workspace: Option<&Path>) -> Action {
             }
         }
         n if n.starts_with("browser") => {
+            // `resource` is the site key; read vs act by tool name (06 §10, D21).
             let act = n.trim_start_matches("browser").trim_start_matches('_');
             Action::Browser {
                 site: host_of(&resource.unwrap_or_default()),
                 action: match act {
                     "navigate" | "open" => BrowserAction::Navigate,
-                    "read" | "snapshot" | "screenshot" | "" => BrowserAction::Read,
+                    "read" | "snapshot" | "screenshot" | "find" | "tabs" | "downloads" | "wait"
+                    | "scroll" | "" => BrowserAction::Read,
                     other => BrowserAction::Act(other.to_string()),
                 },
             }

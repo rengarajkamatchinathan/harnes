@@ -168,6 +168,15 @@ export interface BrowserConfirm {
 }
 
 /** Screencast frame (02 §6.6). */
+export interface BrowserControl {
+  /**
+   * `agent` ("Genie is browsing"), `user` ("you're in control"),
+   * `waiting_for_approval`, or `handoff` (the agent asked the user to take over).
+   */
+  control: string;
+  reason?: string | null;
+}
+
 export interface BrowserFrame {
   device_scale: number;
   frame_seq: number;
@@ -1176,7 +1185,7 @@ export interface SessionError {
 }
 
 /** 02 §4. Discriminated by `type`. */
-export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
+export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "browser.control" } & BrowserControl) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
 
 /** 02 §3.3. */
 export interface SessionEventEnvelope {
@@ -1245,6 +1254,8 @@ export interface SessionSettingsOverlay {
   add_dirs?: string[];
   allow?: string[];
   deny?: string[];
+  /** `--enable-browser`: browser tools in a headless session (SA-28c). */
+  enable_browser?: boolean;
   /** A settings file read by the daemon (same user) as the session's CLI layer. */
   settings_path?: string | null;
 }

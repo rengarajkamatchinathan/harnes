@@ -39,6 +39,8 @@ pub struct SessionSettings {
     pub workspace: Option<PathBuf>,
     /// Session-only settings (CLI layer: `--allow`/`--deny`, `--settings`, `--add-dir`).
     pub overlay: Option<SessionOverlay>,
+    /// Created by a headless client (`genie -p`): browser tools stay off unless enabled.
+    pub headless: bool,
 }
 
 /// The session-only CLI layer (D23 layer 2), already read from `--settings <file>` and
@@ -51,6 +53,8 @@ pub struct SessionOverlay {
     pub add_dirs: Vec<String>,
     /// `permissions.defaultMode` from the settings file, if any.
     pub default_mode: Option<Mode>,
+    /// `--enable-browser` (SA-28c).
+    pub enable_browser: bool,
 }
 
 pub trait SettingsSource: Send + Sync {

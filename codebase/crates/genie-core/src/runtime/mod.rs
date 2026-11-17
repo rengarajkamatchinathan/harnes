@@ -23,6 +23,7 @@
 
 pub mod active;
 pub mod bridge;
+pub mod browser;
 pub mod context;
 pub mod conversation;
 pub mod host;
@@ -279,6 +280,11 @@ impl RuntimeBuilder {
         self
     }
 
+    /// The per-turn taint cells (for ports built before the runtime, e.g. the browser host).
+    pub fn taints(&self) -> Arc<host::TurnTaints> {
+        self.rt.taints.clone()
+    }
+
     /// The `shell` tool (Code registry only, 06 §13).
     pub fn shell(mut self, shell: Arc<genie_tools::shell::ShellRuntime>) -> Self {
         for t in shell.tools() {
@@ -295,6 +301,22 @@ impl RuntimeBuilder {
             cfg.taint = Some(self.rt.taints.clone());
         }
         self.tools(genie_tools::web::tools(cfg))
+    }
+
+    /// The 18 `browser_*` tools for Chat and Code (06 §10), hidden in headless sessions
+    /// unless enabled.
+    pub fn browser(self, b: &Arc<genie_browser::Browser>) -> Self {
+        let settings = self.rt.settings.clone();
+        let tools: Vec<Arc<dyn Tool>> = genie_browser::tools(b)
+            .into_iter()
+            .map(|t| {
+                Arc::new(browser::HeadlessGated {
+                    inner: t,
+                    settings: settings.clone(),
+                }) as Arc<dyn Tool>
+            })
+            .collect();
+        self.tools(tools)
     }
 
     /// Declare provider-native web search when the model supports it (06 §8).

@@ -102,6 +102,9 @@ pub struct SessionSettingsOverlay {
     /// Extra directories the session may read/edit without asking (`--add-dir`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub add_dirs: Vec<String>,
+    /// `--enable-browser`: browser tools in a headless session (SA-28c).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enable_browser: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

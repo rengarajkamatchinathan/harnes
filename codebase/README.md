@@ -207,25 +207,19 @@ output, exit codes 0/1/2/3, `--on-ask deny`, `--ask-timeout`, an ask answered vi
 #### Spec 07 gaps
 
 - **Engine-side pieces the CLI can't supply:** the daemon answers `not_implemented` for
-  `config.*`, `trust.*`, `provider.*`, `mcp.*`, `skill.*`, `memory.*`, `model.list`,
+  `provider.*`, `memory.*`, `model.list`,
   `usage.query`, `checkpoint.*` (`/rewind`), `worktree.finish`, `session.compact`,
   `session.export` and `import.*`; the CLI wires each one and prints "not available in this
   engine build yet". `session.get` returns an empty `path`, so `genie chat open` replays the
   event log instead of printing the branch.
-- **Headless flags not applied:** `--allow/--deny`, `--settings` and `--add-dir` need a
-  session-only settings layer on the wire (not in `session.create`); they print a one-line
-  notice. `--worktree <name>` sends `worktree: new` (no name field). `system/init.tools` is
-  empty (no tool-list method).
+- **Headless flags:** `--allow/--deny`, `--settings`, `--add-dir` and `--worktree <name>` go
+  out on `session.create` (session-only layer, `worktree_name`); worktrees are not created yet.
 - **`no_provider_configured`:** core maps every `TurnError::Provider` to the bare code
   `GENIE-PROV`, so the class is lost on the wire; the CLI words bare `GENIE-PROV` as "provider
   failed / none configured". Suggested core change: put the class in `ErrorInfo.message` or the
   code (`GENIE-PROV:<class>`); `errors::turn_error` already handles both.
 - **`--continue`** picks the most recent session of the kind: `SessionSummary.workspace_id` is
   never set and `workspace_path` is not stored, so "in this folder" can't be filtered yet.
-- **Headless OS notification:** the headless client advertises no ask kinds and answers from
-  the event stream; with a client attached the core sets `awaiting_ask` (not `paused`) and so
-  raises no OS notification. Needs a daemon rule ("attached, but cannot render this kind →
-  notify").
 - **Rendering:** `genie-markdown` (patchmark port) and `syntect` highlighting are not done;
   `tui::markdown` is a small block-stable renderer with the heal step. The OSC 11 palette query
   is not sent (light/dark from `COLORFGBG`, default dark). No full-screen mode, images or
@@ -392,6 +386,35 @@ step-cap check-in, handoff, lost result → `unknown`, download confirmation, re
 type/fill_form, screenshot, screencast flow control + input. `real_chrome_smoke` (`--ignored`)
 drives a local Chrome against a tiny local HTTP page.
 
+### Engine wiring (06 §5, §7–§10, §13; 08 §3–6; 02 §6.4, §6.8, §7)
+
+The subsystems are wired into the turn loop (`genie-core::runtime`) and the daemon
+(`genie-daemon::{lib, services}`):
+
+| What | Where |
+|---|---|
+| Settings/policy/trust hub: one `ConfigStore` per project root (+ user-only for Chat), shared `EffectivePolicy` and `TrustStore`, `HubEvent`s; managed policy from `FilePolicySource::system()` + remote cache, re-read every 60 s; settings files polled every 2 s (content-hash suppressed) | `genie-core::config::ConfigHub`, `genie-daemon::services::Services::start` |
+| Permissions in the turn loop: rules folded from every loaded layer + policy `permissions.deny/ask` + session-only CLI layer + remembered "always"; `ModePolicy` from `disableBypassMode` / `defaultMode` floor; tool call → `Action` (`shell` via `shell::authz_from_request`, `web_fetch` via `web::fetch_authz` with `pasted`/`seen`, `mcp__*`, `browser_*` read vs act, `skill`→`Skill(name)`); deny → `Blocked` (`tool.ended.error.code = policy_blocked` + "Blocked by <org> policy (rule)" for policy); ask → durable ask with save suggestions; "always" → `Evaluator::remember` + `ConfigStore::add_permission_rule` in the chosen scope + `permission.resolved.saved_rule` + release of the session's other pending asks (`by: rule`, 02 §7 step 6) | `runtime::permissions::PermissionAuthorizer`, `runtime::bridge::CallGate`, `session::resolve_ask` |
+| Taint (SA-29): per-turn cell set by untrusted results (MCP unless trusted, `External` tools, `web::TaintPort`, browser host) → evaluator `Taint` | `runtime::host::TurnTaints`, `AgentRuntime::taint_source` |
+| Audit (08 §6): `permission.asked`, `permission.decided`, `policy.blocked`, `settings.changed`, `trust.changed`, `mcp.connected`, `skill.installed` (sha256), `browser.site_approved`; local JSONL in `<data>/audit/` (or `audit.jsonl.dir`) | `PermissionAuthorizer`, `services`, `genie-daemon::build_auditor` |
+| `config.get/set/schema/diagnostics`, `policy.effective`, `trust.get/set/pending_definitions/approve_definition` (paths canonicalised); `config.changed` / `policy.changed` on the workspace feed | `genie-daemon::services` |
+| MCP: one manager for user + managed servers, one per project root for `.mcp.json` / project-settings servers (trust **and** D43 hash approval; unapproved ones listed as `disabled`) and local servers; reconcile on settings/trust/policy events; policy `mcp.allowed`, `mcp.disableLocal`, `mcp.sampling: off`, `mcp.trusted`; tools exposed per turn as `ToolProvider` tools (2 s grace), authorised through the gate, results tainting; elicitation/sampling → asks of the calling turn (sampling then runs the chat model); `mcp.list/add/remove/set_enabled/logs/tools/resources/prompts/resource.read/auth.start`; `mcp.status` on the feed | `runtime::mcp::McpHub`, `runtime::active::ActiveTurns` |
+| Skills: catalog per workspace root (project roots after trust), policy keys, `skills-state.json`, timer refresh, roots/policy reset on trust/policy change; `<available_skills>` + `feature.skills`; `skill` / `skill_read` tools (`Skill(name)` permission first); loaded skills re-injected after compaction; `InputPart::Skill` rendered; `/command args` expanded (file refs → `file_ref` parts); `skill.list/set_enabled/upload`, `directory.list/install` (skills) | `runtime::skills`, `services` |
+| Shell (Code) + background jobs (`background_job` rows, keep-alive, synthetic `background_done`), `end_session` on delete/eviction; web (`web_fetch` for Chat + Code; provider-native search declared in `ServerTools.web_search` from policy `webSearch.*`) | `runtime::host::{EngineJobs, SettingsDirs}`, `RuntimeBuilder::{shell, web, web_search}` |
+| Browser: one `Browser` (`SystemChromeBackend`, Chrome launched on first use), tools for Chat + Code (hidden in headless sessions unless `enable_browser` or a `Browser(site:…)` allow), `EngineBrowserHost` (confirm → `browser_confirm` ask / `Unavailable` when no attached client renders it, taint, image blobs, typed-URL check, vision, `browser.control` banner events), `browser.*` methods (lease-gated where the table says; `stop` interrupts the turn), sites persisted in `browser.sites` user settings, admin lists from policy, backend shutdown on exit | `runtime::browser`, `services::browser_async` |
+| Protocol (additive): `ConfigSource::Cli`, `ConfigScope::Managed`, `session.create.{settings: {allow, deny, settings_path, add_dirs, enable_browser}, worktree_name}`, `tools.list`, `tool.ended.error`, `mcp.add/remove.cwd`, `browser.control` event | `genie-protocol` |
+| Paused-ask notification also when the attached clients can't render the ask kind (e.g. headless) | `DaemonState::can_render`, workspace pump |
+| CLI: session-only flags on `session.create`, `system/init.tools` from `tools.list`, `mcp add/remove` send the cwd | `apps/cli` |
+
+Tests: `genie-core/tests/turn.rs` `wiring::*` (cassettes, real authorizer: policy block,
+"always" + saved rule + release, MCP over an in-memory fake server with taint downgrade,
+skills index/tool/commands, `shell` read-only vs denied, `web_fetch` against a loopback
+server (ask vs pasted), `browser_navigate` site ask against the fake CDP endpoint);
+`genie-daemon/tests/services.rs` (config/policy/trust methods and `config.changed`,
+`tools.list`, session-only settings validation, skills methods, the can't-render
+notification, headless browser gating + `browser.sites` persistence + `browser.status`);
+`config::tests` (hub trust gating and approvals).
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -412,16 +435,37 @@ drives a local Chrome against a tiny local HTTP page.
 - **Not in this milestone:** desktop app, `packages/ui` and the Platform-adapter lint rule (spec 05);
   CI workflows.
 
+### Engine wiring gaps and deviations
+
+- **Hot reload is a 2 s poll** of the settings files (and 60 s for managed policy), not the
+  debounced (100 ms) OS watcher; the remote-policy HTTP fetcher is still a port.
+- **Shared MCP servers** are shared per manager: user + managed servers once per daemon,
+  project/local servers once per project root (a project server overrides a user server of the
+  same name for that project). `mcp.trusted` (array of server names, policy) is our assumption
+  for the trusted allowlist. Sampling cost estimate is 0 and sampling usage is not recorded.
+  Elicitation/sampling outside a running tool call of that server is declined. MCP tool
+  `readOnlyHint` is not passed to the evaluator (taint downgrade always applies).
+- **Permission request encoding:** tools report via `resource` + `preview`; tool-name tables in
+  `permissions::action_for` map them to actions. Cross-session release after "always" is not
+  done (only the session's own pending asks are re-evaluated).
+- **Slash commands:** `` !`cmd` `` snippets are replaced by a note (the shell permission path
+  is not driven from prompt expansion yet); `@file` refs become `file_ref` parts, which the turn
+  still renders as placeholders. The CLI still expands its own user commands with
+  `apps/cli/src/tui/commands.rs` before sending, so the engine expansion serves other clients.
+- **Skills directory** has no HTTP transport (`directory.list/install` for skills report it as
+  unavailable); `skill.upload` reads the blob from the store.
+- **Background jobs** are not killed on interrupt-with-stop (`stop_subagents`); a daemon restart
+  leaves `background_job` rows without `ended`.
+- **Browser:** `browser_screenshot` returns a blob reference (no image part in the tool result
+  yet); there is no `--enable-browser` CLI flag (the wire field exists); "always" answers for
+  sites are saved as `Browser(site:…)` permission rules, not as `browser.sites` states;
+  `attachment_path` is not implemented; `browser.popout` is not routed.
+- **`worktree_name`** and `add_dirs` are stored; worktrees themselves are not created yet.
+- **Audit** covers the events listed in the coverage table; tool calls, usage, sign-ins and
+  hook runs are not recorded yet.
+
 ### Spec 06 §5 / 08 §3–6 gaps and deviations
 
-- **Not wired yet**: the daemon's `config.*`, `policy.*`, `trust.*` methods, the `ToolAuthorizer`
-  adapter in `genie-core` (fold `ConfigStore::permission_layers` + `EffectivePolicy` rules into a
-  `RuleSet`, build `ModePolicy` from `disable_bypass`/`mode_floor`, map `Verdict` to asks), audit
-  calls from the engine, and the debounced (100 ms) file watcher that calls `ConfigStore::refresh`.
-- **Shell scanner** (splitting compound bash/PowerShell commands) is not implemented; the
-  evaluator takes the already-split parts (`None` = unparseable → ask).
-- **CLI layer source**: the protocol's `ConfigSource` has no `cli`; CLI values report as
-  `unknown` until a `cli` variant is added to `genie-protocol`.
 - **OS sources are ports only**: macOS configuration-profile and Windows registry readers, the
   ADMX template, the Windows ACL check on `policy.json` (Unix checks root owner + no g/o write),
   the hourly remote refresh loop and its HTTP fetcher, and the OTLP audit exporter.
@@ -440,8 +484,8 @@ drives a local Chrome against a tiny local HTTP page.
 
 ### Spec 02 gaps and deviations
 
-- **Methods owned by other specs** (config, providers, browser, terminal, MCP, projects, blobs,
-  Code mode, `session.export/search`) are typed in the table and generated
+- **Methods owned by other specs** (providers, terminal, projects, blobs, Code mode,
+  `browser.popout`, `session.export/search`) are typed in the table and generated
   into TS, but the daemon answers `method_not_found` with `data.reason = "not_implemented"`
   until their subsystem lands.
 - **Session metadata is in memory** (`genie-daemon::registry`); `session.get` returns the
@@ -459,13 +503,10 @@ drives a local Chrome against a tiny local HTTP page.
 
 ### Spec 06 gaps and deviations
 
-- **Out of scope here (typed extension points only):** shell and code tools (§4.2, §13),
-  MCP + `tool_search` (§7), web search/fetch (§8), skills (§9), browser (§10), subagents (§11:
+- **Out of scope here (typed extension points only):** code tools (§4.2), `tool_search`
+  deferral (§7), subagents (§11:
   `finish = stop` with running children), hooks (§12: `turn.end` continue, `compact.before/after`),
   checkpoints (D49), artifacts (D28), `chat_search` / `project_search` tools.
-- **Permissions:** `ToolAuthorizer` is the seam for `genie-permissions`; no rules, modes or
-  "always" saving are evaluated here. `DefaultAuthorizer` asks per call for every tool that
-  authorizes (non-read-only, except memory which §4.1 always allows).
 - **Native compaction** (`capabilities.native_compaction`) is not used; we always write our own
   summary. Re-injection after compaction covers the rebuilt baseline only (skills, artifact
   refs, read-state, grants, todo, MCP resources come with their subsystems). If the summary
@@ -556,8 +597,6 @@ drives a local Chrome against a tiny local HTTP page.
   `/server:prompt` UX, asks for first-use permission, elicitation/sampling wiring to asks and the
   chat model, usage accounting. The engine/tools/config crates own these; this crate provides the ports
   and data they need (`Ask` builders, `TaintSource`, `McpEvent`, `definition_hash`).
-- **Managed scope on the wire:** `McpServerInfo.scope` is a `ConfigScope`, which has no `managed`;
-  managed servers report `unknown` (protocol unchanged on purpose).
 - **Schema sanitising** is a Genie assumption (the spec only says names are sanitised); per-provider
   lowering stays in `genie-providers`.
 - **Sampling budget** default is 100,000 tokens per server per daemon run (not persisted); estimated
@@ -574,13 +613,6 @@ drives a local Chrome against a tiny local HTTP page.
 
 ### Spec 06 §9 (`genie-skills`) gaps and deviations
 
-- **Not wired yet (integration owner):** `genie-core` must build a `SkillCatalog` per DirContext,
-  feed `index()` to `InstructionSource::skills_index` (and the `feature.skills` flag), implement
-  `skill` / `skill_read` as `genie-tools` `Tool`s (genie-skills may not depend on genie-tools),
-  check `skill.use` permissions, resolve `InputPart::Skill` via `load(.., Invoker::User, ..)`,
-  re-inject invoked skills after compaction, and map `skill.*` / `directory.*` RPCs and the
-  audit event "skill installed (hash)". Commands: the CLI still uses its own loader in
-  `apps/cli/src/tui/commands.rs`; `genie_skills::command` is a compatible superset to switch to.
 - **Hot reload is polling-based:** `refresh()` compares a fingerprint; no OS file watcher
   (`notify` is not a dependency). The caller decides when to poll and diffs `index()` into
   `<system-update>`s.
@@ -602,9 +634,6 @@ drives a local Chrome against a tiny local HTTP page.
 
 ### Spec 06 §8 and §13 gaps and deviations
 
-- **Not registered yet.** `shell::ShellRuntime` / `shell::tools(cfg)` and `web::tools(cfg)` are
-  constructors only; `genie-core` wires them into the code/chat registries and implements the
-  ports (`SessionDirs`, `BackgroundJobs`, `TaintPort`, optionally `Resolver` / `SearchBackend`).
 - **Permission request encoding.** `PermissionRequest` has no structured field, so the shell tool
   puts the dialect in the resource (`Bash(<cmd>)` / `PowerShell(<cmd>)`) and the cwd in the
   `Command` preview; the authorizer must call `shell::authz_from_request` to get the scanned parts.
@@ -636,18 +665,6 @@ drives a local Chrome against a tiny local HTTP page.
 
 ### Spec 06 §10 (browser) gaps and deviations
 
-- **Not wired yet** (integration owner): the daemon must build one `Browser` (with
-  `SystemChromeBackend`, the shared `SitePolicy`, a `BrowserHost` implementation and the
-  download quarantine dir), register `genie_browser::tools(&browser)` for Chat and Code sessions,
-  and route `browser.*` methods to `Browser::{status, screencast_start/ack/stop, input, takeover,
-  handback, stop, tabs, tab_activate, clear_data}` and `sites.{list,set}`. `BrowserHost` must map
-  `confirm` to a durable `AskKind::BrowserConfirm` ask (Approve / Take over / Deny), `taint` to the
-  evaluator's `Taint { source, read_origins }`, `store_image` to blobs, `attachment_path` to chat
-  attachments, `user_supplied_url` to the turn's user message, `control_changed` to the banner, and
-  must persist `browser.sites.set` and "always" answers into settings. Headless `-p` gating
-  (SA-28c: off unless `--allow 'Browser(site:…)'` / `--enable-browser`) is the registering side's
-  decision. The permission adapter should read `resource` (the site key) of browser asks as
-  `Action::Browser { site, action }` (read vs act by tool name).
 - **Generated CDP types** (research §3) are not used: commands and results are `serde_json::Value`
   with a few typed accessors; no `chromiumoxide_cdp` dependency.
 - **Windows pipe transport** uses `--remote-debugging-io-pipes` with inheritable handles; it

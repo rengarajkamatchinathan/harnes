@@ -22,6 +22,8 @@ pub struct Extra {
     pub overlay: Option<SessionOverlay>,
     /// `--worktree <name>` (kept until the worktree subsystem lands).
     pub worktree_name: Option<String>,
+    /// Created by a headless client.
+    pub headless: bool,
 }
 
 #[derive(Default)]
@@ -188,6 +190,7 @@ impl SettingsSource for Registry {
             title: s.summary.title,
             workspace: x.workspace,
             overlay: x.overlay,
+            headless: x.headless,
         })
     }
 

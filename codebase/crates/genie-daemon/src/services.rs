@@ -41,6 +41,10 @@ pub struct Services {
     pub skills: Option<Arc<SkillsHub>>,
     /// Blob storage (`skill.upload`).
     pub store: Option<Arc<genie_store::Store>>,
+    /// The agent browser (06 §10) and its backend (shut down with the daemon).
+    pub browser: Option<Arc<genie_browser::Browser>>,
+    pub browser_backend: Option<Arc<dyn genie_browser::BrowserBackend>>,
+    pub browser_host: Option<Arc<genie_core::runtime::browser::EngineBrowserHost>>,
 }
 
 pub(crate) enum Handled {
@@ -118,7 +122,18 @@ impl Services {
     }
 
     /// Methods served here. `NotMine` lets the server fall through to its own table.
-    pub(crate) fn dispatch(self: &Arc<Self>, conn: &Arc<Conn>, r: &Request) -> Handled {
+    pub(crate) fn dispatch(
+        self: &Arc<Self>,
+        state: &Arc<DaemonState>,
+        conn: &Arc<Conn>,
+        r: &Request,
+    ) -> Handled {
+        if r.method.starts_with("browser.") {
+            return match &self.browser {
+                Some(b) => self.browser_async(b.clone(), state, conn, r),
+                None => Handled::NotMine,
+            };
+        }
         let name = r.method.as_str();
         let hub = || self.hub.clone().ok_or_else(|| not_implemented(name));
         let mcp = || self.mcp.clone().ok_or_else(|| not_implemented(name));
@@ -318,6 +333,132 @@ impl Services {
         Handled::Now(res)
     }
 
+    /// `browser.*` (02 §6.6). Lease-gated methods check the driver lease first.
+    fn browser_async(
+        self: &Arc<Self>,
+        b: Arc<genie_browser::Browser>,
+        state: &Arc<DaemonState>,
+        conn: &Arc<Conn>,
+        r: &Request,
+    ) -> Handled {
+        let name = r.method.clone();
+        if let Some(info) = m::find(&name)
+            && info.needs_lease
+        {
+            let sid = r
+                .params
+                .get("session_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if let Err(e) = crate::server::with_lease(state, conn, sid) {
+                return Handled::Now(Err(e));
+            }
+        }
+        let r = r.clone();
+        let c = conn.clone();
+        let st = state.clone();
+        let me = self.clone();
+        conn.scope()
+            .child("browser-call")
+            .spawn_cancellable(async move {
+                let berr = |e: genie_browser::BrowserError| {
+                    RpcError::new(ErrorKind::InvalidState, e.to_string())
+                };
+                let empty = || to_result(&Empty {});
+                let res: Result<Value, RpcError> = async {
+                    match name.as_str() {
+                        n if n == m::BrowserStatusMethod::NAME => to_result(&b.status().await),
+                        n if n == m::BrowserScreencastStart::NAME => {
+                            let p = params::<m::BrowserScreencastStart>(&r)?;
+                            let sink = Arc::new(ConnFrames {
+                                conn: c.clone(),
+                                session_id: p.session_id.clone(),
+                            });
+                            to_result(&b.screencast_start(&p, sink).await.map_err(berr)?)
+                        }
+                        n if n == m::BrowserScreencastAck::NAME => {
+                            b.screencast_ack(&params::<m::BrowserScreencastAck>(&r)?)
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserScreencastStop::NAME => {
+                            b.screencast_stop(&params::<m::BrowserScreencastStop>(&r)?)
+                                .await;
+                            empty()
+                        }
+                        n if n == m::BrowserInput::NAME => {
+                            b.input(&params::<m::BrowserInput>(&r)?)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserTakeover::NAME => {
+                            b.takeover(&params::<m::BrowserTakeover>(&r)?.session_id);
+                            empty()
+                        }
+                        n if n == m::BrowserHandback::NAME => {
+                            b.handback(&params::<m::BrowserHandback>(&r)?.session_id);
+                            empty()
+                        }
+                        n if n == m::BrowserStop::NAME => {
+                            let sid = params::<m::BrowserStop>(&r)?.session_id;
+                            b.stop(&sid).await;
+                            // Stop also interrupts the turn (06 §10).
+                            if let Some(h) = st.engine().loaded(&sid) {
+                                h.interrupt();
+                            }
+                            empty()
+                        }
+                        n if n == m::BrowserTabs::NAME => {
+                            to_result(&b.tabs(&params::<m::BrowserTabs>(&r)?.session_id).await)
+                        }
+                        n if n == m::BrowserTabActivate::NAME => {
+                            b.tab_activate(&params::<m::BrowserTabActivate>(&r)?)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserDataClear::NAME => {
+                            b.clear_data(params::<m::BrowserDataClear>(&r)?.what)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserSitesList::NAME => {
+                            to_result(&genie_protocol::api::browser::SitesListResult {
+                                sites: b.sites.list(),
+                            })
+                        }
+                        n if n == m::BrowserSitesSet::NAME => {
+                            let p = params::<m::BrowserSitesSet>(&r)?;
+                            b.sites.set(&p);
+                            // Persisted in user settings (`browser.sites`).
+                            if let Some(h) = &me.hub {
+                                let list = serde_json::to_value(b.sites.list())
+                                    .map_err(|e| RpcError::internal(e.to_string()))?;
+                                h.set("browser.sites", list, ConfigScope::User, None)
+                                    .map_err(config_err)?;
+                            }
+                            me.audit(
+                                AuditEvent::BrowserSiteApproved,
+                                Attrs::new()
+                                    .with("origin", p.origin)
+                                    .with("state", json!(p.state)),
+                            );
+                            empty()
+                        }
+                        other => Err(not_implemented(other)),
+                    }
+                }
+                .await;
+                c.respond(match res {
+                    Ok(v) => Response::ok(r.id, v),
+                    Err(e) => Response::err(r.id, e),
+                });
+            });
+        Handled::Later
+    }
+
     fn directory_async(
         self: &Arc<Self>,
         s: Arc<SkillsHub>,
@@ -496,6 +637,28 @@ impl Services {
                 }
             });
         }
+    }
+}
+
+/// Screencast frames for one connection, as ephemeral `browser.frame` events.
+struct ConnFrames {
+    conn: Arc<Conn>,
+    session_id: String,
+}
+
+impl genie_browser::FrameSink for ConnFrames {
+    fn frame(&self, frame: genie_protocol::event::BrowserFrame) {
+        self.conn
+            .notify_event(&genie_protocol::event::SessionEventEnvelope {
+                session_id: self.session_id.clone(),
+                seq: None,
+                ref_seq: None,
+                ts: genie_protocol::rfc3339_ms(genie_core::bus::now_ms()),
+                turn_id: None,
+                step: None,
+                subagent_of: None,
+                event: genie_protocol::event::SessionEvent::BrowserFrame(frame),
+            });
     }
 }
 

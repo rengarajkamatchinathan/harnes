@@ -111,6 +111,9 @@ pub enum SessionEvent {
     Status(StatusEvent),
     #[serde(rename = "browser.frame")]
     BrowserFrame(BrowserFrame),
+    /// Who drives the agent browser (05 §9 banner), ephemeral.
+    #[serde(rename = "browser.control")]
+    BrowserControl(BrowserControl),
     #[serde(rename = "terminal.output")]
     TerminalOutput(TerminalOutput),
 
@@ -129,6 +132,7 @@ impl SessionEvent {
                 | SessionEvent::UsageUpdated(_)
                 | SessionEvent::Status(_)
                 | SessionEvent::BrowserFrame(_)
+                | SessionEvent::BrowserControl(_)
                 | SessionEvent::TerminalOutput(_)
                 | SessionEvent::Unknown
         )
@@ -169,6 +173,7 @@ impl SessionEvent {
             SessionEvent::UsageUpdated(_) => "usage.updated",
             SessionEvent::Status(_) => "status",
             SessionEvent::BrowserFrame(_) => "browser.frame",
+            SessionEvent::BrowserControl(_) => "browser.control",
             SessionEvent::TerminalOutput(_) => "terminal.output",
             SessionEvent::Unknown => "unknown",
         }
@@ -543,6 +548,15 @@ pub struct StatusEvent {
 }
 
 /// Screencast frame (02 §6.6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BrowserControl {
+    /// `agent` ("Genie is browsing"), `user` ("you're in control"),
+    /// `waiting_for_approval`, or `handoff` (the agent asked the user to take over).
+    pub control: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrowserFrame {
     pub stream_id: String,

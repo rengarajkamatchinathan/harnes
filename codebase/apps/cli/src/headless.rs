@@ -146,6 +146,7 @@ pub async fn run(
                 .iter()
                 .map(|p| opts.cwd.join(p).to_string_lossy().into_owned())
                 .collect(),
+            enable_browser: false,
         });
     }
     let opened = match session::open(conn, &opts.target, &spec, &opts.cwd).await {

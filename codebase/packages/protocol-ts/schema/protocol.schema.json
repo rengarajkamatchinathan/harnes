@@ -601,8 +601,26 @@
       ],
       "type": "object"
     },
-    "BrowserFrame": {
+    "BrowserControl": {
       "description": "Screencast frame (02 §6.6).",
+      "properties": {
+        "control": {
+          "description": "`agent` (\"Genie is browsing\"), `user` (\"you're in control\"),\n`waiting_for_approval`, or `handoff` (the agent asked the user to take over).",
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "control"
+      ],
+      "type": "object"
+    },
+    "BrowserFrame": {
       "properties": {
         "device_scale": {
           "format": "double",
@@ -4991,6 +5009,20 @@
           "type": "object"
         },
         {
+          "$ref": "#/$defs/BrowserControl",
+          "description": "Who drives the agent browser (05 §9 banner), ephemeral.",
+          "properties": {
+            "type": {
+              "const": "browser.control",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/TerminalOutput",
           "properties": {
             "type": {
@@ -5259,6 +5291,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "enable_browser": {
+          "description": "`--enable-browser`: browser tools in a headless session (SA-28c).",
+          "type": "boolean"
         },
         "settings_path": {
           "description": "A settings file read by the daemon (same user) as the session's CLI layer.",
