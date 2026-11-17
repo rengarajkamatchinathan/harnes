@@ -1,0 +1,18 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+@import "highlight.js/styles/github-dark.css";
+
+html, body, #root { height: 100%; margin: 0; }
+body { background: #0f1115; color: #e6e6e6; font: 15px/1.55 system-ui, sans-serif; }
+.md h2 { font-size: 1.2rem; font-weight: 650; margin: 1rem 0 .4rem; }
+.md p { margin: .45rem 0; }
+.md ul { list-style: disc; padding-left: 1.4rem; }
+.md ol { list-style: decimal; padding-left: 1.4rem; }
+.md code { font: 13px/1.45 ui-monospace, Consolas, monospace; }
+.md :not(pre) > code { background: #1f2430; padding: 0 .25rem; border-radius: 4px; }
+.md pre { background: #0d1117; border: 1px solid #2a2f3a; border-radius: 8px; padding: .7rem .9rem; overflow-x: auto; margin: .5rem 0; }
+.md table { border-collapse: collapse; margin: .5rem 0; }
+.md th, .md td { border: 1px solid #333a46; padding: .25rem .6rem; }
+.md blockquote { border-left: 3px solid #4f46e5; padding-left: .8rem; color: #b9bdc7; }
+.mermaid-block { background: #f7f7f9; border-radius: 8px; padding: .5rem; margin: .5rem 0; min-height: 60px; }
+.mermaid-block svg { max-width: 100%; height: auto; }

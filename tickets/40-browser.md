@@ -40,3 +40,6 @@ Report: [research/browser.md](../research/browser.md) (2026-11-16, pending user 
 - **New sites:** ask per site (allow once / always), plus an admin allowlist/blocklist (→ 28). Sensitive actions (payments, sending, uploads, downloads) always need user confirmation.
 - **v2:** our own CEF "Genie Browser" helper (option A), **downloaded on first use**, behind the same backend interface. Then Tauri 3's CEF runtime (D) once it is stable.
 - Deferred to spec: browser tools in the CLI, headless mode, and the profile location/encryption.
+
+### Amendment (D56, 2026-11-17)
+- The browser is shown **inside Genie's window** as a Browser tab (Chat and Code). Chrome/Edge (Genie profile) runs in the background; the daemon streams it with **CDP `Page.startScreencast`** frames to the tab and forwards **Take over** input with `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent`. A pop-out opens the real window. Safety rules (per-site asks, sensitive-action confirmations, profile isolation) are unchanged. Risks to check in the spec: frame rate/latency, IME/clipboard/file pickers during take over, multi-tab handling.
