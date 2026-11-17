@@ -18,13 +18,17 @@ crates/
                    `runtime`: turn loop, context assembly, prompts (`prompts/`), compaction,
                    tool wiring, catalog → provider resolver (spec 06 §1–§4)
   genie-daemon     socket/pipe listener + peer check, token, spawn lock, handshake,
-                   skew handling, idle exit, clean shutdown, standalone lease
+                   skew handling, idle exit, clean shutdown, standalone lease;
+                   `secrets` (backend choice, unlock / locked phase, DB key) and
+                   `providers` (credentials, sign-in, models, catalog, usage, budget)
   genie-client     endpoint layout, NDJSON framing, Connection, ensure (spawn / wait / retry)
   genie-process    kill-trees: Job Object (Windows) / process group (Unix), subreaper; pipe mode
                    (piped stdio, env policy, head/tail/spill capture, deadlines, spawn hook) (06 §13.4)
   genie-audit      tracing → rotating log files (10 × 10 MiB); org audit stream → rotating JSONL
   genie-testkit    in-memory transport
-  genie-secrets    SecretString re-export; credential model + store port (03 §10.1)
+  genie-secrets    secret backends: OS keychain (`keyring`), `secrets.enc` (Argon2id +
+                   XChaCha20-Poly1305), memory; credential model + store port + backend
+                   store; cross-process file lock (03 §10, 08 §2.5/§8)
   genie-store      SQLCipher DB, migrations, GNB1 blobs, FTS, event log, retrieval index (spec 04)
   genie-providers  canonical model, SSE parser, compile step, 4 protocol adapters, Executor,
                    error classification + retry policy, routes/presets, cassettes (spec 03)
@@ -150,7 +154,8 @@ ask with no client → paused + notification + answered by another client, promp
 | 6 | breakpoints (tools, system 1, system 2, tail; ≤ 4; 1 h ordering), `prompt_cache_key`, cache usage lines | `compile`, adapters |
 | 7 | `ProviderError`/`ErrorKind`, classification order, 40-pattern overflow corpus, `x-should-retry`, `retry-after(-ms)`, retry policy (backoff, offline budget, timeouts, one-shot), forced token refresh on 401, `RetryScheduled` event | `error`, `overflow_patterns.txt`, `retry`, `executor` |
 | 8 | catalog schema, tolerant decode, bundled snapshot, Ed25519-verified cache + ETag refresh, discovery parsers (OpenAI, Gemini, Ollama, Azure manual deployments), overrides (merge patch), policy, effort map, small model, embeddings default (SA-14), cost | `genie-catalog` |
-| 10.1 | credential model, precedence (stored beats env), store port + in-memory store | `genie-secrets::credentials` |
+| 10.1 | credential model, precedence (stored beats env), store port + in-memory store; persistent `BackendStore` (index + `credential:<id>` accounts, one active per provider, hints only) | `genie-secrets::{credentials, store}` |
+| 10.2 | Entra auth code + PKCE (S256, loopback `http://localhost:<port>` on 127.0.0.1, `state` checked), device code, refresh via `oauth2` with our rustls client (no redirects); `OAuthTokenSource` refresh under a cross-process file lock with re-read (drops our refresh when another process rotated the token); Google ADC (`authorized_user`, `service_account` RS256 via `ring`; explicit path → `GOOGLE_APPLICATION_CREDENTIALS` → gcloud well-known file) | `genie-providers::{oauth, adc}`, `genie-secrets::lock` |
 | 11 | layer 1 cassettes (`tests/cassettes`, `CassetteTransport`, `RecordingTransport`, header scrubbing, secret check) and layer 2 goldens (`tests/golden`, `GENIE_UPDATE_GOLDEN=1`); layer 3 patch tests | `genie-providers/tests` |
 
 ### Spec 06 §5 / 08 §3–6 (permissions, config, trust, policy, audit)
@@ -208,9 +213,7 @@ output, exit codes 0/1/2/3, `--on-ask deny`, `--ask-timeout`, an ask answered vi
 #### Spec 07 gaps
 
 - **Engine-side pieces the CLI can't supply:** the daemon answers `not_implemented` for
-  `provider.*`, `model.list`,
-  `usage.query`, `session.compact`
-  and `import.*`; the CLI wires each one and prints "not available in this
+  `import.*`; the CLI wires each one and prints "not available in this
   engine build yet". `session.get` returns an empty `path`, so `genie chat open` replays the
   event log instead of printing the branch.
 - **Headless flags:** `--allow/--deny`, `--settings`, `--add-dir` and `--worktree <name>` go
@@ -473,6 +476,22 @@ edit and read-only steps leave none; drop); `genie-daemon/tests/code.rs` (in-mem
 plain / auto / named worktree sessions, `files.tree/read` + escape refusal, `git.status/diff/commit`,
 merge / keep / discard, checkpoint errors, `new` without git).
 
+### Spec 08 §2.5 / §8, 04 §2, 03 §10, 02 §6.1 / §6.5 (secrets, provider auth, providers)
+
+| § | What | Where |
+|---|---|---|
+| D26 / 03 §10.1 | backends: macOS Keychain / Windows Credential Manager / Linux Secret Service via `keyring` (service `genie`, `genie-beta`, `genie-dev`), probed at start; else `secrets.enc`; `secrets.backend: "file"` forces the file | `genie-secrets::{keychain, vault}`, `genie-daemon::secrets::Secrets::open` |
+| 08 §8 / 04 §1 | `secrets.enc` 0600: Argon2id (m 64 MiB, t 3, p 1, stored with the file, bounds-checked) + XChaCha20-Poly1305, fresh nonce per write, KDF params as AAD; wrong passphrase leaves it locked; `change_passphrase` | `genie-secrets::vault` |
+| 04 §2 | data key in the backend through `SecretsKeyStore` (`genie_store::KeyStore`); recovery key flow unchanged (`genie-store::keys`); the old `keystore.placeholder.json` is migrated once (verified, then deleted; a different keychain key is kept as `data-key.replaced`) | `genie-daemon::secrets::{SecretsKeyStore, migrate_placeholder}`, `open_store` |
+| 02 §2 / §6.1 | `GENIE_PASSPHRASE` unlocks at start; otherwise a locked phase serves the endpoint with `InitializeResult.locked = {reason: "passphrase_required"}`, answers only `secrets.unlock`, `daemon.status/restart`, `doctor.run`, `$/ping`, `workspace.subscribe` (everything else → `locked` −32006); after `secrets.unlock` → `daemon.restarting` and the full engine starts with the store opened (clients reconnect) | `genie-daemon::secrets::locked_phase`, `providers::ProviderHub::dispatch` |
+| 02 §6.5 | `provider.list` (built-in + custom `providers.*`, status, credentials incl. env ones with source label + 4-char hint, endpoint), `provider.credential.add/remove/activate` (keys; Google `external` = ADC path; OAuth only via sign-in; env credentials can't be removed), `provider.login.start/status` (Entra PKCE / device code; the fresh credential becomes active), `provider.test` (authenticated models GET, latency; failure → status `error`), `model.list`, `catalog.status/refresh`, `usage.query` (group by day/provider/model/project, cache + compaction tokens, cost), `usage.budget.set` | `genie-daemon::providers` |
+| 02 §3.2 | `provider.status` on every status change (credentials, sign-in, test, settings/policy events), `catalog.updated` after a refresh, budget `notification`s at 80 % and 100 % once per month and level (checked every minute and on set; no hard stop) | `ProviderHub::{refresh_statuses, catalog_refresh, check_budget, start}` |
+| 03 §8.1 | catalog = bundled / verified cache → signed refresh (policy `catalog.url` or `GENIE_CATALOG_URL`, `<url>.sig`, ETag, on start + every 6 h) → live discovery (OpenAI / OpenAI-compatible / OpenRouter `/v1/models`, Gemini `models.list`, Ollama `/api/tags`; 10 min TTL; "limited info") → Azure deployments from `providers.azure-foundry.deployments` → user overrides `models.<id>` → policy (`providers.allowed`, `models.allowed/blocked` with `prefix*`); one shared copy read by the resolver | `ProviderHub::{rebuild_catalog, model_list}` |
+| 03 §10 / D38 | the engine's model resolution goes through the hub (`ProviderBinder`): API keys (`x-api-key`, `api-key`, `x-goog-api-key`, Bearer), Entra tokens (`TokenAuth` cached per credential: single-flight + forced refresh on 401), Google ADC → Vertex, Ollama / custom endpoints without auth, Settings endpoints (`base_url`, `project`, `location`), `AccountTag` per credential; policy `providers.allowed` and `auth.methods` (`api_key`, `entra`, `adc`) enforced on add, sign-in and resolution | `genie-core::runtime::models::{ProviderBinder, CatalogResolver::{with_binder, with_shared_catalog}}`, `ProviderHub::auth_for` |
+| 08 §2.5 / §6 | secrets never in settings, logs or results: `SecretString` / `Zeroizing`, redacted `Debug` on grants, params, backends and stores; `credential.changed` / `auth.signed_in` audit events without secrets | all of the above |
+
+Tests: `genie-secrets` unit tests (memory backend, vault create/unlock/wrong passphrase/tamper/re-key/0600, backend store over memory and a locked vault, file lock); `real_keychain_roundtrip` is `#[ignore]` (run by hand, touches the real keychain). `genie-providers/tests/oauth.rs` against a fake local token endpoint: PKCE loopback (S256 verified by the fake), forged `state`, device code with `authorization_pending`, refresh + persisted rotation, rotation by "another process" under the lock, `TokenAuth` 401 path, ADC authorized-user and service-account (RS256 verified with the test-only key in `tests/fixtures/`). `genie-daemon/tests/providers.rs`: credentials + `provider.status` + redaction + test failure, discovery + overrides + resolver auth, policy, Entra device-code sign-in → bearer on the fake Foundry endpoint, PKCE URL, usage + 80/100 % budget notifications, signed catalog refresh, locked gate + unlock, and the real-endpoint locked phase → unlock → restart → store key in `secrets.enc` + placeholder migration. Automated tests only use the memory backend or `secrets.enc` with cheap KDF parameters.
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -481,11 +500,9 @@ merge / keep / discard, checkpoint errors, `new` without git).
 - **Subsystem edges are not declared yet.** Cargo 1.99 warns on unused dependencies, so
   `genie-core` gains each subsystem dependency when it first uses it; `xtask check-deps`
   enforces the directions in the meantime.
-- **Durable storage is wired with a placeholder keychain.** The daemon opens
-  `genie{-channel}.db` in the channel data dir with `StoreJournal` and the store-backed
-  conversation, but the data key sits in `keystore.placeholder.json` (0600) via
-  `genie-daemon::PlaceholderKeyStore` — **TODO spec 08**: OS keychain / `secrets.enc`. If the
-  store can't be opened the daemon logs it and runs in memory.
+- **Store fallback:** if the store can't be opened (e.g. the keychain entry is gone and the
+  DB exists) the daemon logs it and runs in memory; the recovery-key / quarantine prompt
+  (04 §2) needs UI (spec 05).
 - **Windows Job Object race:** a child is assigned to its job right after `spawn`, so anything it
   starts in that gap escapes. Closing it needs a raw `CreateProcessW` with `CREATE_SUSPENDED`
   (planned with the `opencode-pty` port, D45).
@@ -567,7 +584,7 @@ merge / keep / discard, checkpoint errors, `new` without git).
 
 ### Spec 02 gaps and deviations
 
-- **Methods owned by other specs** (providers, terminal, import/`export.all`,
+- **Methods owned by other specs** (terminal, import/`export.all`,
   `browser.popout`) are typed in the table and generated
   into TS, but the daemon answers `method_not_found` with `data.reason = "not_implemented"`
   until their subsystem lands.
@@ -610,9 +627,9 @@ merge / keep / discard, checkpoint errors, `new` without git).
   path through `PathLocks` (shell commands are not path-locked).
 - **`session.get`** returns the active path but no `siblings`; `prompt` with `parent_id` (edit →
   branch) is still refused. Session metadata stays in the daemon's in-memory registry.
-- **Model resolution in the daemon:** bundled catalog + preset routes + credentials from the
-  environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, …); provider settings,
-  Azure/Vertex/custom endpoints and the catalog refresh loop are not wired.
+- **Model resolution in the daemon** goes through `genie-daemon::ProviderHub` (stored
+  credentials, env keys, Entra, ADC, Settings endpoints, refreshed catalog); see the secrets /
+  providers section.
 - **Engine-side ToolError:** `genie-tools` mirrors `genie_core::ToolError` (rule 3) and adds
   `Cancelled`; core converts.
 - `turn.settled.error.message` now carries the engine error text and `link` the fix link
@@ -631,8 +648,8 @@ merge / keep / discard, checkpoint errors, `new` without git).
 - **`StoreJournal` sessions**: rows are created on first event as bare chat sessions, and
   `events_after` returns retained events only; the daemon must check `events::head` for the floor
   and send `resync_required {snapshot: true}` (02 §3.1).
-- **Keychain**: only the `KeyStore` port + `MemoryKeyStore`; the OS keychain and `secrets.enc`
-  (Argon2id) land with spec 08. Recovery-key UI/`.txt` download is UI work (spec 05).
+- **Keychain**: the daemon adapts `genie-secrets` backends to the `KeyStore` port
+  (`genie-daemon::SecretsKeyStore`). Recovery-key UI/`.txt` download is UI work (spec 05).
 - **Blobs**: `put_blob` takes the whole buffer (two passes would be needed for streaming input
   because the address is the plaintext hash); no streaming writer yet.
 - **Not implemented:** long resumable data migrations (kv cursor jobs); export-all `.zip` (SA-17),
@@ -642,11 +659,40 @@ merge / keep / discard, checkpoint errors, `new` without git).
 - **Build:** `rusqlite` uses `bundled-sqlcipher-vendored-openssl` (macOS has no OpenSSL headers);
   it needs Perl and a C compiler. Not yet tried on Windows with `scripts/cargo-win-gnu.sh`.
 
+### Secrets and provider auth gaps and deviations
+
+- **Entra app id:** no Genie multi-tenant Entra app is registered yet (t35 item 2). Builds pick
+  it up from `GENIE_ENTRA_CLIENT_ID` at compile time, or `providers.azure-foundry.client_id`
+  in settings; without one `provider.login.start` answers `invalid_state`. The redirect is
+  `http://localhost` (any port), which the app registration must allow (public client,
+  "Mobile and desktop" platform, device-code flow enabled). `authority` / `tenant` can be set
+  under `providers.azure-foundry` (https or loopback only).
+- **Locked phase restarts the engine in-process:** the unlocking client gets `{ok}`, then
+  `daemon.restarting`, and must reconnect (as for `daemon.restart`). No passphrase prompt in
+  the CLI yet (spec 07); `GENIE_PASSPHRASE` works. No passphrase change / backend switch
+  method (a `FileVault::change_passphrase` exists); switching backends doesn't migrate
+  entries; `secrets.backend` is read from the user settings file at start only.
+- **Keychain limits:** Windows Credential Manager caps a blob at 2,560 bytes (large OAuth grants
+  or many credentials in the index may not fit); macOS may prompt for access on first use
+  of an unsigned dev build; the keychain probe can't tell a locked Linux keyring from a missing
+  Secret Service (both fall back to the file).
+- **Not implemented:** the pasted-redirect fallback for non-Entra OAuth, Azure deployment
+  discovery via the management API (manual `deployments` only), Ollama `/api/show` context
+  lengths, the catalog feed's default URL and pinned key (D40; only policy `catalog.url` /
+  `GENIE_CATALOG_URL`), `endpoints.allowed` policy, per-request usage audit. Budget months
+  are UTC like `usage_daily` days. `provider.test` for Vertex only checks that a token can be
+  obtained.
+- **Settings keys added:** `models` (overrides) and `secrets` are now known top-level settings
+  (opaque JSON) so the layer validation keeps them.
+- **New external dependencies:** `keyring` 3.6 (MIT/Apache-2.0; `vendored` dbus on Linux),
+  `argon2` 0.5, `oauth2` 5 (with our reqwest/rustls client), `ring` (already in the tree via
+  rustls) for RS256.
+
 ### Spec 03 gaps
 
-- **Auth flows are ports only.** `TokenSource` + `TokenAuth` (cache, single-flight refresh, forced
-  refresh on 401) exist; Entra PKCE/device code (`oauth2`), Google ADC (`google-cloud-auth`) and
-  the cross-process refresh file lock are not implemented. Keychain / `secrets.enc` backends are spec 08.
+- **Google ADC is our own** (`genie-providers::adc`, refresh-token and RS256 service-account
+  grants) instead of `google-cloud-auth` (keeps rustls-only HTTP); external-account / workload
+  identity files are not supported (not in v1).
 - **No live HTTP in tests.** `ReqwestTransport` (rustls) is untested against real endpoints; the
   live-smoke layer (11 layer 4), nightly re-recording and the drift report are not built.
   Cassettes are hand-written from the vendors' documented event shapes, not recordings.

@@ -53,6 +53,13 @@ pub struct Settings {
     /// Provider routes (03); `${env:VAR}` only allowed here (D23).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub providers: Option<BTreeMap<String, Value>>,
+    /// User model overrides `models.<id>` (03 §8.1 step 5): merge patches over catalog
+    /// entries (context window, price, capabilities); validated by the catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models: Option<BTreeMap<String, Value>>,
+    /// `secrets.backend: "file"` forces `secrets.enc` (03 §10.1); read at daemon start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secrets: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<Toggle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

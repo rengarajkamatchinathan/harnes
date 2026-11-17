@@ -8,6 +8,8 @@
 //! - [`error`] / [`retry`]: the error taxonomy, classification and retry policy (03 §7).
 //! - [`executor`]: the single HTTP choke point (auth, timeouts, retry, cassettes; 03 §3).
 //! - [`auth`], [`route`], [`compat`]: routes, presets, quirk flags and model specs.
+//! - [`oauth`] (Entra PKCE / device code / refresh under a cross-process lock) and
+//!   [`adc`] (Google ADC): [`TokenSource`]s for token-based routes (03 §10.2).
 //!
 //! Dependency rule (01 §2.1 rule 3): this crate depends on `genie-protocol` and the
 //! `genie-secrets` leaf only. Catalog data reaches it as a [`compat::ModelSpec`] built by
@@ -17,6 +19,7 @@
 // request ids, retry hint, message, excerpt); errors are rare next to stream events.
 #![allow(clippy::result_large_err)]
 
+pub mod adc;
 pub mod auth;
 pub mod cassette;
 pub mod compat;
@@ -26,6 +29,7 @@ pub mod error;
 pub mod event;
 pub mod executor;
 pub mod model;
+pub mod oauth;
 pub mod protocol;
 pub mod retry;
 pub mod route;

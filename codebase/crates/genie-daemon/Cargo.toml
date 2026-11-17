@@ -20,8 +20,15 @@ genie-mcp.workspace = true
 genie-skills.workspace = true
 genie-tools.workspace = true
 genie-browser.workspace = true
+genie-secrets.workspace = true
+genie-catalog.workspace = true
+genie-providers.workspace = true
 async-trait.workspace = true
 base64.workspace = true
+ed25519-dalek.workspace = true
+futures.workspace = true
+http.workspace = true
+reqwest.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 ignore.workspace = true
@@ -41,6 +48,7 @@ libc.workspace = true
 windows-sys.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 tokio-util.workspace = true
 futures.workspace = true
 genie-testkit.workspace = true

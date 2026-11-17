@@ -1,10 +1,7 @@
-//! TODO(spec 08): PLACEHOLDER keychain for the store's data key.
-//!
-//! The real `KeyStore` is the OS keychain (or `secrets.enc` with Argon2id) from
-//! `genie-secrets`, owned by spec 08. Until it lands the daemon keeps the data key in a
-//! user-only (0600) file in the channel data dir so the encrypted DB survives restarts.
-//! This gives **no protection at rest** beyond file permissions and must be replaced
-//! before release; the key is migrated into the keychain by spec 08's first run.
+//! Legacy PLACEHOLDER keystore (before spec 08): the data key in a user-only (0600)
+//! JSON file in the channel data dir. It is no longer used to open the store; the
+//! daemon only reads it once to migrate its keys into the keychain / `secrets.enc`
+//! ([`crate::secrets::migrate_placeholder`]) and then deletes the file.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -25,6 +22,12 @@ impl PlaceholderKeyStore {
             path: data_dir.join(PLACEHOLDER_FILE),
             lock: Mutex::new(()),
         }
+    }
+
+    /// Account names in the file.
+    pub fn accounts(&self) -> Result<Vec<String>, StoreError> {
+        let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+        Ok(self.load()?.keys().cloned().collect())
     }
 
     fn load(&self) -> Result<serde_json::Map<String, serde_json::Value>, StoreError> {

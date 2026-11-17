@@ -9,7 +9,7 @@
 // `ProviderError` is a flat, inspectable struct (03 §7), as in `genie-providers`.
 #![allow(clippy::result_large_err)]
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use genie_catalog::Catalog;
 use genie_catalog::entry::{Effort, EffortWire, Entry, Protocol};
@@ -149,12 +149,21 @@ fn display_provider(p: &str) -> String {
 
 type EnvFn = dyn Fn(&str) -> Option<String> + Send + Sync;
 
+/// Binds providers that need more than a preset + key: OAuth (Entra), Google ADC,
+/// endpoints from Settings (Azure, Vertex, custom). Implemented by the daemon's provider
+/// hub (03 §10); `None` falls back to the built-in preset + key path.
+pub trait ProviderBinder: Send + Sync {
+    fn bind(&self, provider: &str) -> Option<Result<ProviderConfig, ResolveError>>;
+}
+
 /// Resolves catalog ids with preset routes and stored/env credentials.
 pub struct CatalogResolver {
-    catalog: Catalog,
+    /// Shared so the catalog refresh, discovery and overrides apply without a restart.
+    catalog: Arc<RwLock<Catalog>>,
     credentials: Arc<dyn CredentialStore>,
     env: Arc<EnvFn>,
     executor: Arc<Executor>,
+    binder: Option<Arc<dyn ProviderBinder>>,
 }
 
 impl CatalogResolver {
@@ -164,11 +173,24 @@ impl CatalogResolver {
         executor: Arc<Executor>,
     ) -> Self {
         CatalogResolver {
-            catalog,
+            catalog: Arc::new(RwLock::new(catalog)),
             credentials,
             env: Arc::new(|k| std::env::var(k).ok()),
             executor,
+            binder: None,
         }
+    }
+
+    /// Read the model catalog from a shared, updatable copy.
+    pub fn with_shared_catalog(mut self, catalog: Arc<RwLock<Catalog>>) -> Self {
+        self.catalog = catalog;
+        self
+    }
+
+    /// Bind OAuth / ADC / Settings-endpoint providers through `binder` first.
+    pub fn with_binder(mut self, binder: Arc<dyn ProviderBinder>) -> Self {
+        self.binder = Some(binder);
+        self
     }
 
     /// The bundled catalog over live HTTP (rustls), with credentials from the environment
@@ -191,11 +213,14 @@ impl CatalogResolver {
         self
     }
 
-    fn entry(&self, model: &str) -> Option<&Entry> {
-        self.catalog.get(model).or_else(|| {
-            let (p, w) = model.split_once('/')?;
-            self.catalog.find_wire(p, w)
-        })
+    fn entry(&self, model: &str) -> Option<Entry> {
+        let cat = self.catalog.read().unwrap_or_else(|p| p.into_inner());
+        cat.get(model)
+            .or_else(|| {
+                let (p, w) = model.split_once('/')?;
+                cat.find_wire(p, w)
+            })
+            .cloned()
     }
 
     fn bind(&self, e: &Entry) -> Result<ResolvedModel, ResolveError> {
@@ -204,6 +229,9 @@ impl CatalogResolver {
             message: format!("{} uses a protocol this build can't speak", e.id),
             fix_link: None,
         })?;
+        if let Some(cfg) = self.binder.as_ref().and_then(|b| b.bind(&e.provider)) {
+            return self.finish(e, &spec, PresetProvider(cfg?));
+        }
         let preset = match e.provider.as_str() {
             "anthropic" => Preset::Anthropic,
             "openai" => Preset::OpenAi,
@@ -241,7 +269,7 @@ impl CatalogResolver {
                 _ => Arc::new(BearerKey(cred.secret)),
             }
         };
-        let route = PresetProvider(ProviderConfig {
+        let provider = PresetProvider(ProviderConfig {
             id: ProviderId::new(e.provider.clone()),
             preset,
             base_url: None,
@@ -251,9 +279,17 @@ impl CatalogResolver {
             account: None,
             compat_overlay: None,
             headers: vec![],
-        })
-        .route(&spec)
-        .map_err(|err| ResolveError {
+        });
+        self.finish(e, &spec, provider)
+    }
+
+    fn finish(
+        &self,
+        e: &Entry,
+        spec: &ModelSpec,
+        provider: PresetProvider,
+    ) -> Result<ResolvedModel, ResolveError> {
+        let route = provider.route(spec).map_err(|err| ResolveError {
             class: "invalid_request",
             message: err.message,
             fix_link: None,
@@ -277,7 +313,7 @@ impl ModelResolver for CatalogResolver {
             message: format!("{model} is not in the model catalog"),
             fix_link: Some("genie://settings/models".into()),
         })?;
-        self.bind(e)
+        self.bind(&e)
     }
 
     fn small_model(&self, model: &str) -> Result<ResolvedModel, ResolveError> {
@@ -285,8 +321,14 @@ impl ModelResolver for CatalogResolver {
             .entry(model)
             .map(|e| e.provider.clone())
             .unwrap_or_default();
-        match self.catalog.small_model(&provider, "title") {
-            Some(e) => self.bind(e).or_else(|_| self.resolve(model)),
+        let small = self
+            .catalog
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .small_model(&provider, "title")
+            .cloned();
+        match small {
+            Some(e) => self.bind(&e).or_else(|_| self.resolve(model)),
             None => self.resolve(model),
         }
     }
