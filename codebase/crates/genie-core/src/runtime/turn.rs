@@ -134,7 +134,7 @@ pub(crate) fn tool_env(rt: &AgentRuntime, sid: &str, s: &SessionSettings) -> Too
         kind: s.kind,
         mode: s.mode,
         features: Features {
-            memory: rt.cfg.memory && rt.memory.is_some() && !s.incognito,
+            memory: rt.cfg.memory && rt.memory.is_some() && !s.incognito && rt.memory_on(),
             incognito: s.incognito,
             chat_search: false,
             artifacts: false,
@@ -228,12 +228,17 @@ impl Run {
             }
             InboxKind::User | InboxKind::Synthetic { .. } => {
                 self.baseline_delta()?;
-                let input = &self.turn.input;
-                let msg = Message::new(
-                    input.message_id.clone(),
-                    Role::User,
-                    wire::input_parts(&self.rt.resolve_input(&self.sid, &input.parts)),
-                );
+                let turn = self.turn.clone();
+                let input = &turn.input;
+                let mut parts = self.rt.user_parts(&self.sid, &input.parts);
+                if let Some(p) = self
+                    .rt
+                    .excerpts(&self.sid, &self.settings, &input.parts)
+                    .await
+                {
+                    parts.push(p);
+                }
+                let msg = Message::new(input.message_id.clone(), Role::User, parts);
                 let kind = if matches!(input.kind, InboxKind::Synthetic { .. }) {
                     MsgKind::Synthetic
                 } else {
@@ -428,7 +433,7 @@ impl Run {
             let msg = Message::new(
                 i.message_id.clone(),
                 Role::User,
-                wire::input_parts(&self.rt.resolve_input(&self.sid, &i.parts)),
+                self.rt.user_parts(&self.sid, &i.parts),
             );
             self.append(msg, MsgKind::Normal)?;
         }
@@ -438,6 +443,16 @@ impl Run {
     fn base_prompt(&self, tool_names: Vec<String>) -> String {
         let spec = &self.model.route.model;
         let memory_on = tool_names.iter().any(|t| t == "memory_save");
+        let artifacts_on = tool_names
+            .iter()
+            .any(|t| t == crate::runtime::artifacts::CREATE)
+            .then(|| crate::runtime::artifacts::ARTIFACT_LIBRARIES.to_string());
+        let chat_search_on = tool_names
+            .iter()
+            .any(|t| t == crate::runtime::chat_search::CHAT_SEARCH);
+        let project_search_on = tool_names
+            .iter()
+            .any(|t| t == crate::runtime::projects::PROJECT_SEARCH);
         let skills_on = tool_names.iter().any(|t| t == "skill");
         let mcp_on = tool_names.iter().any(|t| t.starts_with("mcp__"));
         prompts::base_prompt(&BasePromptInput {
@@ -457,6 +472,9 @@ impl Run {
                 memory: memory_on,
                 skills: skills_on,
                 mcp: mcp_on,
+                artifacts: artifacts_on,
+                chat_search: chat_search_on,
+                project_search: project_search_on,
                 ..PromptFeatures::default()
             },
             family: spec.family.clone(),
@@ -471,6 +489,7 @@ impl Run {
         let history = effective_history(&path, &self.meta);
         let compat = &self.model.route.compat;
         let messages = lower_updates(history, self.model.route.protocol.kind(), compat);
+        let messages = self.rt.prepare_media(messages, &self.model.route.model);
         let specs = self.registry.specs(&self.env);
         let names = specs.iter().map(|s| s.name.clone()).collect();
         let baseline = self.meta.baseline.clone().unwrap_or_default();

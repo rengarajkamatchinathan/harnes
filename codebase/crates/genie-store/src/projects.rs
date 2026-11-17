@@ -154,6 +154,28 @@ pub fn remove_file(conn: &Connection, id: &str) -> Result<bool> {
     Ok(conn.execute("DELETE FROM project_file WHERE id = ?1", [id])? > 0)
 }
 
+pub fn get_file(conn: &Connection, id: &str) -> Result<Option<ProjectFile>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {FILE_COLS} FROM project_file WHERE id = ?1"),
+            [id],
+            file_row,
+        )
+        .optional()?)
+}
+
+/// Record that a session belongs to a project (chat search scopes, 04 §6). Creates a
+/// bare session row if the journal has not written one yet; unknown projects are ignored.
+pub fn link_session(conn: &Connection, session_id: &str, project_id: &str) -> Result<()> {
+    crate::sessions::ensure(conn, session_id)?;
+    conn.execute(
+        "UPDATE session SET project_id = ?2 WHERE id = ?1 AND project_id IS NOT ?2
+           AND EXISTS (SELECT 1 FROM project WHERE id = ?2)",
+        params![session_id, project_id],
+    )?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: String,

@@ -37,6 +37,8 @@ async-stream = "0.3"
 async-trait = "0.1"
 base64 = "0.22"
 bytes = "1"
+# PDF text extraction (06 §2.5, 04 §7): FlateDecode content streams.
+flate2 = "1"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { version = "4", features = ["derive", "env"] }
 # Inline TUI (07 §1): ratatui inline viewport on crossterm.

@@ -22,16 +22,23 @@
 //! (`turn.end` continue), checkpoints, native compaction.
 
 pub mod active;
+pub mod artifacts;
+pub mod attachments;
 pub mod bridge;
 pub mod browser;
+pub mod chat_search;
 pub mod context;
 pub mod conversation;
+pub mod extract;
 pub mod host;
 pub mod mcp;
+pub mod memory_ctl;
 pub mod models;
 pub mod permissions;
 pub mod ports;
+pub mod projects;
 pub mod prompts;
+pub mod retrieval;
 pub mod skills;
 mod turn;
 pub mod wire;
@@ -116,6 +123,14 @@ pub struct AgentRuntime {
     pub shell: Option<Arc<genie_tools::shell::ShellRuntime>>,
     /// Provider-native web search policy (06 §8); `None`: never declared.
     pub web_search: Option<genie_tools::web::SearchPolicy>,
+    /// Artifacts (D28): the `artifact_*` tools and their versions.
+    pub artifacts: Option<Arc<artifacts::ArtifactHub>>,
+    /// Chat projects: instructions, knowledge, retrieval (D32).
+    pub projects: Option<Arc<projects::ProjectsHub>>,
+    /// Memory on/paused and memory in the prompt (D31).
+    pub memory_ctl: Option<Arc<memory_ctl::MemoryControl>>,
+    /// Attachments in prompts (06 §2.5); without it they stay placeholders.
+    pub attachments: Option<Arc<attachments::Attachments>>,
 }
 
 impl AgentRuntime {
@@ -129,6 +144,57 @@ impl AgentRuntime {
             Some(s) => s.resolve_input(session_id, parts),
             None => parts.to_vec(),
         }
+    }
+
+    /// Canonical parts of a user message: skills/commands resolved, attachments read
+    /// (06 §2.5).
+    pub fn user_parts(
+        &self,
+        session_id: &str,
+        parts: &[genie_protocol::message::InputPart],
+    ) -> Vec<genie_providers::model::Part> {
+        let resolved = self.resolve_input(session_id, parts);
+        match &self.attachments {
+            Some(a) => a.input_parts(&resolved),
+            None => wire::input_parts(&resolved),
+        }
+    }
+
+    /// Retrieval-mode `<project_excerpts>` for a user message (06 §2.1, D32).
+    pub async fn excerpts(
+        &self,
+        session_id: &str,
+        settings: &SessionSettings,
+        parts: &[genie_protocol::message::InputPart],
+    ) -> Option<genie_providers::model::Part> {
+        let hub = self.projects.as_ref()?;
+        let query: Vec<&str> = parts
+            .iter()
+            .filter_map(|p| match p {
+                genie_protocol::message::InputPart::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        hub.excerpts_for(session_id, settings, &query.join("\n"))
+            .await
+            .map(genie_providers::model::Part::text)
+    }
+
+    /// Resolve attachment media for a request (06 §2.5).
+    pub fn prepare_media(
+        &self,
+        messages: Vec<genie_providers::model::Message>,
+        model: &genie_providers::compat::ModelSpec,
+    ) -> Vec<genie_providers::model::Message> {
+        match &self.attachments {
+            Some(a) => a.prepare(messages, model),
+            None => messages,
+        }
+    }
+
+    /// Memory is on (not paused, allowed by policy).
+    pub fn memory_on(&self) -> bool {
+        self.memory_ctl.as_ref().is_none_or(|m| m.is_on())
     }
 
     /// The session's registry: the static tools of its kind plus provider tools.
@@ -213,6 +279,10 @@ impl RuntimeBuilder {
                 taints: Arc::new(host::TurnTaints::default()),
                 shell: None,
                 web_search: None,
+                artifacts: None,
+                projects: None,
+                memory_ctl: None,
+                attachments: None,
             },
         }
     }
@@ -341,6 +411,41 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Artifacts (D28): `artifact_create/update/rewrite` for Chat; versions committed with
+    /// the assistant message that produced them.
+    pub fn artifacts(mut self, hub: Arc<artifacts::ArtifactHub>) -> Self {
+        self.rt.artifacts = Some(hub);
+        self
+    }
+
+    /// Projects (D32): project instructions and knowledge in the baseline, retrieval
+    /// excerpts, `project_search`.
+    pub fn projects(mut self, hub: Arc<projects::ProjectsHub>) -> Self {
+        self.rt.projects = Some(hub);
+        self
+    }
+
+    /// Memory state and memory in the prompt (D31).
+    pub fn memory_control(mut self, m: Arc<memory_ctl::MemoryControl>) -> Self {
+        self.rt.memory_ctl = Some(m);
+        self
+    }
+
+    /// Read attachments into prompts (06 §2.5).
+    pub fn attachments(mut self, a: Arc<attachments::Attachments>) -> Self {
+        self.rt.attachments = Some(a);
+        self
+    }
+
+    /// `chat_search` over the store (Chat, D31).
+    pub fn chat_search(self, store: Arc<genie_store::Store>) -> Self {
+        let t = Arc::new(chat_search::ChatSearch::new(
+            store,
+            self.rt.settings.clone(),
+        ));
+        self.chat_tool(t)
+    }
+
     /// Wire the store: messages, memory and blob spill (spec 04).
     pub fn store(self, store: Arc<genie_store::Store>) -> Self {
         self.conversation(Arc::new(StoreConversation::new(store.clone())))
@@ -349,6 +454,24 @@ impl RuntimeBuilder {
     }
 
     pub fn build(mut self) -> AgentRunner {
+        if self.rt.projects.is_some() || self.rt.memory_ctl.is_some() {
+            self.rt.instructions = Arc::new(projects::ContextSources {
+                base: self.rt.instructions.clone(),
+                projects: self.rt.projects.clone(),
+                memory: self.rt.memory_ctl.clone(),
+            });
+        }
+        if let Some(hub) = self.rt.projects.clone() {
+            let t: Arc<dyn Tool> = Arc::new(projects::ProjectSearch::new(hub));
+            self.rt.chat_tools.register(t.clone());
+            self.rt.code_tools.register(t);
+        }
+        if let Some(hub) = self.rt.artifacts.clone() {
+            self.rt.conversation = hub.wrap(self.rt.conversation.clone());
+            for t in artifacts::tools(&hub) {
+                self.rt.chat_tools.register(t);
+            }
+        }
         if let Some(hub) = self.rt.skills.clone() {
             self.rt.instructions = Arc::new(skills::SkillsInstructions {
                 base: self.rt.instructions.clone(),

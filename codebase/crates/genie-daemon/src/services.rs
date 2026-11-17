@@ -45,6 +45,12 @@ pub struct Services {
     pub browser: Option<Arc<genie_browser::Browser>>,
     pub browser_backend: Option<Arc<dyn genie_browser::BrowserBackend>>,
     pub browser_host: Option<Arc<genie_core::runtime::browser::EngineBrowserHost>>,
+    /// Artifacts (D28), projects/retrieval (D32), memory state (D31) and chunked blob
+    /// uploads (02 §6.9): served by `crate::projects` / `crate::blobs`.
+    pub artifacts: Option<Arc<genie_core::runtime::artifacts::ArtifactHub>>,
+    pub projects: Option<Arc<genie_core::runtime::projects::ProjectsHub>>,
+    pub memory_ctl: Option<Arc<genie_core::runtime::memory_ctl::MemoryControl>>,
+    pub uploads: crate::blobs::Uploads,
 }
 
 pub(crate) enum Handled {
@@ -133,6 +139,9 @@ impl Services {
                 Some(b) => self.browser_async(b.clone(), state, conn, r),
                 None => Handled::NotMine,
             };
+        }
+        if let Some(res) = crate::projects::dispatch(self, r) {
+            return Handled::Now(res);
         }
         let name = r.method.as_str();
         let hub = || self.hub.clone().ok_or_else(|| not_implemented(name));

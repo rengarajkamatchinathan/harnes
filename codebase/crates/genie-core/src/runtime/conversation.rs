@@ -393,6 +393,11 @@ impl ConversationStore for StoreConversation {
                     match p {
                         Part::ToolCall(c) => part.call_id = Some(c.id.0.clone()),
                         Part::ToolResult(r) => part.call_id = Some(r.call_id.0.clone()),
+                        // Attachments keep their blob alive (refcount, 04 §4).
+                        Part::Media(genie_providers::model::MediaPart {
+                            source: genie_providers::model::MediaSource::Blob { id },
+                            ..
+                        }) => part.blob_id = Some(id.0.clone()),
                         _ => {}
                     }
                     sm::insert_part(tx, &part)?;

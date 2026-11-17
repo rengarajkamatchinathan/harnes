@@ -2,8 +2,8 @@
 //!
 //! Covered here: `kchunk` rows (+ `kchunk_fts`), the embedding cache by content hash,
 //! BM25 search, brute-force cosine (SA-15) and reciprocal rank fusion. Chunking, the
-//! indexing job, the full/retrieval mode switch and the capacity cap are not
-//! implemented yet (README gaps).
+//! indexing job, the full/retrieval mode switch and the capacity cap live in
+//! `genie-core::runtime::knowledge`.
 
 use std::collections::HashMap;
 
@@ -210,6 +210,42 @@ pub fn vector_search(
     }
     scored.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
     Ok(scored.into_iter().take(limit).map(|(_, id)| id).collect())
+}
+
+/// BM25 ranking where any query word may match (retrieval queries are natural language,
+/// so requiring every word would miss most chunks). Chunk ids, best first.
+pub fn bm25_any(
+    conn: &Connection,
+    project_id: &str,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<String>> {
+    let words: Vec<String> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 2)
+        .map(|w| format!("\"{}\"", w.to_lowercase()))
+        .collect();
+    if words.is_empty() {
+        return Ok(vec![]);
+    }
+    let q = words.join(" OR ");
+    let mut st = conn.prepare(&format!(
+        "SELECT c.id FROM kchunk_fts f JOIN kchunk c ON c.rowid = f.rowid
+         WHERE kchunk_fts MATCH ?1 AND c.project_id = ?2
+         ORDER BY bm25(kchunk_fts) LIMIT {limit}"
+    ))?;
+    let rows = st.query_map(params![q, project_id], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// `(chunks, tokens)` indexed for a project.
+pub fn project_stats(conn: &Connection, project_id: &str) -> Result<(u64, u64)> {
+    let (n, t): (i64, i64) = conn.query_row(
+        "SELECT count(*), coalesce(sum(tokens), 0) FROM kchunk WHERE project_id = ?1",
+        [project_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok((u64::try_from(n).unwrap_or(0), u64::try_from(t).unwrap_or(0)))
 }
 
 /// Reciprocal rank fusion of several rankings (ids best first).

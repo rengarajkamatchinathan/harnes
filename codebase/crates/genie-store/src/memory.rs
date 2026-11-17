@@ -120,3 +120,20 @@ pub fn search(conn: &Connection, scopes: &[&str], query: &str, limit: u32) -> Re
     let rows = st.query_map(args.as_slice(), row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
+
+/// Every entry, most recently used first (`memory.list` without a scope).
+pub fn all(conn: &Connection) -> Result<Vec<Memory>> {
+    let mut st = conn.prepare(&format!(
+        "SELECT {COLS} FROM memory m ORDER BY m.last_used DESC NULLS LAST, m.updated DESC"
+    ))?;
+    let rows = st.query_map([], row)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// `memory.reset`: delete one scope, or everything with `None`. Returns the count.
+pub fn reset(conn: &Connection, scope: Option<&str>) -> Result<usize> {
+    Ok(match scope {
+        Some(s) => conn.execute("DELETE FROM memory WHERE scope = ?1", [s])?,
+        None => conn.execute("DELETE FROM memory", [])?,
+    })
+}
