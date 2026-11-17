@@ -1,7 +1,7 @@
 // Code right-panel tabs (05 §3.3): Changes (git status/diff, commit split button,
-// checkpoints), Files (tree with M/A/D markers, read-only preview), Terminal (stub until
-// the daemon serves terminal.*).
-import { useEffect, useMemo, useState } from "react";
+// checkpoints), Files (tree with M/A/D markers, read-only preview). Terminal is in
+// TerminalPanel.tsx.
+import { useMemo, useState } from "react";
 import type { CheckpointEntry, CommitThen, FileChange, FileNode } from "@genie/protocol";
 import { Badge, Button, Icon, Input, Menu, Segmented } from "@genie/ui";
 import { t } from "../../i18n";
@@ -171,17 +171,6 @@ export function FilesPanel({ sessionId }: { sessionId: string }) {
           </li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-export function TerminalPanel() {
-  useEffect(() => {}, []);
-  return (
-    <div className="empty">
-      <Icon name="terminal" />
-      <strong>{t("panel.comingSoon")}</strong>
-      <p className="muted">{t("panel.terminalSoon")}</p>
     </div>
   );
 }

@@ -15,6 +15,8 @@ import {
   type SessionListed,
   type SessionSummary,
   type SessionSynced,
+  type TerminalExited,
+  type TerminalOutput,
   type UserNotification,
   type WorkspaceSnapshot,
 } from "@genie/protocol";
@@ -22,6 +24,7 @@ import { DEFAULT_APPEARANCE, type Appearance } from "@genie/ui";
 import { errorKind, errorMessage, type HostInfo, type HostMessage, type HostStatus, type Platform } from "../platform";
 import { Emitter } from "./emitter";
 import { SessionStore } from "./session";
+import { Terminals } from "./terminals";
 
 export type View = "main" | "settings" | "project";
 export type PanelTab = "artifact" | "browser" | "changes" | "files" | "terminal";
@@ -44,6 +47,10 @@ export interface UiState {
   model: string | null;
   effort: string | null;
   recentWorkspaces: string[];
+  /** Open terminal ids per session, for reattach after a reload (05 §10). */
+  terminals: Record<string, { id: string; title: string }[]>;
+  /** OS notifications for paused asks when the window is in the background. */
+  osNotifications: boolean;
 }
 
 const DEFAULT_UI: UiState = {
@@ -63,6 +70,8 @@ const DEFAULT_UI: UiState = {
   model: null,
   effort: null,
   recentWorkspaces: [],
+  terminals: {},
+  osNotifications: true,
 };
 
 export interface Toast {
@@ -100,9 +109,12 @@ export class App extends Emitter {
   private configListeners = new Set<Listener<string[]>>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  readonly terminals: Terminals;
+
   constructor(readonly platform: Platform) {
     super();
     this.client = new GenieClient({ request: (m, p) => platform.request(m, p) });
+    this.terminals = new Terminals({ client: this.client, persistTerminals: (terminals) => this.setUi({ terminals }) });
   }
 
   async start() {
@@ -110,6 +122,7 @@ export class App extends Emitter {
     this.ui = { ...DEFAULT_UI, ...(state as Partial<UiState>), view: "main", appearance: { ...DEFAULT_APPEARANCE, ...((state as Partial<UiState>).appearance ?? {}) } };
     if ((state as { firstRunDone?: boolean }).firstRunDone) this.ui.firstRunDone = true;
     this.stateLoaded = true;
+    this.terminals.restore(this.ui.terminals);
     this.info = await this.platform.connect((m) => this.onHost(m));
     this.changedNow();
   }
@@ -180,6 +193,7 @@ export class App extends Emitter {
     if (this.everReady) {
       // The relay resubscribed sessions and the workspace feed itself (02 §3.1).
       void this.refreshLists();
+      this.terminals.reattachAll();
       return;
     }
     this.everReady = true;
@@ -205,9 +219,16 @@ export class App extends Emitter {
     switch (method) {
       case "event": {
         const env = params as SessionEventEnvelope;
+        if (env.event.type === "terminal.output") {
+          this.terminals.onOutput(env.event as unknown as TerminalOutput);
+          return;
+        }
         this.open.get(env.session_id)?.apply(env);
         return;
       }
+      case "terminal.exited":
+        this.terminals.onExited(params as TerminalExited);
+        return;
       case "session.synced":
         this.open.get((params as SessionSynced).session_id)?.markSynced();
         return;
@@ -227,7 +248,10 @@ export class App extends Emitter {
       case "session.listed": {
         const p = params as SessionListed;
         this.sessions = new Map(this.sessions);
-        if (p.change === "deleted") this.sessions.delete(p.session.session_id);
+        if (p.change === "deleted") {
+          this.sessions.delete(p.session.session_id);
+          if (this.terminals.list(p.session.session_id).length) this.terminals.forgetSession(p.session.session_id);
+        }
         else this.sessions.set(p.session.session_id, p.session);
         this.changed();
         return;
@@ -347,6 +371,7 @@ export class App extends Emitter {
   async deleteSession(id: string) {
     await this.client.session.delete({ session_id: id });
     this.closeSession(id);
+    this.terminals.forgetSession(id);
     this.sessions = new Map(this.sessions);
     this.sessions.delete(id);
     if (this.ui.activeSession === id) this.setUi({ activeSession: null });

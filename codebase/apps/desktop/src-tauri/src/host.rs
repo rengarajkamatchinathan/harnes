@@ -74,8 +74,8 @@ pub fn client_info(instance_id: &str) -> ClientInfo {
             ],
             notifications: true,
             screencast: Some(true),
-            // terminal.* is not served by the daemon yet (05 §10).
-            terminal: Some(false),
+            // Terminal tab: terminal.open/attach/input/resize/close (05 §10, D55).
+            terminal: Some(true),
         },
     }
 }
@@ -252,6 +252,6 @@ mod tests {
         let info = client_info("desktop_x");
         assert_eq!(info.kind, ClientKind::Desktop);
         assert!(info.capabilities.asks.contains(&AskKind::BrowserConfirm));
-        assert_eq!(info.capabilities.terminal, Some(false));
+        assert_eq!(info.capabilities.terminal, Some(true));
     }
 }

@@ -191,3 +191,12 @@ code { font-size: 0.92em; }
 .toast--danger { border-color: var(--danger); }
 .toast--success { border-color: var(--success); }
 .toast__body { flex: 1; min-width: 0; }
+
+/* Terminal tab (05 §10) */
+.terminal-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.terminal-tabs { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.terminal-tab { display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-sm); padding-left: var(--space-2); white-space: nowrap; }
+.terminal-tab.is-active { background: var(--surface-raised); box-shadow: inset 0 -2px 0 var(--accent); }
+.terminal-host { flex: 1; min-height: 0; padding: var(--space-1); background: var(--code-bg); }
+.terminal-host .xterm { height: 100%; }
+.terminal-exit { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }

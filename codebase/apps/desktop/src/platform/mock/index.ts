@@ -20,7 +20,23 @@ export interface MockOptions {
   firstRun?: boolean;
   /** Reply text; default is a Markdown sample. */
   reply?: (prompt: string) => string;
+  /** Replay ring size of mock terminals (bytes); default 64 KiB. */
+  terminalRing?: number;
 }
+
+/** A mock terminal: a line-echoing "shell" with a replay ring and absolute offsets. */
+interface MockTerm {
+  id: string;
+  sessionId: string;
+  /** Bytes as a binary string; `ring[0]` is at absolute offset `ringStart`. */
+  ring: string;
+  ringStart: number;
+  line: string;
+  attached: boolean;
+}
+
+const PROMPT = "mock$ ";
+const toBin = (text: string) => String.fromCharCode(...new TextEncoder().encode(text));
 
 const SAMPLE = `Here is a quick overview.
 
@@ -75,6 +91,8 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     { id: "anthropic", kind: "anthropic", status: "needs_auth", credentials: [] },
   ];
   const blobs = new Map<string, string>();
+  const terms = new Map<string, MockTerm>();
+  const ringCap = opts.terminalRing ?? 64 * 1024;
   const uploads = new Map<string, string[]>();
 
   const emit = (m: HostMessage) => listener?.(m);
@@ -171,6 +189,56 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     void stream();
   }
 
+  function termWrite(t: MockTerm, text: string) {
+    const bin = toBin(text);
+    const start = t.ringStart + t.ring.length;
+    t.ring += bin;
+    if (t.ring.length > ringCap) {
+      const drop = t.ring.length - ringCap;
+      t.ring = t.ring.slice(drop);
+      t.ringStart += drop;
+    }
+    if (t.attached) {
+      notify("event", { session_id: t.sessionId, ts: now(), event: { type: "terminal.output", terminal_id: t.id, start, end: start + bin.length, data_b64: btoa(bin) } });
+    }
+  }
+
+  function termExit(t: MockTerm, code: number | null) {
+    terms.delete(t.id);
+    notify("terminal.exited", { terminal_id: t.id, code });
+  }
+
+  function termInput(t: MockTerm, bin: string) {
+    const text = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    for (const ch of text) {
+      if (ch === "\r") {
+        const line = t.line.trim();
+        t.line = "";
+        if (line === "exit" || line.startsWith("exit ")) {
+          termWrite(t, "\r\nexit\r\n");
+          termExit(t, Number(line.slice(5)) || 0);
+          return;
+        }
+        const out = !line ? "" : line.startsWith("echo ") ? `${line.slice(5)}\r\n` : `mock: command not found: ${line.split(" ")[0]}\r\n`;
+        termWrite(t, `\r\n${out}${PROMPT}`);
+      } else if (ch === "\x7f") {
+        if (t.line) {
+          t.line = t.line.slice(0, -1);
+          termWrite(t, "\b \b");
+        }
+      } else {
+        t.line += ch;
+        termWrite(t, ch);
+      }
+    }
+  }
+
+  function term(id: unknown): MockTerm {
+    const t = terms.get(String(id));
+    if (!t) throw err("not_found", "terminal not found", -32004);
+    return t;
+  }
+
   function session(id: unknown): MockSession {
     const s = sessions.get(String(id));
     if (!s) throw err("not_found", `no session ${String(id)}`, -32004);
@@ -242,6 +310,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "session.delete": (p) => {
       const s = session(p.session_id);
       sessions.delete(s.info.session_id);
+      for (const t of [...terms.values()]) if (t.sessionId === s.info.session_id) termExit(t, null);
       if (workspaceOn) notify("session.listed", { change: "deleted", session: summary(s) });
       return {};
     },
@@ -344,6 +413,37 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "import.scan": () => ({ report: { items: [] } }),
     "trust.get": (p) => ({ path: p.path, state: "unknown" }),
     "trust.set": () => ({}),
+    "terminal.open": (p) => {
+      const s = session(p.session_id);
+      if (s.info.kind !== "code") throw err("invalid_state", "terminals belong to Code sessions", -32010);
+      const t: MockTerm = { id: uid("term"), sessionId: s.info.session_id, ring: "", ringStart: 0, line: "", attached: false };
+      terms.set(t.id, t);
+      termWrite(t, PROMPT);
+      return { terminal_id: t.id };
+    },
+    "terminal.attach": (p) => {
+      const t = term(p.terminal_id);
+      t.attached = true;
+      const offset = Number(p.offset ?? 0);
+      const end = t.ringStart + t.ring.length;
+      if (offset < t.ringStart) {
+        const lastLine = t.ring.slice(t.ring.lastIndexOf("\n") + 1);
+        return { truncated: true, checkpoint_b64: btoa(lastLine), replay_b64: "", end_offset: end };
+      }
+      return { truncated: false, checkpoint_b64: null, replay_b64: btoa(t.ring.slice(Math.min(offset, end) - t.ringStart)), end_offset: end };
+    },
+    "terminal.input": (p) => {
+      termInput(term(p.terminal_id), atob(String(p.data_b64 ?? "")));
+      return {};
+    },
+    "terminal.resize": (p) => {
+      term(p.terminal_id);
+      return {};
+    },
+    "terminal.close": (p) => {
+      termExit(term(p.terminal_id), null);
+      return {};
+    },
     "blob.put.begin": () => {
       const id = uid("up");
       uploads.set(id, []);

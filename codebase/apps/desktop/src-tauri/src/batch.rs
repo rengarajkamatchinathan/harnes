@@ -146,4 +146,17 @@ mod tests {
         assert_eq!(out[0]["params"]["event"]["json"], "{\"a\":1}");
         assert_eq!(out[1]["params"]["event"]["message"], "2/3");
     }
+
+    #[test]
+    fn terminal_output_is_never_merged_or_dropped() {
+        // Offsets must stay gap-free for the Terminal tab (05 §10).
+        let mut b = Batcher::default();
+        let o = |start: u64, data: &str| json!({"session_id": "s", "ts": "t", "event": {"type": "terminal.output", "terminal_id": "term_1", "start": start, "end": start + 1, "data_b64": data}});
+        b.push("event", o(0, "YQ=="));
+        b.push("event", o(1, "Yg=="));
+        b.push("terminal.exited", json!({"terminal_id": "term_1", "code": 0}));
+        let out = b.take();
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[1]["params"]["event"]["start"], 1);
+    }
 }
