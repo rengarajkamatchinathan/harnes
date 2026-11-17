@@ -11,10 +11,12 @@ use genie_config::{ConfigError, PolicyManager, TrustError};
 use genie_core::config::{ConfigHub, HubEvent};
 use genie_core::runtime::AgentRuntime;
 use genie_core::runtime::mcp::McpHub;
+use genie_core::runtime::skills::SkillsHub;
 use genie_protocol::api::config::{ApproveDecision, PendingDefinitionsResult, TrustGetResult};
 use genie_protocol::api::mcp::{
     AuthUrlResult, BlobMimeResult, LinesResult, McpItemsResult, McpListResult,
 };
+use genie_protocol::api::mcp::{DirectoryKind, IdResult};
 use genie_protocol::api::session::ToolsListResult;
 use genie_protocol::common::{ConfigScope, Empty};
 use genie_protocol::methods::{self as m, Method};
@@ -36,6 +38,9 @@ pub struct Services {
     pub audit: Option<Arc<Auditor>>,
     /// Managed policy sources, re-read periodically.
     pub policy: Option<Mutex<PolicyManager>>,
+    pub skills: Option<Arc<SkillsHub>>,
+    /// Blob storage (`skill.upload`).
+    pub store: Option<Arc<genie_store::Store>>,
 }
 
 pub(crate) enum Handled {
@@ -275,9 +280,88 @@ impl Services {
                 to_result(&ToolsListResult { tools })
             }),
 
+            n if n == m::SkillList::NAME => self
+                .skills
+                .as_ref()
+                .ok_or_else(|| not_implemented(name))
+                .and_then(|s| to_result(&s.list())),
+            n if n == m::SkillSetEnabled::NAME => params::<m::SkillSetEnabled>(r).and_then(|p| {
+                let s = self.skills.as_ref().ok_or_else(|| not_implemented(name))?;
+                s.set_enabled(&p.id, p.enabled).map_err(skill_err)?;
+                to_result(&Empty {})
+            }),
+            n if n == m::SkillUpload::NAME => params::<m::SkillUpload>(r).and_then(|p| {
+                let s = self.skills.as_ref().ok_or_else(|| not_implemented(name))?;
+                let store = self.store.as_ref().ok_or_else(|| not_implemented(name))?;
+                let bytes = store
+                    .read_blob(&p.blob_id)
+                    .map_err(|_| RpcError::new(ErrorKind::NotFound, "blob not found"))?;
+                let inst = s.upload(&bytes).map_err(skill_err)?;
+                self.audit(
+                    AuditEvent::SkillInstalled,
+                    Attrs::new()
+                        .with("skill", inst.id.clone())
+                        .with("sha256", inst.sha256)
+                        .with("source", "upload"),
+                );
+                to_result(&IdResult { id: inst.id })
+            }),
+            n if n == m::DirectoryList::NAME || n == m::DirectoryInstall::NAME => {
+                let skills_kind = r.params.get("kind").and_then(Value::as_str) == Some("skills");
+                match (&self.skills, skills_kind) {
+                    (Some(s), true) => return self.directory_async(s.clone(), conn, r),
+                    _ => return Handled::NotMine,
+                }
+            }
             _ => return Handled::NotMine,
         };
         Handled::Now(res)
+    }
+
+    fn directory_async(
+        self: &Arc<Self>,
+        s: Arc<SkillsHub>,
+        conn: &Arc<Conn>,
+        r: &Request,
+    ) -> Handled {
+        let r = r.clone();
+        let c = conn.clone();
+        let me = self.clone();
+        conn.scope()
+            .child("directory")
+            .spawn_cancellable(async move {
+                let dir = genie_skills::SkillDirectory::new(UnavailableFeed);
+                let res: Result<Value, RpcError> = async {
+                    if r.method == m::DirectoryList::NAME {
+                        let p = params::<m::DirectoryList>(&r)?;
+                        return to_result(&dir.list(p.query.as_deref()).await.map_err(skill_err)?);
+                    }
+                    let p = params::<m::DirectoryInstall>(&r)?;
+                    if p.kind != DirectoryKind::Skills {
+                        return Err(not_implemented(&r.method));
+                    }
+                    let mut cat = s.user_catalog();
+                    let out = dir.install(&mut cat, &p).await.map_err(skill_err)?;
+                    if out.installed {
+                        s.rescan_all();
+                        me.audit(
+                            AuditEvent::SkillInstalled,
+                            Attrs::new()
+                                .with("skill", p.id.clone())
+                                .with("version", p.version.clone())
+                                .with("sha256", out.manifest["sha256"].clone())
+                                .with("source", "directory"),
+                        );
+                    }
+                    to_result(&out)
+                }
+                .await;
+                c.respond(match res {
+                    Ok(v) => Response::ok(r.id, v),
+                    Err(e) => Response::err(r.id, e),
+                });
+            });
+        Handled::Later
     }
 
     fn mcp_async(self: &Arc<Self>, h: Arc<McpHub>, conn: &Arc<Conn>, r: &Request) -> Handled {
@@ -342,6 +426,11 @@ impl Services {
                     if let Some(mcp) = &me.mcp {
                         mcp.reconcile_all();
                     }
+                    if let Some(sk) = &me.skills
+                        && !matches!(ev, HubEvent::Config { .. })
+                    {
+                        sk.on_change();
+                    }
                     match ev {
                         HubEvent::Config { scope, keys, .. } => st
                             .workspace_send(m::ConfigChanged::NAME, &ConfigChanged { keys, scope }),
@@ -367,15 +456,20 @@ impl Services {
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     h.refresh();
                     tick += 1;
-                    if tick % 30 == 0 {
-                        if let Some(pm) = &me.policy {
-                            let eff = {
-                                let mut g = pm.lock().unwrap_or_else(|e| e.into_inner());
-                                g.refresh_local();
-                                g.effective()
-                            };
-                            h.set_policy(eff);
-                        }
+                    if tick.is_multiple_of(5)
+                        && let Some(sk) = &me.skills
+                    {
+                        sk.refresh();
+                    }
+                    if tick.is_multiple_of(30)
+                        && let Some(pm) = &me.policy
+                    {
+                        let eff = {
+                            let mut g = pm.lock().unwrap_or_else(|e| e.into_inner());
+                            g.refresh_local();
+                            g.effective()
+                        };
+                        h.set_policy(eff);
                     }
                 }
             });
@@ -402,6 +496,37 @@ impl Services {
                 }
             });
         }
+    }
+}
+
+fn skill_err(e: genie_skills::SkillError) -> RpcError {
+    use genie_skills::SkillError as E;
+    let kind = match &e {
+        E::NotFound(_) => ErrorKind::NotFound,
+        E::Blocked(_) | E::Policy(_) => ErrorKind::PolicyBlocked,
+        E::Disabled(_) | E::UserOnly(_) => ErrorKind::InvalidState,
+        E::AlreadyExists(_) => ErrorKind::Conflict,
+        E::Directory(_) | E::Io(_) => ErrorKind::InvalidState,
+        _ => ErrorKind::InvalidParams,
+    };
+    RpcError::new(kind, e.to_string()).with_data(json!({"code": e.code()}))
+}
+
+/// The signed skills feed has no HTTP transport in this build (D40 feed URL + keys are
+/// not pinned yet): `directory.*` for skills reports it as unavailable.
+struct UnavailableFeed;
+
+#[async_trait::async_trait]
+impl genie_skills::DirectoryTransport for UnavailableFeed {
+    async fn fetch_feed(&self) -> Result<genie_skills::SignedFeed, genie_skills::SkillError> {
+        Err(genie_skills::SkillError::Directory(
+            "the skills directory feed is not available in this build".into(),
+        ))
+    }
+    async fn fetch_package(&self, _url: &str) -> Result<Vec<u8>, genie_skills::SkillError> {
+        Err(genie_skills::SkillError::Directory(
+            "the skills directory feed is not available in this build".into(),
+        ))
     }
 }
 

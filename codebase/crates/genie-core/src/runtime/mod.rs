@@ -30,6 +30,7 @@ pub mod models;
 pub mod permissions;
 pub mod ports;
 pub mod prompts;
+pub mod skills;
 mod turn;
 pub mod wire;
 
@@ -105,9 +106,23 @@ pub struct AgentRuntime {
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
     /// The running turn per session (MCP elicitation/sampling → asks).
     pub turns: Arc<ActiveTurns>,
+    /// Skills and slash commands (06 §9).
+    pub skills: Option<Arc<skills::SkillsHub>>,
 }
 
 impl AgentRuntime {
+    /// Resolve skill parts and `/commands` in a user message (06 §9).
+    pub fn resolve_input(
+        &self,
+        session_id: &str,
+        parts: &[genie_protocol::message::InputPart],
+    ) -> Vec<genie_protocol::message::InputPart> {
+        match &self.skills {
+            Some(s) => s.resolve_input(session_id, parts),
+            None => parts.to_vec(),
+        }
+    }
+
     /// The session's registry: the static tools of its kind plus provider tools.
     pub fn registry_for(&self, session_id: &str, settings: &SessionSettings) -> ToolRegistry {
         let mut r = match settings.kind {
@@ -186,6 +201,7 @@ impl RuntimeBuilder {
                 memory: None,
                 tool_providers: Vec::new(),
                 turns: Arc::new(ActiveTurns::new()),
+                skills: None,
             },
         }
     }
@@ -246,6 +262,13 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Skills (06 §9): `<available_skills>` in the baseline, the `skill` / `skill_read`
+    /// tools for Chat and Code, skill parts and user commands in prompts.
+    pub fn skills(mut self, hub: Arc<skills::SkillsHub>) -> Self {
+        self.rt.skills = Some(hub);
+        self
+    }
+
     /// Share the active-turn index (the MCP handler resolves asks through it).
     pub fn turns(mut self, t: Arc<ActiveTurns>) -> Self {
         self.rt.turns = t;
@@ -269,7 +292,21 @@ impl RuntimeBuilder {
             .spill(Some(Arc::new(bridge::BlobSpill::new(store))))
     }
 
-    pub fn build(self) -> AgentRunner {
+    pub fn build(mut self) -> AgentRunner {
+        if let Some(hub) = self.rt.skills.clone() {
+            self.rt.instructions = Arc::new(skills::SkillsInstructions {
+                base: self.rt.instructions.clone(),
+                skills: hub.clone(),
+            });
+            let tools: [Arc<dyn Tool>; 2] = [
+                Arc::new(skills::SkillTool::new(hub.clone())),
+                Arc::new(skills::SkillReadTool::new(hub)),
+            ];
+            for t in tools {
+                self.rt.chat_tools.register(t.clone());
+                self.rt.code_tools.register(t);
+            }
+        }
         AgentRunner(Arc::new(self.rt))
     }
 }

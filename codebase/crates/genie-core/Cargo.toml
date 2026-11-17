@@ -20,6 +20,7 @@ genie-config.workspace = true
 genie-permissions.workspace = true
 genie-mcp.workspace = true
 genie-audit.workspace = true
+genie-skills.workspace = true
 
 async-trait.workspace = true
 http.workspace = true

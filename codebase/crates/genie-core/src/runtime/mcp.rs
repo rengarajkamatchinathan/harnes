@@ -255,7 +255,9 @@ impl ClientHandler for AskHandler {
 
 /// One MCP server tool as a [`Tool`].
 struct McpToolAdapter {
-    tool: McpTool,
+    def: McpTool,
+    /// `mcp__<server>__<tool>` (what the model calls).
+    exposed: String,
     server: McpServer,
     calls: Arc<Calls>,
     description: String,
@@ -264,7 +266,7 @@ struct McpToolAdapter {
 #[async_trait]
 impl Tool for McpToolAdapter {
     fn name(&self) -> &str {
-        &self.tool.model_name
+        &self.exposed
     }
 
     fn description(&self, _env: &ToolEnv) -> Cow<'_, str> {
@@ -272,7 +274,7 @@ impl Tool for McpToolAdapter {
     }
 
     fn input_schema(&self) -> &Value {
-        &self.tool.input_schema
+        &self.def.input_schema
     }
 
     fn kind(&self) -> ToolKind {
@@ -285,19 +287,19 @@ impl Tool for McpToolAdapter {
 
     async fn execute(&self, input: Value, ctx: ToolCtx) -> Result<ToolOutput, ToolError> {
         ctx.authorize(PermissionRequest {
-            resource: Some(self.tool.model_name.clone()),
+            resource: Some(self.def.model_name.clone()),
             preview: Some(Preview::McpArgs {
-                server: self.tool.server.clone(),
-                tool: self.tool.name.clone(),
+                server: self.def.server.clone(),
+                tool: self.def.name.clone(),
                 args: input.clone(),
             }),
             save_suggestions: Vec::new(),
         })
         .await?;
-        let _guard = self.calls.enter(&self.tool.server, &ctx.env.session_id);
+        let _guard = self.calls.enter(&self.def.server, &ctx.env.session_id);
         let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel::<genie_mcp::Progress>();
         let call = self.server.call_tool(
-            &self.tool.name,
+            &self.def.name,
             input,
             genie_mcp::CallOpts {
                 cancel: Some(ctx.cancel.clone()),
@@ -762,7 +764,8 @@ impl ToolProvider for McpHub {
                     server: Some(t.server.clone()),
                     source: ToolSource::Mcp,
                     tool: Arc::new(McpToolAdapter {
-                        tool: t,
+                        exposed: t.model_name.clone(),
+                        def: t,
                         server,
                         calls: self.calls.clone(),
                         description,

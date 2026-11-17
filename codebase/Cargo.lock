@@ -1010,6 +1010,7 @@ dependencies = [
  "genie-protocol",
  "genie-providers",
  "genie-secrets",
+ "genie-skills",
  "genie-store",
  "genie-tools",
  "http",
@@ -1028,6 +1029,7 @@ dependencies = [
 name = "genie-daemon"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures",
  "genie-audit",
  "genie-client",
@@ -1037,6 +1039,7 @@ dependencies = [
  "genie-permissions",
  "genie-process",
  "genie-protocol",
+ "genie-skills",
  "genie-store",
  "genie-testkit",
  "getrandom 0.3.4",

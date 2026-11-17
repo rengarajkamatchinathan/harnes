@@ -48,7 +48,7 @@ pub enum ConfigSource {
     Project,
     Local,
     Policy,
-    /// Session-only CLI layer (`--settings`, `--allow`/`--deny`, D23 layer 2).
+    // Session-only CLI layer (`--settings`, `--allow`/`--deny`, D23 layer 2).
     Cli,
     #[serde(other)]
     Unknown,

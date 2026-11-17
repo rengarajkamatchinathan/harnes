@@ -261,6 +261,16 @@ fn build_engine(
             Err(e) => tracing::error!(error = %e, "MCP unavailable"),
         }
     }
+    if let Some(hub) = &hub {
+        let skills = genie_core::runtime::skills::SkillsHub::new(
+            ep.config_dir.clone(),
+            hub.clone(),
+            registry.clone(),
+        );
+        rb = rb.skills(skills.clone());
+        services.skills = Some(skills);
+    }
+    services.store = store.clone();
     services.hub = hub;
     let runner = rb.build();
     let conversation = runner.conversation();

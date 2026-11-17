@@ -341,6 +341,12 @@ pub fn action_for(req: &AuthzRequest, workspace: Option<&Path>) -> Action {
             }
         }
         "web_search" => Action::WebSearch,
+        // The `skill.use` check (06 §9): `Skill(<name>)` rules.
+        "skill" | "skill_read" => Action::Other {
+            tool: "Skill".into(),
+            specifier: resource,
+            read_only: true,
+        },
         n if n.starts_with("mcp__") => {
             let (server, tool) = match &req.preview {
                 Some(Preview::McpArgs { server, tool, .. }) => (server.clone(), tool.clone()),

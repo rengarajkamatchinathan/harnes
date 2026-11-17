@@ -314,6 +314,18 @@
     },
     {
       "direction": "request",
+      "ident": "ToolsList",
+      "name": "tools.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ToolsListResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "PermissionPending",
       "name": "permission.pending",
       "needs_lease": false,

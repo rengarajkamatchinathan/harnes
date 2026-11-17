@@ -310,9 +310,9 @@ pub struct AskParams {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSource {
-    /// Built into the engine.
+    // Built into the engine.
     Builtin,
-    /// An MCP server tool (`mcp__<server>__<tool>`).
+    // An MCP server tool (`mcp__<server>__<tool>`).
     Mcp,
     #[serde(other)]
     Unknown,

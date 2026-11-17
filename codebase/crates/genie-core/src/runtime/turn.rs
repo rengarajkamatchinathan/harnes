@@ -230,7 +230,7 @@ impl Run {
                 let msg = Message::new(
                     input.message_id.clone(),
                     Role::User,
-                    wire::input_parts(&input.parts),
+                    wire::input_parts(&self.rt.resolve_input(&self.sid, &input.parts)),
                 );
                 let kind = if matches!(input.kind, InboxKind::Synthetic { .. }) {
                     MsgKind::Synthetic
@@ -426,7 +426,7 @@ impl Run {
             let msg = Message::new(
                 i.message_id.clone(),
                 Role::User,
-                wire::input_parts(&i.parts),
+                wire::input_parts(&self.rt.resolve_input(&self.sid, &i.parts)),
             );
             self.append(msg, MsgKind::Normal)?;
         }
@@ -436,6 +436,8 @@ impl Run {
     fn base_prompt(&self, tool_names: Vec<String>) -> String {
         let spec = &self.model.route.model;
         let memory_on = tool_names.iter().any(|t| t == "memory_save");
+        let skills_on = tool_names.iter().any(|t| t == "skill");
+        let mcp_on = tool_names.iter().any(|t| t.starts_with("mcp__"));
         prompts::base_prompt(&BasePromptInput {
             kind: self.settings.kind,
             model_display_name: self.model.display_name.clone(),
@@ -451,6 +453,8 @@ impl Run {
             shell: None,
             features: PromptFeatures {
                 memory: memory_on,
+                skills: skills_on,
+                mcp: mcp_on,
                 ..PromptFeatures::default()
             },
             family: spec.family.clone(),
@@ -1243,7 +1247,12 @@ impl Run {
         self.meta.compactions.insert(comp_id.clone(), kept_from);
         // Rebuilt baseline from current sources (§2.2).
         let version = self.meta.baseline.as_ref().map_or(1, |b| b.version + 1);
-        let sources = self.rt.instructions.sources(&self.sid, &self.settings);
+        let mut sources = self.rt.instructions.sources(&self.sid, &self.settings);
+        sources.extend(
+            self.rt
+                .instructions
+                .after_compaction(&self.sid, &self.settings),
+        );
         self.meta.baseline = Some(FrozenBaseline::freeze(sources, version));
         self.meta.measured = None;
         let path = self.rt.conversation.path(&self.sid)?;

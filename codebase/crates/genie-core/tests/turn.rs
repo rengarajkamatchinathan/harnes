@@ -1429,4 +1429,90 @@ mod wiring {
         assert_eq!(list[0].status, genie_mcp::McpStatus::Connected);
         assert_eq!(list[0].tools, 1);
     }
+
+    #[tokio::test]
+    async fn skills_index_skill_tool_and_user_commands() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join(".genie");
+        std::fs::create_dir_all(home.join("skills/greet")).unwrap();
+        std::fs::write(
+            home.join("skills/greet/SKILL.md"),
+            "---\nname: greet\ndescription: Greet people warmly.\n---\nAlways greet with GREET-MARKER.\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(home.join("commands")).unwrap();
+        std::fs::write(home.join("commands/hello.md"), "Say hello to $ARGUMENTS").unwrap();
+        let h = hub(d.path());
+        let settings: Arc<dyn SettingsSource> = Arc::new(Settings);
+        let skills = genie_core::runtime::skills::SkillsHub::new(home, h.clone(), settings.clone());
+        let mut t = harness_with(
+            vec![
+                reply(
+                    &[tool_block(0, "toolu_a", "skill", json!({"name": "greet"}))],
+                    "tool_use",
+                ),
+                text(&["done"]),
+            ],
+            |_| {},
+            vec![],
+            None,
+            settings.clone(),
+            |b, _| {
+                b.skills(skills.clone())
+                    .authorizer(Arc::new(PermissionAuthorizer::new(
+                        h.clone(),
+                        settings.clone(),
+                    )))
+            },
+        );
+        t.s.prompt("/hello Bob", Delivery::Steer).unwrap();
+        let ev = t.settle().await;
+        assert_eq!(ended(&ev)[0].outcome, ToolOutcome::Ok);
+        let bodies = t.bodies();
+        let system = bodies[0]["system"].to_string();
+        assert!(system.contains("<available_skills>"), "{system}");
+        assert!(system.contains("greet"), "{system}");
+        let msgs = bodies[0]["messages"].to_string();
+        assert!(msgs.contains("Say hello to Bob"), "{msgs}");
+        let res = bodies[1]["messages"].as_array().unwrap()[2]["content"][0]["content"].to_string();
+        assert!(res.contains("GREET-MARKER"), "{res}");
+        assert_eq!(skills.loaded(t.s.id()).len(), 1);
+        // A `Skill(greet)` deny rule blocks it.
+        std::fs::write(
+            d.path().join(".genie/settings.json"),
+            r#"{"permissions": {"deny": ["Skill(greet)"]}}"#,
+        )
+        .unwrap();
+        h.refresh();
+        let ev = genie_core::runtime::permissions::action_for(
+            &genie_core::runtime::AuthzRequest {
+                session_id: "x".into(),
+                tool: "skill".into(),
+                kind: ToolKind::ReadOnly,
+                resource: Some("greet".into()),
+                preview: None,
+                save_suggestions: vec![],
+                mode: Mode::Default,
+                taint: None,
+            },
+            None,
+        );
+        assert!(matches!(ev, genie_permissions::Action::Other { ref tool, .. } if tool == "Skill"));
+        let authz = PermissionAuthorizer::new(h.clone(), settings.clone());
+        use genie_core::runtime::ToolAuthorizer;
+        let dec = authz.authorize(&genie_core::runtime::AuthzRequest {
+            session_id: "x".into(),
+            tool: "skill".into(),
+            kind: ToolKind::ReadOnly,
+            resource: Some("greet".into()),
+            preview: None,
+            save_suggestions: vec![],
+            mode: Mode::Default,
+            taint: None,
+        });
+        assert!(
+            matches!(dec, genie_core::runtime::AuthzDecision::Deny { .. }),
+            "{dec:?}"
+        );
+    }
 }

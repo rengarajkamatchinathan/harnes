@@ -67,13 +67,21 @@ fn daemon() -> Mem {
         )
         .unwrap(),
     );
-    let runtime = RuntimeBuilder::new(registry.clone(), Arc::new(NoModels)).build();
+    let skills = genie_core::runtime::skills::SkillsHub::new(
+        dir.path().join("home/.genie"),
+        hub.clone(),
+        registry.clone(),
+    );
+    let runtime = RuntimeBuilder::new(registry.clone(), Arc::new(NoModels))
+        .skills(skills.clone())
+        .build();
     let engine = EngineBuilder::new()
         .turn_runner(Arc::new(Runner))
         .build(&root);
     let services = Services {
         hub: Some(hub),
         runtime: Some(runtime.runtime().clone()),
+        skills: Some(skills),
         ..Services::default()
     };
     let state = Arc::new(DaemonState::with_services(
@@ -250,6 +258,28 @@ async fn tools_list_and_session_only_settings() {
         .tools;
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"tool_output_read"), "{names:?}");
+    assert!(names.contains(&"skill"), "{names:?}");
+    let sk = c.conn.call::<m::SkillList>(Empty {}).await.unwrap();
+    assert!(sk.skills.iter().any(|s| s.id == "write-spec" && s.enabled));
+    c.conn
+        .call::<m::SkillSetEnabled>(genie_protocol::api::mcp::SkillSetEnabledParams {
+            id: "write-spec".into(),
+            enabled: false,
+        })
+        .await
+        .unwrap();
+    let sk = c.conn.call::<m::SkillList>(Empty {}).await.unwrap();
+    assert!(sk.skills.iter().any(|s| s.id == "write-spec" && !s.enabled));
+    // The skills directory feed is not available yet: a clear error, not a hang.
+    let e = c
+        .conn
+        .call::<m::DirectoryList>(genie_protocol::api::mcp::DirectoryListParams {
+            kind: genie_protocol::api::mcp::DirectoryKind::Skills,
+            query: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(e, ClientError::Rpc(ref r) if r.code == ErrorKind::InvalidState.code()));
     // A malformed session-only rule is refused at create time.
     let e = c
         .conn

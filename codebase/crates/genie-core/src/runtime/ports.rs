@@ -235,6 +235,15 @@ impl ToolAuthorizer for AllowAllAuthorizer {
 /// Baseline sources for a session (06 §2.2).
 pub trait InstructionProvider: Send + Sync {
     fn sources(&self, session_id: &str, settings: &SessionSettings) -> Vec<InstructionSource>;
+
+    /// Extra sources for the baseline rebuilt by compaction (06 §3: loaded skills …).
+    fn after_compaction(
+        &self,
+        _session_id: &str,
+        _settings: &SessionSettings,
+    ) -> Vec<InstructionSource> {
+        Vec::new()
+    }
 }
 
 /// Environment + date. Org/custom instructions, skills, MCP guidance, memory, project

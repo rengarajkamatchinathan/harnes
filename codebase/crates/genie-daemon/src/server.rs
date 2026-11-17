@@ -315,11 +315,11 @@ impl DaemonState {
                                 st.listed(ListedChange::Updated, s);
                             }
                         }
-                        SessionEvent::PermissionAsked(a) => {
+                        SessionEvent::PermissionAsked(a)
                             // Notify unless a client subscribed to this session can
                             // render the ask kind (e.g. a headless client can't): 02 §7
                             // step 2.
-                            if !st.can_render(&env.session_id, a.ask.kind) {
+                            if !st.can_render(&env.session_id, a.ask.kind) => {
                                 st.workspace_send(
                                     m::UserNotification::NAME,
                                     &UserNotification {
@@ -335,7 +335,6 @@ impl DaemonState {
                                     },
                                 );
                             }
-                        }
                         _ => {}
                     }
                 }
