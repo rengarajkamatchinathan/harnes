@@ -11,7 +11,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use genie_catalog::Pricing;
 use genie_core::bus::{SubItem, Subscription};
-use genie_core::runtime::{ModelResolver, ResolveError, ResolvedModel, SessionSettings, SettingsSource};
+use genie_core::runtime::{
+    ModelResolver, ResolveError, ResolvedModel, SessionSettings, SettingsSource,
+};
 use genie_protocol::common::SessionKind;
 use genie_protocol::event::SessionEvent;
 use genie_providers::auth::NoAuth;
@@ -185,7 +187,10 @@ impl SettingsSource for Settings {
 }
 
 /// Wire events from `sub` until `pred` matches (inclusive).
-pub async fn until(sub: &mut Subscription, pred: impl Fn(&SessionEvent) -> bool) -> Vec<SessionEvent> {
+pub async fn until(
+    sub: &mut Subscription,
+    pred: impl Fn(&SessionEvent) -> bool,
+) -> Vec<SessionEvent> {
     let mut out = vec![];
     loop {
         let item = tokio::time::timeout(WAIT, sub.next())

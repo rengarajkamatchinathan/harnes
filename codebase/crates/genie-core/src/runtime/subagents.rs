@@ -29,8 +29,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use async_trait::async_trait;
 use genie_protocol::common::{Cost, SessionKind};
 use genie_protocol::event::{
-    Activity, SessionCreated, SessionEvent, StatusEvent, SubagentEnded, SubagentStarted,
-    TurnStatus,
+    Activity, SessionCreated, SessionEvent, StatusEvent, SubagentEnded, SubagentStarted, TurnStatus,
 };
 use genie_protocol::message::InputPart;
 use genie_protocol::session::{Delivery, LiveStatus};
@@ -416,12 +415,13 @@ impl SubagentHub {
                 let h = engine.create_session();
                 let id = h.id().to_string();
                 let stop = CancellationToken::new();
+                let depth = self.depth(&parent_id) + 1;
                 self.children().insert(
                     id.clone(),
                     Child {
                         parent: parent_id.clone(),
                         agent: def.name.clone(),
-                        depth: self.depth(&parent_id) + 1,
+                        depth,
                         settings: s.clone(),
                         running: true,
                         stop: stop.clone(),
@@ -739,10 +739,7 @@ impl Tool for TaskTool {
     }
 
     fn description(&self, env: &ToolEnv) -> Cow<'_, str> {
-        let ws = self
-            .hub
-            .settings(&env.session_id)
-            .and_then(|s| s.workspace);
+        let ws = self.hub.settings(&env.session_id).and_then(|s| s.workspace);
         let mut d = String::from(
             "Start a subagent for a broad search or an independent sub-task. It runs in the background in its own session; this call returns at once with its session_id. Its final report arrives automatically as a <subagent> message, so don't poll. Give it a complete prompt: it sees nothing else of this conversation. Pass session_id to send a follow-up to an earlier subagent.\n\nAgents:",
         );

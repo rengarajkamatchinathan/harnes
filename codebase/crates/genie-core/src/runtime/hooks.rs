@@ -224,7 +224,10 @@ pub fn parse_hooks(v: Option<&Value>, scope: HookScope) -> (Vec<HookSpec>, Vec<S
             continue;
         };
         if raw.run.first().is_none_or(|p| p.trim().is_empty()) {
-            problems.push(format!("{} hooks[{i}]: `run` needs a program", scope.as_str()));
+            problems.push(format!(
+                "{} hooks[{i}]: `run` needs a program",
+                scope.as_str()
+            ));
             continue;
         }
         out.push(HookSpec {
@@ -906,10 +909,8 @@ impl TurnHooks {
                 &HookTarget::default(),
             )
             .await;
-        (o.decision == Some(HookDecision::Continue)).then(|| {
-            o.message
-                .unwrap_or_else(|| "Continue the task.".into())
-        })
+        (o.decision == Some(HookDecision::Continue))
+            .then(|| o.message.unwrap_or_else(|| "Continue the task.".into()))
     }
 
     /// `compact.before` / `compact.after` (read-only).
@@ -974,9 +975,10 @@ impl CallHooks {
                 let mut ask = Ask::new("", req.session_id.clone(), AskKind::Permission, "");
                 ask.tool = Some(req.tool.clone());
                 ask.resource.clone_from(&req.resource);
-                ask.preview = req.preview.clone().or_else(|| {
-                    v.message.clone().map(|text| Preview::Text { text })
-                });
+                ask.preview = req
+                    .preview
+                    .clone()
+                    .or_else(|| v.message.clone().map(|text| Preview::Text { text }));
                 ask.save_suggestions.clone_from(&req.save_suggestions);
                 AuthzDecision::Ask(Box::new(ask))
             }
@@ -1124,10 +1126,9 @@ pub(crate) async fn run_tool(
         });
     }
     match (res, o.context_text(HookEvent::ToolAfter)) {
-        (Ok(out), Some(ctx_text)) => Ok(ToolOutput::Text(format!(
-            "{}\n\n{ctx_text}",
-            out.to_text()
-        ))),
+        (Ok(out), Some(ctx_text)) => {
+            Ok(ToolOutput::Text(format!("{}\n\n{ctx_text}", out.to_text())))
+        }
         (r, _) => r,
     }
 }
@@ -1160,10 +1161,8 @@ mod tests {
 
     #[test]
     fn matching() {
-        let m: HookMatch = serde_json::from_value(
-            json!({"tool": "Bash", "resource": "git push*"}),
-        )
-        .unwrap();
+        let m: HookMatch =
+            serde_json::from_value(json!({"tool": "Bash", "resource": "git push*"})).unwrap();
         let t = HookTarget::from_tool("shell", &json!({"command": "git push origin"}));
         assert!(m.matches(&t, "main"));
         let t2 = HookTarget::from_tool("shell", &json!({"command": "git status"}));

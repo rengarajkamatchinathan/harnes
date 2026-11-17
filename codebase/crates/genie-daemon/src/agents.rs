@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
+use genie_core::TaskScope;
 use genie_core::runtime::subagents::ChildRegistrar;
 use genie_core::runtime::{AgentRuntime, SessionSettings, SettingsSource};
-use genie_core::TaskScope;
 use genie_protocol::api::session::CreateParams;
 
 use crate::registry::{Extra, Registry};

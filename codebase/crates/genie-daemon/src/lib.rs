@@ -352,12 +352,12 @@ fn build_engine(
             root.child("subagents"),
         );
     if let Some(hub) = &hub {
-        rb = rb.config_hub(hub.clone()).hooks(
-            genie_core::runtime::hooks::HooksHub::with_audit(
+        rb = rb
+            .config_hub(hub.clone())
+            .hooks(genie_core::runtime::hooks::HooksHub::with_audit(
                 Arc::new(genie_core::runtime::hooks::ConfigHooks { hub: hub.clone() }),
                 services.audit.clone(),
-            ),
-        );
+            ));
     }
     if let Some(hub) = &hub {
         let skills = genie_core::runtime::skills::SkillsHub::new(

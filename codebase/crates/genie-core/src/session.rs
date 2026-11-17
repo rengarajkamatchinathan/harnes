@@ -248,8 +248,7 @@ impl SessionHandle {
             session_id: self.sh.id.clone(),
             agent: agent.into(),
         };
-        *self.sh.relay.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some(AskRelay { parent, label });
+        *self.sh.relay.lock().unwrap_or_else(|e| e.into_inner()) = Some(AskRelay { parent, label });
     }
 
     /// Write an inbox item and ring the doorbell. Returns once the item is committed

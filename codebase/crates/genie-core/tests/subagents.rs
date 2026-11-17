@@ -12,9 +12,7 @@ use std::time::Duration;
 use genie_core::bus::Subscription;
 use genie_core::runtime::agents::AgentCatalog;
 use genie_core::runtime::subagents::{SubagentConfig, SubagentHub};
-use genie_core::runtime::{
-    DefaultAuthorizer, MemoryConversation, RuntimeBuilder, RuntimeConfig,
-};
+use genie_core::runtime::{DefaultAuthorizer, MemoryConversation, RuntimeBuilder, RuntimeConfig};
 use genie_core::{Engine, EngineBuilder, SessionHandle, TaskScope};
 use genie_protocol::ask::{AskAnswer, Decision};
 use genie_protocol::common::SessionKind;
@@ -37,7 +35,10 @@ struct H {
     gate: Arc<Gate>,
 }
 
-fn harness(parent: Vec<genie_providers::cassette::RecordedResponse>, child: Vec<genie_providers::cassette::RecordedResponse>) -> H {
+fn harness(
+    parent: Vec<genie_providers::cassette::RecordedResponse>,
+    child: Vec<genie_providers::cassette::RecordedResponse>,
+) -> H {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home/.genie");
     std::fs::create_dir_all(home.join("agents")).unwrap();
@@ -130,17 +131,26 @@ async fn subagent_runs_end_to_end_and_its_ask_surfaces_in_the_parent() {
             text("child done"),
         ],
     );
-    h.s.prompt_parts(vec![InputPart::text("Delegate the work.")], genie_protocol::session::Delivery::Queue)
-        .unwrap();
+    h.s.prompt_parts(
+        vec![InputPart::text("Delegate the work.")],
+        genie_protocol::session::Delivery::Queue,
+    )
+    .unwrap();
 
     // The child's permission ask is raised in the parent, labelled with the subagent.
-    let ev = until(&mut h.sub, |e| matches!(e, SessionEvent::PermissionAsked(_))).await;
+    let ev = until(&mut h.sub, |e| {
+        matches!(e, SessionEvent::PermissionAsked(_))
+    })
+    .await;
     let child = child_of(&ev);
     let ask = match ev.last().unwrap() {
         SessionEvent::PermissionAsked(a) => a.ask.clone(),
         _ => unreachable!(),
     };
-    let label = ask.subagent.clone().expect("ask labelled with the subagent");
+    let label = ask
+        .subagent
+        .clone()
+        .expect("ask labelled with the subagent");
     assert_eq!(label.session_id, child);
     assert_eq!(label.agent, "worker");
     assert_eq!(ask.session_id, h.s.id());
@@ -195,14 +205,20 @@ async fn subagent_runs_end_to_end_and_its_ask_surfaces_in_the_parent() {
     let child_bodies = h.models.bodies(CHILD);
     assert_eq!(child_bodies.len(), 2);
     let sys = body_text(&child_bodies[0]["system"]);
-    assert!(sys.contains("TEST WORKER"), "agent body replaces the base prompt");
+    assert!(
+        sys.contains("TEST WORKER"),
+        "agent body replaces the base prompt"
+    );
     let child_tools: Vec<String> = child_bodies[0]["tools"]
         .as_array()
         .unwrap()
         .iter()
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    assert!(!child_tools.contains(&"task".to_string()), "depth 1: no task for children");
+    assert!(
+        !child_tools.contains(&"task".to_string()),
+        "depth 1: no task for children"
+    );
     assert!(body_text(&child_bodies[0]["messages"]).contains("Please do the work."));
     assert!(!h.hub.has_running(h.s.id()));
 
@@ -225,8 +241,11 @@ async fn interrupt_with_stop_subagents_stops_the_children_and_drops_their_report
         vec![task_call(), text("Waiting.")],
         vec![tool_call("toolu_gate", "gate", json!({}))],
     );
-    h.s.prompt_parts(vec![InputPart::text("Delegate.")], genie_protocol::session::Delivery::Queue)
-        .unwrap();
+    h.s.prompt_parts(
+        vec![InputPart::text("Delegate.")],
+        genie_protocol::session::Delivery::Queue,
+    )
+    .unwrap();
     until(&mut h.sub, waiting).await;
     // Let the child reach its blocking tool call.
     for _ in 0..200 {
@@ -242,7 +261,10 @@ async fn interrupt_with_stop_subagents_stops_the_children_and_drops_their_report
     let mut got_ended = None;
     while got_settled.is_none() || got_ended.is_none() {
         let ev = until(&mut h.sub, |e| {
-            matches!(e, SessionEvent::TurnSettled(_) | SessionEvent::SubagentEnded(_))
+            matches!(
+                e,
+                SessionEvent::TurnSettled(_) | SessionEvent::SubagentEnded(_)
+            )
         })
         .await;
         match ev.last().unwrap() {
@@ -264,10 +286,16 @@ async fn interrupt_with_stop_subagents_stops_the_children_and_drops_their_report
 async fn background_subagent_report_arrives_as_a_new_turn() {
     let mut h = harness(
         vec![task_call(), text("Waiting."), text("Got the late result.")],
-        vec![tool_call("toolu_gate", "gate", json!({})), text("late result")],
+        vec![
+            tool_call("toolu_gate", "gate", json!({})),
+            text("late result"),
+        ],
     );
-    h.s.prompt_parts(vec![InputPart::text("Delegate.")], genie_protocol::session::Delivery::Queue)
-        .unwrap();
+    h.s.prompt_parts(
+        vec![InputPart::text("Delegate.")],
+        genie_protocol::session::Delivery::Queue,
+    )
+    .unwrap();
     until(&mut h.sub, waiting).await;
     // Interrupt without stop_subagents: the child keeps running in the background.
     assert!(h.s.interrupt());
@@ -301,7 +329,11 @@ async fn background_subagent_report_arrives_as_a_new_turn() {
     assert!(text_of.contains("status=\"done\""));
     assert!(text_of.contains("late result"));
     assert!(ev.iter().any(|e| matches!(e, SessionEvent::TurnStarted(_))));
-    assert!(ev.iter().any(|e| matches!(e, SessionEvent::SubagentEnded(x) if x.status == TurnStatus::Completed)));
+    assert!(
+        ev.iter().any(
+            |e| matches!(e, SessionEvent::SubagentEnded(x) if x.status == TurnStatus::Completed)
+        )
+    );
     match ev.last().unwrap() {
         SessionEvent::TurnSettled(s) => assert_eq!(s.status, TurnStatus::Completed),
         _ => unreachable!(),
@@ -312,7 +344,7 @@ async fn background_subagent_report_arrives_as_a_new_turn() {
 }
 
 #[tokio::test]
-async fn task_rejects_unknown_agents_and_follow_ups_reuse_the_child() {
+async fn task_rejects_unknown_agents_and_lists_the_available_ones() {
     let mut h = harness(
         vec![
             tool_call(
@@ -324,10 +356,16 @@ async fn task_rejects_unknown_agents_and_follow_ups_reuse_the_child() {
         ],
         vec![],
     );
-    h.s.prompt_parts(vec![InputPart::text("Go.")], genie_protocol::session::Delivery::Queue)
-        .unwrap();
+    h.s.prompt_parts(
+        vec![InputPart::text("Go.")],
+        genie_protocol::session::Delivery::Queue,
+    )
+    .unwrap();
     let ev = until(&mut h.sub, settled).await;
-    assert!(!ev.iter().any(|e| matches!(e, SessionEvent::SubagentStarted(_))));
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, SessionEvent::SubagentStarted(_)))
+    );
     let second = body_text(&h.models.bodies(PARENT)[1]);
     assert!(second.contains("unknown agent `nobody`"), "{second}");
     assert!(second.contains("worker"), "lists available agents");

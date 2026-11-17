@@ -415,6 +415,30 @@ server (ask vs pasted), `browser_navigate` site ask against the fake CDP endpoin
 notification, headless browser gating + `browser.sites` persistence + `browser.status`);
 `config::tests` (hub trust gating and approvals).
 
+### Spec 06 §11–§12 (agents, subagents, hooks)
+
+| § | What | Where |
+|---|---|---|
+| 11 / D46 definitions | built-ins `general` (inherit, Genie base prompt), `explore` (read-only tools + read-only shell, catalog small model), `plan` (read-only set + `web_fetch`), hidden `title` / `compaction`; `~/.genie/agents/*.md` < trusted `<project>/.genie/agents/*.md` (later wins; never `.claude/agents`); frontmatter `name, description, tools, disallowedTools, model, effort, permissionMode, maxSteps, context, skills, mcpServers` (Claude tool names mapped: `Bash`→`shell`, `Read`→`read` …); parse problems reported, files re-read per lookup | `genie-core::runtime::agents::{AgentCatalog, parse_agent, builtins}` |
+| 11 / D46 narrowing | body replaces the base prompt (tuning appendix still applies); tools/env/baseline still added, `context: minimal` keeps env + date only; tool allow/deny lists and `mcpServers` hide tools; `permissionMode` only narrows (plan < default < accept-edits < bypass; `bypass` = inherit); `maxSteps`; model/effort overrides; read-only shell enforced by `AgentAuthorizer` on top of the rules (deny/policy still first); `session.create.agent` applies the definition on every turn | `agents::{AgentCatalog::effective, AgentInstructions, AgentAuthorizer, narrow_mode}`, `turn.rs` (`agent_body`, `max_steps`), `AgentRuntime::registry_for` |
+| 11 / D47 `task` | `task {agent, description, prompt, model?, session_id?}` (Code only) creates a child session (`parent_session_id`, agent settings narrowed from the parent's mode, title = description, `task.model` > agent model > small model > parent), registers it in the daemon registry, returns `{status:"running", session_id, queued}` at once; follow-up by `session_id` (idle children only); unknown agents list the available ones | `runtime::subagents::{TaskTool, SubagentHub::start}`, `genie-daemon::agents` (`ChildRegistrar` for `Registry`) |
+| 11 / D47 run + report | supervisor per child run on the hub's scope: own session actor + turn, `subagent.started` / `subagent.ended {status, summary, cost}` on the parent, final text steered into the parent as the `subagent_report` synthetic message; the parent turn waits at `finish = stop` while children run (`status.activity = waiting_for_children`) and continues with the reports; reports for a parent that is no longer running start a new turn (background completion); `task_wait {session_ids?}` blocks explicitly | `SubagentHub::{supervise, run_child, wait_change, wait}`, `TaskWaitTool`, `turn.rs::wait_for_children` |
+| 11 / D47 asks | a child's asks are held by the parent session with `Ask.subagent {session_id, agent}`: `permission.asked` on the parent feed, `permission.pending` / `permission.respond` on the parent, paused notification when the parent has no client; cancelled with the child's turn | `SessionHandle::set_ask_relay`, `TurnCtx::relay_ask` |
+| 11 / D47 limits | depth 1 by default (`task` only below `subagents.maxDepth`, setting 1–3, min with policy), 4 concurrent children per parent (more queue on a semaphore), child cost in `subagent.ended`; `session.interrupt {stop_subagents: true}` interrupts running/queued children and drops their reports; deleting a parent closes and unregisters its children | `SubagentHub::{may_delegate, max_depth, stop_children, session_ended}`, `genie-daemon::server` (interrupt, delete), `lib.rs` (on session end) |
+| 12 / D48 config | `hooks: [{id?, event, match:{tool, resource, path, agent}, run:[argv], timeoutMs, failClosed}]` from user, project, local settings + policy `hooks.managed`; policy `hooks.enabled: false`, `hooks.managedOnly`; project hooks only when trusted **and** approved by definition hash (`trust.pending_definitions` now lists `kind: hook`, `trust.approve_definition` approves them); local hooks need trust; bad entries skipped with a warning | `runtime::hooks::{parse_hooks, ConfigHooks, project_hook_definitions}`, `ConfigHub::project_definitions` |
+| 12 / D48 run | Code sessions only; argv via `genie-process` pipe mode (kill-tree, no shell parsing, `{path}`/`{tool}`/`{session}` placeholders), session cwd, minimal env + `GENIE_HOOK*`/`GENIE_SESSION_ID`/`GENIE_PROJECT_DIR`, envelope `{genieHook:1, event, session, cwd, agent, mode, data}` on stdin, `{decision?, message?, updatedInput?, addContext?}` on stdout; non-zero exit / timeout (default 60 s, tree killed) / bad JSON = hook error, ignored unless `failClosed`; durable `hook.ran {event, hook_id, decision, duration_ms, error}` + audit `hook.ran` | `HooksHub::run`, `run_one` |
+| 12 / D48 events | `tool.before` (deny → blocked `hook_denied`; ask → forces an ask; allow → answers a rule ask for this call; `updatedInput` composes and the tool re-authorises the new input; deny rules/policy always stand), `tool.after` (add context to the result, mark failed), `prompt.submit` (block → `session.error hook_blocked`, add context), `turn.end` (continue with `hook_continue`, max 3 per turn), `subagent.end` (context appended to the report), `session.start` (first turn context), `session.end` (on `session.delete`, read-only), `compact.before/after`, `permission.request` (allow/deny an ask, never a deny), `notification` (read-only, when an ask is shown); matching hooks run in order, most restrictive decision wins; Claude matchers (`Bash`, `Edit|Write`) map to Genie tool names so `genie hook-adapter claude` imports keep working | `hooks::{run_tool, CallHooks, TurnHooks}`, `bridge::CallGate`, `turn.rs` |
+
+Tests: `genie-core/tests/subagents.rs` (cassette per model: subagent end to end with a child
+ask surfacing and answered in the parent, `waiting_for_children`, report steered into the
+same turn, child prompt/tools/session.created; interrupt + `stop_subagents` drops the report;
+interrupt without it → background report starts a new turn; unknown agent),
+`genie-core/tests/hooks.rs` (`sh` scripts: deny, rewrite + envelope, timeout ignored vs
+fail-closed, non-zero exit / bad JSON / `tool.after` context, `turn.end` continue,
+`prompt.submit` block/context, Chat never runs hooks, project hooks untrusted → unapproved →
+approved), unit tests in `agents` (frontmatter, narrowing, precedence, trust) and `hooks`
+(parsing, matching, ranking).
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -461,8 +485,8 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
   sites are saved as `Browser(site:…)` permission rules, not as `browser.sites` states;
   `attachment_path` is not implemented; `browser.popout` is not routed.
 - **`worktree_name`** and `add_dirs` are stored; worktrees themselves are not created yet.
-- **Audit** covers the events listed in the coverage table; tool calls, usage, sign-ins and
-  hook runs are not recorded yet.
+- **Audit** covers the events listed in the coverage table plus `hook.ran`; tool calls,
+  usage and sign-ins are not recorded yet.
 
 ### Spec 06 §5 / 08 §3–6 gaps and deviations
 
@@ -504,9 +528,8 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
 ### Spec 06 gaps and deviations
 
 - **Out of scope here (typed extension points only):** code tools (§4.2), `tool_search`
-  deferral (§7), subagents (§11:
-  `finish = stop` with running children), hooks (§12: `turn.end` continue, `compact.before/after`),
-  checkpoints (D49), artifacts (D28), `chat_search` / `project_search` tools.
+  deferral (§7), checkpoints (D49), artifacts (D28), `chat_search` / `project_search` tools.
+  (Subagents §11 and hooks §12 are covered above.)
 - **Native compaction** (`capabilities.native_compaction`) is not used; we always write our own
   summary. Re-injection after compaction covers the rebuilt baseline only (skills, artifact
   refs, read-state, grants, todo, MCP resources come with their subsystems). If the summary
@@ -533,6 +556,34 @@ notification, headless browser gating + `browser.sites` persistence + `browser.s
   `Cancelled`; core converts.
 - `turn.settled.error.message` now carries the engine error text and `link` the fix link
   (`CoreEvent::TurnSettled` gained two optional fields).
+
+### Spec 06 §11–§12 gaps and deviations
+
+- **Outbox:** the report is pushed into the parent's in-memory inbox after the child's turn
+  settles, not in the same store transaction as the child's terminal event; a daemon crash in
+  between loses the report (the child transcript survives). The inbox itself is not durable yet.
+- **Waiting:** a parent turn always waits for running children at `finish = stop` (no explicit
+  "end now" signal for the model yet); interrupting without `stop_subagents` is how a parent
+  lets children finish in the background.
+- **Cost roll-up:** child usage is recorded on the child session and in `usage_daily`, and
+  reported in `subagent.ended.cost`; it is not added to the parent session's totals.
+- **Cache key:** each child uses its own session id as `prompt_cache_key` (the parent's
+  prefix differs anyway because the agent body replaces the base prompt).
+- **Asks:** "always" from a child ask releases only the child's own pending asks; child events
+  don't carry `subagent_of`; the child's state is `paused` / `awaiting_ask` while the parent
+  holds its ask, the parent's status doesn't change.
+- **Not implemented:** preloading agent `skills`, an `agents.list` method (the CLI's `/agents`
+  has no engine source), the desktop picker, `.claude/agents` beyond the importer, workspace-feed
+  `session.listed` for child sessions, child sessions persisting across a daemon restart (the
+  hub's child map is in memory).
+- **Hooks:** a hook `allow` on `tool.before` / `permission.request` also answers a policy
+  `permissions.ask` (the authorizer's ask does not say where it came from; policy can disable
+  hooks or set `hooks.managedOnly`). `tool.before` runs before the tool's own authorisation, so
+  hooks also run for calls a deny rule then blocks. Resource/path for `match` come from the
+  tool input (`command`, `url`, `path`, `file_path`). `addContext` from `tool.before` is
+  ignored. `session.end` runs on `session.delete` only (not eviction or shutdown), with
+  `hook.ran` in the audit log only. Managed hooks live under policy `hooks.managed` (our
+  assumption). No Windows run of the hook tests yet (they are `#[cfg(unix)]`).
 
 ### Spec 04 (storage) gaps and deviations
 

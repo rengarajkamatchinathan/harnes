@@ -525,7 +525,8 @@ pub struct AgentAuthorizer {
 
 fn read_only_command(req: &AuthzRequest) -> bool {
     use genie_permissions::{BuiltinReadOnly, ReadOnlyClassifier, ShellDialect};
-    let Some(a) = genie_tools::shell::authz_from_request(req.resource.as_deref(), req.preview.as_ref())
+    let Some(a) =
+        genie_tools::shell::authz_from_request(req.resource.as_deref(), req.preview.as_ref())
     else {
         return false;
     };
@@ -610,11 +611,22 @@ mod tests {
         assert!(parse_agent("---\nname: Bad Name\n---\n", "x", AgentSource::User, None).is_err());
         assert!(parse_agent("---\nmaxSteps: 0\n---\n", "x", AgentSource::User, None).is_err());
         assert!(
-            parse_agent("---\npermissionMode: wild\n---\n", "x", AgentSource::User, None).is_err()
+            parse_agent(
+                "---\npermissionMode: wild\n---\n",
+                "x",
+                AgentSource::User,
+                None
+            )
+            .is_err()
         );
         // Name from the file stem, bypass is "inherit" (it can never narrow).
-        let d = parse_agent("---\npermissionMode: bypass\n---\n", "helper", AgentSource::User, None)
-            .unwrap();
+        let d = parse_agent(
+            "---\npermissionMode: bypass\n---\n",
+            "helper",
+            AgentSource::User,
+            None,
+        )
+        .unwrap();
         assert_eq!(d.name, "helper");
         assert_eq!(d.permission_mode, None);
     }
@@ -622,8 +634,14 @@ mod tests {
     #[test]
     fn modes_only_narrow() {
         assert_eq!(narrow_mode(Mode::Bypass, Some(Mode::Plan)), Mode::Plan);
-        assert_eq!(narrow_mode(Mode::Default, Some(Mode::AcceptEdits)), Mode::Default);
-        assert_eq!(narrow_mode(Mode::AcceptEdits, Some(Mode::Default)), Mode::Default);
+        assert_eq!(
+            narrow_mode(Mode::Default, Some(Mode::AcceptEdits)),
+            Mode::Default
+        );
+        assert_eq!(
+            narrow_mode(Mode::AcceptEdits, Some(Mode::Default)),
+            Mode::Default
+        );
         assert_eq!(narrow_mode(Mode::Plan, None), Mode::Plan);
     }
 
@@ -678,13 +696,19 @@ mod tests {
 
     #[test]
     fn builtin_explore_is_read_only() {
-        let e = builtins().into_iter().find(|d| d.name == "explore").unwrap();
+        let e = builtins()
+            .into_iter()
+            .find(|d| d.name == "explore")
+            .unwrap();
         assert!(e.allows_tool("grep"));
         assert!(e.allows_tool("shell"));
         assert!(!e.allows_tool("edit"));
         assert!(!e.allows_tool("task"));
         assert!(e.read_only_shell && e.small_model);
-        let g = builtins().into_iter().find(|d| d.name == "general").unwrap();
+        let g = builtins()
+            .into_iter()
+            .find(|d| d.name == "general")
+            .unwrap();
         assert!(g.allows_tool("task") && g.body.is_none());
     }
 }
