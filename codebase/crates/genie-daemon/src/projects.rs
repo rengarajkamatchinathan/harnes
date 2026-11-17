@@ -19,6 +19,7 @@ use genie_protocol::api::session::{
     ExportFormat, ExportResult, SearchHit, SearchResult, SearchScope,
 };
 use genie_protocol::common::Empty;
+use genie_protocol::event::MemoryChanged;
 use genie_protocol::methods::{self as m, Method};
 use genie_protocol::{ErrorKind, Request, RpcError};
 use serde::Serialize;
@@ -132,6 +133,65 @@ fn memory_item(m: genie_store::memory::Memory) -> MemoryItem {
 }
 
 /// Handle the method if it is one of ours.
+/// The scope of the memory a `memory.update/delete` names, read before the change.
+pub(crate) fn memory_scope(svc: &Services, r: &Request) -> Option<String> {
+    let name = r.method.as_str();
+    if name != m::MemoryUpdate::NAME && name != m::MemoryDelete::NAME {
+        return None;
+    }
+    let id = r.params.get("memory_id")?.as_str()?;
+    let store = svc.store.as_ref()?;
+    store
+        .read(|c| genie_store::memory::get(c, id))
+        .ok()
+        .flatten()
+        .map(|m| m.scope)
+}
+
+/// `memory.changed` on the workspace feed after a successful `memory.*` change (D31).
+/// `memory.reset` reports `memory_id: "*"` with op `delete`.
+pub(crate) fn memory_changed(
+    state: &crate::server::DaemonState,
+    r: &Request,
+    scope_before: Option<String>,
+) {
+    let name = r.method.as_str();
+    let id = || {
+        r.params
+            .get("memory_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let note = if name == m::MemoryUpdate::NAME {
+        MemoryChanged {
+            memory_id: id(),
+            op: "update".into(),
+            scope: scope_before.unwrap_or_default(),
+        }
+    } else if name == m::MemoryDelete::NAME {
+        MemoryChanged {
+            memory_id: id(),
+            op: "delete".into(),
+            scope: scope_before.unwrap_or_default(),
+        }
+    } else if name == m::MemoryReset::NAME {
+        MemoryChanged {
+            memory_id: "*".into(),
+            op: "delete".into(),
+            scope: r
+                .params
+                .get("scope")
+                .and_then(Value::as_str)
+                .unwrap_or("all")
+                .to_string(),
+        }
+    } else {
+        return;
+    };
+    state.workspace_send(m::MemoryChangedNote::NAME, &note);
+}
+
 pub(crate) fn dispatch(svc: &Services, r: &Request) -> Option<Result<Value, RpcError>> {
     let name = r.method.as_str();
     let known = [

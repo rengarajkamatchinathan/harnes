@@ -43,6 +43,13 @@ impl ChildRegistrar for Registry {
 
 /// `session.interrupt {stop_subagents: true}`: stop the session's running children too.
 pub fn stop_subagents(rt: Option<&Arc<AgentRuntime>>, session_id: &str) -> usize {
+    // Stop also ends the session's background shell jobs (06 §13.1).
+    if let Some(sh) = rt.and_then(|r| r.shell.as_ref()) {
+        let n = sh.kill_session_jobs(session_id);
+        if n > 0 {
+            tracing::info!(session_id, jobs = n, "background jobs killed on stop");
+        }
+    }
     rt.and_then(|r| r.subagents.as_ref())
         .map_or(0, |h| h.stop_children(session_id))
 }

@@ -260,6 +260,8 @@ methods! {
     ProviderStatusNote = "provider.status", Notification, false, workspace::ProviderStatusChanged => ();
     UserNotification = "notification", Notification, false, workspace::UserNotification => ();
     TerminalExited = "terminal.exited", Notification, false, workspace::TerminalExited => ();
+    /// Memory changed outside a turn (`memory.update/delete/reset`, Settings → Memory).
+    MemoryChangedNote = "memory.changed", Notification, false, crate::event::MemoryChanged => ();
 }
 
 // Names the architecture layer (spec 01) already used.

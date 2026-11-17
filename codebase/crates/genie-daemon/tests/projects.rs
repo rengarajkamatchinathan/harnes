@@ -363,6 +363,26 @@ async fn project_methods_and_files() {
 async fn memory_methods_and_state() {
     let mem = daemon();
     let c = connect(&mem).await;
+    let mut rx = c.take_incoming().unwrap();
+    c.call::<m::WorkspaceSubscribe>(Default::default())
+        .await
+        .unwrap();
+    // `memory.changed` on the workspace feed (D31) after each change.
+    async fn changed(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<genie_client::connection::Incoming>,
+    ) -> genie_protocol::event::MemoryChanged {
+        loop {
+            let i = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("memory.changed in time")
+                .expect("open");
+            if let genie_client::connection::Incoming::Notification(n) = i
+                && n.method == "memory.changed"
+            {
+                return serde_json::from_value(n.params).unwrap();
+            }
+        }
+    }
     let (a, _b) = mem
         .store
         .write(|tx| {
@@ -398,6 +418,11 @@ async fn memory_methods_and_state() {
             .text,
         "Likes green tea"
     );
+    let note = changed(&mut rx).await;
+    assert_eq!(
+        (note.memory_id.as_str(), note.op.as_str(), note.scope.as_str()),
+        (a.id.as_str(), "update", "global")
+    );
 
     c.call::<m::MemorySetState>(MemorySetStateParams {
         state: MemoryState::Paused,
@@ -417,6 +442,8 @@ async fn memory_methods_and_state() {
     })
     .await
     .unwrap();
+    let note = changed(&mut rx).await;
+    assert_eq!((note.op.as_str(), note.scope.as_str()), ("delete", "global"));
     let e = c
         .call::<m::MemoryDelete>(MemoryIdParams { memory_id: a.id })
         .await
@@ -425,6 +452,8 @@ async fn memory_methods_and_state() {
     c.call::<m::MemoryReset>(MemoryScopeParams::default())
         .await
         .unwrap();
+    let note = changed(&mut rx).await;
+    assert_eq!((note.memory_id.as_str(), note.scope.as_str()), ("*", "all"));
     let all = c
         .call::<m::MemoryList>(MemoryScopeParams::default())
         .await

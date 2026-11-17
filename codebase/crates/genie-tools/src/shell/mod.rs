@@ -300,6 +300,19 @@ impl ShellRuntime {
         }
     }
 
+    /// Interrupt with stop (06 §13.1): kill the session's background jobs, keep its cwd.
+    /// Returns how many were running.
+    pub fn kill_session_jobs(&self, session_id: &str) -> usize {
+        let mut n = 0;
+        for j in lock(&self.inner.jobs).values() {
+            if j.session_id == session_id {
+                j.cancel.cancel();
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// Session end / eviction: kill its background jobs and forget its cwd.
     pub fn end_session(&self, session_id: &str) {
         for j in lock(&self.inner.jobs).values() {

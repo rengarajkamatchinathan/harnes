@@ -150,7 +150,11 @@ impl Services {
                 None => Handled::NotMine,
             };
         }
+        let memory_before = crate::projects::memory_scope(self, r);
         if let Some(res) = crate::projects::dispatch(self, r) {
+            if res.is_ok() {
+                crate::projects::memory_changed(state, r, memory_before);
+            }
             return Handled::Now(res);
         }
         // export.all, session.import, import.*, agents.list (04 §9, 07 §5, 06 §11).
