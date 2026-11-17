@@ -26,7 +26,7 @@ use genie_providers::cassette::{CassetteTransport, RecordedResponse};
 use genie_providers::compat::ModelSpec;
 use genie_providers::model::{ProtocolKind, ProviderId, Role};
 use genie_providers::route::{Preset, PresetProvider, ProviderConfig, Route};
-use genie_providers::{Executor, RetryPolicy};
+use genie_providers::{Executor, Provider, RetryPolicy};
 use genie_tools::code::git::Git;
 use serde_json::{Value, json};
 
