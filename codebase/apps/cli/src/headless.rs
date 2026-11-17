@@ -127,7 +127,29 @@ pub async fn run(
     let Sinks { out, err } = sinks;
     notices(conn, opts, err).await;
 
-    let opened = match session::open(conn, &opts.target, &opts.spec, &opts.cwd).await {
+    let mut spec = opts.spec.clone();
+    if spec.overlay.is_none()
+        && (!opts.allow.is_empty()
+            || !opts.deny.is_empty()
+            || opts.settings.is_some()
+            || !opts.add_dirs.is_empty())
+    {
+        spec.overlay = Some(genie_protocol::api::session::SessionSettingsOverlay {
+            allow: opts.allow.clone(),
+            deny: opts.deny.clone(),
+            settings_path: opts
+                .settings
+                .as_ref()
+                .map(|p| opts.cwd.join(p).to_string_lossy().into_owned()),
+            add_dirs: opts
+                .add_dirs
+                .iter()
+                .map(|p| opts.cwd.join(p).to_string_lossy().into_owned())
+                .collect(),
+            enable_browser: false,
+        });
+    }
+    let opened = match session::open(conn, &opts.target, &spec, &opts.cwd).await {
         Ok(o) => o,
         Err(e) => return Ok(fail_early(opts, out, err, "", &format!("{e:#}"))),
     };
@@ -144,6 +166,14 @@ pub async fn run(
     let mut run = Run::new(sid.clone(), opts, after.unwrap_or(0));
 
     if opts.format == OutputFormat::StreamJson {
+        // `tools.list` (older engines: method not found → empty list).
+        let tools: Vec<String> = conn
+            .call::<m::ToolsList>(genie_protocol::api::session::SessionIdParams {
+                session_id: sid.clone(),
+            })
+            .await
+            .map(|r| r.tools.into_iter().map(|t| t.name).collect())
+            .unwrap_or_default();
         line(
             out,
             &json!({
@@ -153,8 +183,7 @@ pub async fn run(
                 "model": opened.info.model,
                 "mode": opened.info.mode,
                 "cwd": opts.cwd.to_string_lossy(),
-                // The tool registry is not on the wire yet (no `tool.list`); see README gaps.
-                "tools": Vec::<String>::new(),
+                "tools": tools,
             }),
         );
     }
@@ -313,23 +342,6 @@ async fn respond(conn: &Connection, ask_id: &str, message: &str) {
 
 /// One-line notices for flags the engine cannot honour yet, and the trust notice (D43).
 async fn notices(conn: &Connection, opts: &Options, err: &mut (dyn Write + Send)) {
-    let mut unsupported = vec![];
-    if !opts.allow.is_empty() || !opts.deny.is_empty() {
-        unsupported.push("--allow/--deny");
-    }
-    if opts.settings.is_some() {
-        unsupported.push("--settings");
-    }
-    if !opts.add_dirs.is_empty() {
-        unsupported.push("--add-dir");
-    }
-    if !unsupported.is_empty() {
-        let _ = writeln!(
-            err,
-            "genie: {} not applied: this engine build has no session-only settings yet",
-            unsupported.join(", ")
-        );
-    }
     let path = opts.cwd.to_string_lossy().into_owned();
     if opts.trust {
         let r = conn

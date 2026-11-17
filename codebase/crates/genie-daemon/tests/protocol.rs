@@ -145,7 +145,7 @@ impl Client {
                 agent: None,
                 mode: None,
                 incognito: false,
-                worktree: None,
+                ..Default::default()
             })
             .await
             .unwrap()

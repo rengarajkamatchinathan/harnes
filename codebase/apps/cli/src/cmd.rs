@@ -467,13 +467,13 @@ pub async fn mcp(
             (
                 "mcp add",
                 m::McpAdd::NAME,
-                json!({"scope": scope_str(scope), "name": name, "config": config}),
+                json!({"scope": scope_str(scope), "name": name, "config": config, "cwd": cwd.to_string_lossy()}),
             )
         }
         McpAction::Remove { name, scope } => (
             "mcp remove",
             m::McpRemove::NAME,
-            json!({"scope": scope_str(scope), "name": name}),
+            json!({"scope": scope_str(scope), "name": name, "cwd": cwd.to_string_lossy()}),
         ),
         McpAction::Auth { name } => ("mcp auth", m::McpAuthStart::NAME, json!({"name": name})),
         McpAction::Logs { name, lines } => (

@@ -168,6 +168,15 @@ export interface BrowserConfirm {
 }
 
 /** Screencast frame (02 §6.6). */
+export interface BrowserControl {
+  /**
+   * `agent` ("Genie is browsing"), `user` ("you're in control"),
+   * `waiting_for_approval`, or `handoff` (the agent asked the user to take over).
+   */
+  control: string;
+  reason?: string | null;
+}
+
 export interface BrowserFrame {
   device_scale: number;
   frame_seq: number;
@@ -318,8 +327,12 @@ export interface ConfigSchemaResult {
   ui?: unknown;
 }
 
-/** Config write scopes (D23). `policy` is only ever a *source*, never a target. */
-export type ConfigScope = "user" | "project" | "local" | "unknown";
+/**
+ * Config write scopes (D23). `policy` is only ever a *source*, never a target.
+ * `managed` labels definitions delivered by managed policy (e.g. MCP servers); it is
+ * never a write target either.
+ */
+export type ConfigScope = "user" | "project" | "local" | "managed" | "unknown";
 
 export interface ConfigSetParams {
   cwd?: string | null;
@@ -329,7 +342,7 @@ export interface ConfigSetParams {
 }
 
 /** Where a config value came from. */
-export type ConfigSource = "default" | "user" | "project" | "local" | "policy" | "unknown";
+export type ConfigSource = "default" | "user" | "project" | "local" | "policy" | "cli" | "unknown";
 
 /** One connected client as `daemon.status` reports it. */
 export interface ConnectedClient {
@@ -354,8 +367,11 @@ export interface CreateParams {
   mode?: Mode | null;
   model: string;
   project_id?: string | null;
+  settings?: SessionSettingsOverlay | null;
   workspace_path?: string | null;
   worktree?: WorktreeChoice | null;
+  /** Name for a new worktree (`--worktree <name>`). */
+  worktree_name?: string | null;
 }
 
 export interface CreateResult {
@@ -742,6 +758,8 @@ export interface LoginStatusResult {
 export interface McpAddParams {
   /** Server definition as in `settings.json` `mcpServers` (D30). */
   config: unknown;
+  /** The project folder for `project` / `local` scope. */
+  cwd?: string | null;
   name: string;
   scope: ConfigScope;
 }
@@ -761,6 +779,8 @@ export interface McpLogsParams {
 }
 
 export interface McpRemoveParams {
+  /** The project folder for `project` / `local` scope. */
+  cwd?: string | null;
   name: string;
   scope: ConfigScope;
 }
@@ -1165,7 +1185,7 @@ export interface SessionError {
 }
 
 /** 02 §4. Discriminated by `type`. */
-export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
+export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "browser.control" } & BrowserControl) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
 
 /** 02 §3.3. */
 export interface SessionEventEnvelope {
@@ -1223,6 +1243,21 @@ export interface SessionListed {
 export interface SessionPathParams {
   path?: string | null;
   session_id: string;
+}
+
+/**
+ * Session-only settings (the CLI layer, D23 layer 2): `--allow`/`--deny` rules,
+ * `--settings <file>` and `--add-dir`. They apply to this session only.
+ */
+export interface SessionSettingsOverlay {
+  /** Extra directories the session may read/edit without asking (`--add-dir`). */
+  add_dirs?: string[];
+  allow?: string[];
+  deny?: string[];
+  /** `--enable-browser`: browser tools in a headless session (SA-28c). */
+  enable_browser?: boolean;
+  /** A settings file read by the daemon (same user) as the session's CLI layer. */
+  settings_path?: string | null;
 }
 
 /** One row in the session list (02 §6.2, workspace feed). */
@@ -1418,9 +1453,22 @@ export interface TextResult {
 
 export interface ToolEnded {
   call_id: string;
+  /**
+   * Why a `blocked` call was blocked: `code` is `policy_blocked` for managed policy
+   * (with "Blocked by <org> policy (rule)"), `GENIE-TOOL-BLOCKED` for a deny rule.
+   */
+  error?: ErrorInfo | null;
   outcome: ToolOutcome;
   result_part_id: string;
   spill_ref?: string | null;
+}
+
+export interface ToolInfo {
+  description: string;
+  name: string;
+  /** The MCP server, for `source: "mcp"`. */
+  server?: string | null;
+  source: ToolSource;
 }
 
 export type ToolOutcome = "ok" | "error" | "declined" | "blocked" | "cancelled" | "unknown";
@@ -1432,10 +1480,17 @@ export interface ToolProgress {
   output_tail?: string | null;
 }
 
+/** Where a tool comes from (`tools.list`). */
+export type ToolSource = "builtin" | "mcp" | "unknown";
+
 export interface ToolStarted {
   call_id: string;
   name: string;
   resource?: string | null;
+}
+
+export interface ToolsListResult {
+  tools: ToolInfo[];
 }
 
 export type TrustDecision = "trust" | "once" | "deny" | "revoke" | "unknown";

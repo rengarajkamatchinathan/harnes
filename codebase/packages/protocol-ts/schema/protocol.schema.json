@@ -601,8 +601,26 @@
       ],
       "type": "object"
     },
-    "BrowserFrame": {
+    "BrowserControl": {
       "description": "Screencast frame (02 §6.6).",
+      "properties": {
+        "control": {
+          "description": "`agent` (\"Genie is browsing\"), `user` (\"you're in control\"),\n`waiting_for_approval`, or `handoff` (the agent asked the user to take over).",
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "control"
+      ],
+      "type": "object"
+    },
+    "BrowserFrame": {
       "properties": {
         "device_scale": {
           "format": "double",
@@ -1131,11 +1149,12 @@
       "type": "object"
     },
     "ConfigScope": {
-      "description": "Config write scopes (D23). `policy` is only ever a *source*, never a target.",
+      "description": "Config write scopes (D23). `policy` is only ever a *source*, never a target.\n`managed` labels definitions delivered by managed policy (e.g. MCP servers); it is\nnever a write target either.",
       "enum": [
         "user",
         "project",
         "local",
+        "managed",
         "unknown"
       ],
       "type": "string"
@@ -1171,6 +1190,7 @@
         "project",
         "local",
         "policy",
+        "cli",
         "unknown"
       ],
       "type": "string"
@@ -1259,6 +1279,16 @@
             "null"
           ]
         },
+        "settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionSettingsOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workspace_path": {
           "type": [
             "string",
@@ -1273,6 +1303,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "worktree_name": {
+          "description": "Name for a new worktree (`--worktree <name>`).",
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
@@ -2837,6 +2874,13 @@
         "config": {
           "description": "Server definition as in `settings.json` `mcpServers` (D30)."
         },
+        "cwd": {
+          "description": "The project folder for `project` / `local` scope.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },
@@ -2897,6 +2941,13 @@
     },
     "McpRemoveParams": {
       "properties": {
+        "cwd": {
+          "description": "The project folder for `project` / `local` scope.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },
@@ -4958,6 +5009,20 @@
           "type": "object"
         },
         {
+          "$ref": "#/$defs/BrowserControl",
+          "description": "Who drives the agent browser (05 §9 banner), ephemeral.",
+          "properties": {
+            "type": {
+              "const": "browser.control",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/TerminalOutput",
           "properties": {
             "type": {
@@ -5203,6 +5268,42 @@
       "required": [
         "session_id"
       ],
+      "type": "object"
+    },
+    "SessionSettingsOverlay": {
+      "description": "Session-only settings (the CLI layer, D23 layer 2): `--allow`/`--deny` rules,\n`--settings <file>` and `--add-dir`. They apply to this session only.",
+      "properties": {
+        "add_dirs": {
+          "description": "Extra directories the session may read/edit without asking (`--add-dir`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allow": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enable_browser": {
+          "description": "`--enable-browser`: browser tools in a headless session (SA-28c).",
+          "type": "boolean"
+        },
+        "settings_path": {
+          "description": "A settings file read by the daemon (same user) as the session's CLI layer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "SessionSummary": {
@@ -5879,6 +5980,17 @@
         "call_id": {
           "type": "string"
         },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why a `blocked` call was blocked: `code` is `policy_blocked` for managed policy\n(with \"Blocked by <org> policy (rule)\"), `GENIE-TOOL-BLOCKED` for a deny rule."
+        },
         "outcome": {
           "$ref": "#/$defs/ToolOutcome"
         },
@@ -5896,6 +6008,32 @@
         "call_id",
         "outcome",
         "result_part_id"
+      ],
+      "type": "object"
+    },
+    "ToolInfo": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "server": {
+          "description": "The MCP server, for `source: \"mcp\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ToolSource"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "source"
       ],
       "type": "object"
     },
@@ -5940,6 +6078,15 @@
       ],
       "type": "object"
     },
+    "ToolSource": {
+      "description": "Where a tool comes from (`tools.list`).",
+      "enum": [
+        "builtin",
+        "mcp",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "ToolStarted": {
       "properties": {
         "call_id": {
@@ -5958,6 +6105,20 @@
       "required": [
         "call_id",
         "name"
+      ],
+      "type": "object"
+    },
+    "ToolsListResult": {
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools"
       ],
       "type": "object"
     },

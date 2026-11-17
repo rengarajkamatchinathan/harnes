@@ -24,14 +24,13 @@ pub enum McpScope {
 }
 
 impl McpScope {
-    /// The wire scope (`McpServerInfo.scope`). `ConfigScope` has no `managed` (policy is a
-    /// source, never a write target), so managed servers report `unknown`.
+    /// The wire scope (`McpServerInfo.scope`).
     pub fn to_config_scope(self) -> ConfigScope {
         match self {
             McpScope::User => ConfigScope::User,
             McpScope::Project => ConfigScope::Project,
             McpScope::Local => ConfigScope::Local,
-            McpScope::Managed => ConfigScope::Unknown,
+            McpScope::Managed => ConfigScope::Managed,
         }
     }
 }

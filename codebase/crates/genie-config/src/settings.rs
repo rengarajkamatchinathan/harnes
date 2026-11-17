@@ -165,6 +165,9 @@ pub struct BrowserSettings {
     pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<BrowserProfile>,
+    /// Per-site states set in Settings → Browser (`browser.sites.set`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sites: Option<Vec<genie_protocol::api::browser::SitePermission>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

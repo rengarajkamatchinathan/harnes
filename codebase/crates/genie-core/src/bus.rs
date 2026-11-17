@@ -72,6 +72,9 @@ pub enum CoreEvent {
         decision: Option<Decision>,
         #[serde(default)]
         by: Option<ResolvedBy>,
+        /// The rule an `always` answer saved (06 §5.4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        saved_rule: Option<String>,
     },
     TurnSettled {
         turn_id: String,
@@ -194,6 +197,7 @@ impl CoreEvent {
                 outcome,
                 decision,
                 by,
+                saved_rule,
             } => (
                 SessionEvent::PermissionResolved(wire::PermissionResolved {
                     ask_id: ask_id.clone(),
@@ -202,7 +206,7 @@ impl CoreEvent {
                         AskOutcome::Cancelled => Decision::Cancel,
                     }),
                     by: by.clone().unwrap_or(ResolvedBy::Auto(AutoResolver::System)),
-                    saved_rule: None,
+                    saved_rule: saved_rule.clone(),
                 }),
                 None,
             ),

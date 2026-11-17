@@ -88,7 +88,26 @@ pub enum WorktreeChoice {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// Session-only settings (the CLI layer, D23 layer 2): `--allow`/`--deny` rules,
+/// `--settings <file>` and `--add-dir`. They apply to this session only.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionSettingsOverlay {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny: Vec<String>,
+    /// A settings file read by the daemon (same user) as the session's CLI layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_path: Option<String>,
+    /// Extra directories the session may read/edit without asking (`--add-dir`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add_dirs: Vec<String>,
+    /// `--enable-browser`: browser tools in a headless session (SA-28c).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enable_browser: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateParams {
     pub kind: SessionKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -106,6 +125,11 @@ pub struct CreateParams {
     pub incognito: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeChoice>,
+    /// Name for a new worktree (`--worktree <name>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<SessionSettingsOverlay>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -281,4 +305,33 @@ pub struct RespondParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AskParams {
     pub ask: Ask,
+}
+
+// ---------------------------------------------------------------- tools
+
+/// Where a tool comes from (`tools.list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSource {
+    // Built into the engine.
+    Builtin,
+    // An MCP server tool (`mcp__<server>__<tool>`).
+    Mcp,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ToolInfo {
+    pub name: String,
+    pub description: String,
+    pub source: ToolSource,
+    /// The MCP server, for `source: "mcp"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ToolsListResult {
+    pub tools: Vec<ToolInfo>,
 }

@@ -26,12 +26,15 @@ pub struct OkResult {
 }
 
 /// Config write scopes (D23). `policy` is only ever a *source*, never a target.
+/// `managed` labels definitions delivered by managed policy (e.g. MCP servers); it is
+/// never a write target either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigScope {
     User,
     Project,
     Local,
+    Managed,
     #[serde(other)]
     Unknown,
 }
@@ -45,6 +48,8 @@ pub enum ConfigSource {
     Project,
     Local,
     Policy,
+    // Session-only CLI layer (`--settings`, `--allow`/`--deny`, D23 layer 2).
+    Cli,
     #[serde(other)]
     Unknown,
 }

@@ -25,6 +25,9 @@ genie-secrets = { path = "crates/genie-secrets" }
 genie-providers = { path = "crates/genie-providers" }
 genie-catalog = { path = "crates/genie-catalog" }
 genie-tools = { path = "crates/genie-tools" }
+genie-config = { path = "crates/genie-config" }
+genie-permissions = { path = "crates/genie-permissions" }
+genie-mcp = { path = "crates/genie-mcp" }
 genie-skills = { path = "crates/genie-skills" }
 genie-browser = { path = "crates/genie-browser" }
 # external

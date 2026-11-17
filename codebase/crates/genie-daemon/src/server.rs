@@ -40,7 +40,8 @@ use genie_core::runtime::ConversationStore;
 
 use crate::DaemonConfig;
 use crate::lease::{LeaseCheck, Leases};
-use crate::registry::Registry;
+use crate::registry::{Extra, Registry};
+use crate::services::{Handled, Services};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownReason {
@@ -86,6 +87,8 @@ pub struct DaemonState {
     prompts: Mutex<HashMap<(String, String), PromptResult>>,
     workspace: broadcast::Sender<Arc<str>>,
     pump_started: AtomicBool,
+    services: Option<Arc<Services>>,
+    background_started: AtomicBool,
 }
 
 /// Time a new connection has to send `initialize`.
@@ -112,6 +115,19 @@ impl DaemonState {
         registry: Arc<Registry>,
         conversation: Option<Arc<dyn ConversationStore>>,
     ) -> Self {
+        Self::with_services(cfg, engine, token, root, registry, conversation, None)
+    }
+
+    /// Fully wired: config/policy/trust, MCP, `tools.list` (and audit) from `services`.
+    pub fn with_services(
+        cfg: DaemonConfig,
+        engine: Engine,
+        token: String,
+        root: TaskScope,
+        registry: Arc<Registry>,
+        conversation: Option<Arc<dyn ConversationStore>>,
+        services: Option<Arc<Services>>,
+    ) -> Self {
         let leases = Leases::new(cfg.lease_grace);
         DaemonState {
             cfg,
@@ -130,6 +146,22 @@ impl DaemonState {
             prompts: Mutex::new(HashMap::new()),
             workspace: broadcast::channel(1024).0,
             pump_started: AtomicBool::new(false),
+            services,
+            background_started: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn root_scope(&self) -> &TaskScope {
+        &self.root
+    }
+
+    /// Start the services' background tasks once (first connection or daemon start).
+    pub fn start_background(self: &Arc<Self>) {
+        if self.background_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(s) = &self.services {
+            s.start(self);
         }
     }
 
@@ -216,6 +248,21 @@ impl DaemonState {
         }
     }
 
+    /// Whether a client subscribed to `session` can show asks of `kind`.
+    pub fn can_render(&self, session: &str, kind: genie_protocol::ask::AskKind) -> bool {
+        self.conns
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .any(|c| {
+                c.caps.asks.contains(&kind)
+                    && c.subs
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .contains_key(session)
+            })
+    }
+
     fn conn(&self, id: u64) -> Option<Arc<Conn>> {
         self.conns
             .lock()
@@ -233,7 +280,7 @@ impl DaemonState {
         Some(s)
     }
 
-    fn workspace_send<P: Serialize>(&self, method: &str, params: &P) {
+    pub(crate) fn workspace_send<P: Serialize>(&self, method: &str, params: &P) {
         if self.workspace.receiver_count() > 0
             && let Some(line) = notification_line(method, params)
         {
@@ -268,12 +315,11 @@ impl DaemonState {
                                 st.listed(ListedChange::Updated, s);
                             }
                         }
-                        SessionEvent::PermissionAsked(a) => {
-                            let attached = st
-                                .engine
-                                .loaded(&env.session_id)
-                                .map_or(0, |h| h.attached());
-                            if attached == 0 {
+                        SessionEvent::PermissionAsked(a)
+                            // Notify unless a client subscribed to this session can
+                            // render the ask kind (e.g. a headless client can't): 02 §7
+                            // step 2.
+                            if !st.can_render(&env.session_id, a.ask.kind) => {
                                 st.workspace_send(
                                     m::UserNotification::NAME,
                                     &UserNotification {
@@ -289,7 +335,6 @@ impl DaemonState {
                                     },
                                 );
                             }
-                        }
                         _ => {}
                     }
                 }
@@ -342,7 +387,15 @@ impl Conn {
         }
     }
 
-    fn respond(&self, resp: Response) {
+    pub(crate) fn notify_event(&self, env: &genie_protocol::event::SessionEventEnvelope) {
+        self.notify(m::EVENT, env);
+    }
+
+    pub(crate) fn scope(&self) -> &TaskScope {
+        &self.scope
+    }
+
+    pub(crate) fn respond(&self, resp: Response) {
         self.send_line(Message::Response(resp).to_line());
     }
 
@@ -614,6 +667,7 @@ pub async fn serve_stream(state: Arc<DaemonState>, stream: BoxStream, _scope: Ta
         state: &state,
         id: conn_id,
     };
+    state.start_background();
     let mut restarting = state.restarting.subscribe();
 
     // 4. Request loop.
@@ -723,6 +777,18 @@ fn not_implemented(method: &str) -> RpcError {
 /// Handle one request. `None` when the handler already sent the response (subscribe
 /// must answer before replaying).
 fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Response> {
+    if let Some(s) = &state.services {
+        match s.dispatch(state, conn, &r) {
+            Handled::Now(res) => {
+                return Some(match res {
+                    Ok(v) => Response::ok(r.id, v),
+                    Err(e) => Response::err(r.id, e),
+                });
+            }
+            Handled::Later => return None,
+            Handled::NotMine => {}
+        }
+    }
     let result: Result<Value, RpcError> = match r.method.as_str() {
         m::PING => empty(),
         m::DAEMON_STATUS => to_result(&state.status()),
@@ -763,9 +829,10 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
         n if n == m::SessionGet::NAME => {
             params::<m::SessionGet>(&r).and_then(|p| session_get(state, &p.session_id))
         }
-        n if n == m::SessionCreate::NAME => {
-            params::<m::SessionCreate>(&r).and_then(|p| session_create(state, &p, None))
-        }
+        n if n == m::SessionCreate::NAME => params::<m::SessionCreate>(&r).and_then(|p| {
+            let headless = conn.client.client_kind == genie_protocol::ClientKind::Headless;
+            session_create(state, &p, None, headless)
+        }),
         n if n == m::SessionUpdate::NAME => {
             params::<m::SessionUpdate>(&r).and_then(|p| session_update(state, conn, p))
         }
@@ -827,18 +894,19 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
             };
             // Copying the message path needs the store (spec 04); the fork starts empty
             // with the same settings and records its parent.
+            let x = state.registry.extra(&p.session_id);
             let cp = sp::CreateParams {
                 kind: src.summary.kind,
                 project_id: src.summary.project_id.clone(),
-                workspace_path: None,
+                workspace_path: x.workspace.map(|w| w.display().to_string()),
                 model: src.model.clone(),
                 effort: src.effort.clone(),
                 agent: src.agent.clone(),
                 mode: Some(src.mode),
                 incognito: src.incognito,
-                worktree: None,
+                ..Default::default()
             };
-            session_create(state, &cp, Some(p.session_id))
+            session_create(state, &cp, Some(p.session_id), false)
         }),
 
         n if n == m::PermissionPending::NAME => params::<m::PermissionPending>(&r).and_then(|p| {
@@ -893,7 +961,11 @@ fn handle(state: &DaemonState, session: &str) -> Result<SessionHandle, RpcError>
 }
 
 /// Check the driver lease for a mutating command; acquire it if vacant (02 §5).
-fn with_lease(state: &Arc<DaemonState>, conn: &Arc<Conn>, session: &str) -> Result<(), RpcError> {
+pub(crate) fn with_lease(
+    state: &Arc<DaemonState>,
+    conn: &Arc<Conn>,
+    session: &str,
+) -> Result<(), RpcError> {
     if !state.registry.exists(session) {
         return Err(not_found("session"));
     }
@@ -967,12 +1039,32 @@ fn session_create(
     state: &Arc<DaemonState>,
     p: &sp::CreateParams,
     parent: Option<String>,
+    headless: bool,
 ) -> Result<Value, RpcError> {
     if p.model.trim().is_empty() {
         return Err(RpcError::invalid_params("model is required"));
     }
+    let overlay = match &p.settings {
+        Some(o) => Some(overlay(o, p.workspace_path.as_deref())?),
+        None => None,
+    };
+    let mut p = p.clone();
+    if p.mode.is_none() {
+        p.mode = overlay.as_ref().and_then(|o| o.default_mode);
+    }
+    let p = &p;
+    let extra = Extra {
+        workspace: p
+            .workspace_path
+            .as_deref()
+            .filter(|w| !w.is_empty())
+            .map(|w| std::path::PathBuf::from(crate::services::canonical(w))),
+        overlay,
+        worktree_name: p.worktree_name.clone(),
+        headless,
+    };
     let h = state.engine.create_session();
-    let info = state.registry.create(h.id(), p, parent.clone());
+    let info = state.registry.create_with(h.id(), p, parent.clone(), extra);
     h.publish_wire(SessionEvent::SessionCreated(
         genie_protocol::event::SessionCreated {
             kind: p.kind,
@@ -992,6 +1084,52 @@ fn session_create(
     to_result(&sp::CreateResult {
         session_id: h.id().to_string(),
     })
+}
+
+/// The session-only CLI layer from `session.create.settings` (D23 layer 2): the
+/// `--settings` file's `permissions` block plus `--allow`/`--deny`/`--add-dir`.
+fn overlay(
+    o: &sp::SessionSettingsOverlay,
+    workspace: Option<&str>,
+) -> Result<genie_core::runtime::SessionOverlay, RpcError> {
+    let mut out = genie_core::runtime::SessionOverlay {
+        allow: o.allow.clone(),
+        deny: o.deny.clone(),
+        add_dirs: o.add_dirs.clone(),
+        enable_browser: o.enable_browser,
+        ..Default::default()
+    };
+    if let Some(path) = o.settings_path.as_deref().filter(|p| !p.is_empty()) {
+        let mut pb = std::path::PathBuf::from(path);
+        if pb.is_relative()
+            && let Some(w) = workspace
+        {
+            pb = std::path::Path::new(w).join(pb);
+        }
+        let v = crate::services::read_settings_file(&pb).map_err(RpcError::invalid_params)?;
+        let perms = &v["permissions"];
+        let list = |k: &str| -> Vec<String> {
+            perms[k]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        };
+        out.allow.extend(list("allow"));
+        out.ask.extend(list("ask"));
+        out.deny.extend(list("deny"));
+        out.add_dirs.extend(list("additionalDirectories"));
+        out.default_mode = perms["defaultMode"]
+            .as_str()
+            .and_then(genie_config::ModeSetting::parse)
+            .map(genie_config::ModeSetting::to_mode);
+    }
+    for r in out.allow.iter().chain(&out.ask).chain(&out.deny) {
+        genie_permissions::Rule::parse(r)
+            .map_err(|e| RpcError::invalid_params(format!("rule `{r}`: {e}")))?;
+    }
+    Ok(out)
 }
 
 fn session_get(state: &DaemonState, id: &str) -> Result<Value, RpcError> {

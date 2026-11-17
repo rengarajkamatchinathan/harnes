@@ -14,7 +14,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 use genie_protocol::common::{Cost, SessionKind};
@@ -95,10 +95,15 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
     let path = rt.conversation.path(&sid)?;
     let first_reply = !path.iter().any(|m| m.message.role == Role::Assistant);
     let env = Arc::new(tool_env(&rt, &sid, &settings));
-    let registry = match settings.kind {
-        SessionKind::Code => rt.code_tools.clone(),
-        _ => rt.chat_tools.clone(),
-    };
+    // Dynamic tools (MCP) join the static registry at turn start (06 §7: 2 s grace for
+    // servers still starting before the first model call).
+    for p in &rt.tool_providers {
+        p.ready(&settings).await;
+    }
+    let registry = rt.registry_for(&sid, &settings);
+    let turns = rt.turns.clone();
+    let _active = turns.enter(&turn);
+    let taint_cell = rt.taints.enter(&sid, &turn.turn_id);
     let mut r = Run {
         leaf: path.last().map(|m| m.id().to_string()),
         rt,
@@ -109,8 +114,10 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
         meta,
         env,
         registry,
+        taint: taint_cell,
     };
     let res = r.go().await;
+    r.rt.taints.leave(&r.sid, &r.turn.turn_id);
     if let Err(e) = r.save_meta() {
         tracing::error!(incident_id = %e.incident_id, "saving runtime meta failed");
     }
@@ -121,7 +128,7 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
     Ok(())
 }
 
-fn tool_env(rt: &AgentRuntime, sid: &str, s: &SessionSettings) -> ToolEnv {
+pub(crate) fn tool_env(rt: &AgentRuntime, sid: &str, s: &SessionSettings) -> ToolEnv {
     ToolEnv {
         session_id: sid.to_string(),
         kind: s.kind,
@@ -175,6 +182,8 @@ struct Run {
     env: Arc<ToolEnv>,
     registry: ToolRegistry,
     leaf: Option<String>,
+    /// Untrusted content seen in this turn (SA-29): the source label.
+    taint: Arc<Mutex<Option<String>>>,
 }
 
 impl Run {
@@ -223,7 +232,7 @@ impl Run {
                 let msg = Message::new(
                     input.message_id.clone(),
                     Role::User,
-                    wire::input_parts(&input.parts),
+                    wire::input_parts(&self.rt.resolve_input(&self.sid, &input.parts)),
                 );
                 let kind = if matches!(input.kind, InboxKind::Synthetic { .. }) {
                     MsgKind::Synthetic
@@ -419,7 +428,7 @@ impl Run {
             let msg = Message::new(
                 i.message_id.clone(),
                 Role::User,
-                wire::input_parts(&i.parts),
+                wire::input_parts(&self.rt.resolve_input(&self.sid, &i.parts)),
             );
             self.append(msg, MsgKind::Normal)?;
         }
@@ -429,6 +438,8 @@ impl Run {
     fn base_prompt(&self, tool_names: Vec<String>) -> String {
         let spec = &self.model.route.model;
         let memory_on = tool_names.iter().any(|t| t == "memory_save");
+        let skills_on = tool_names.iter().any(|t| t == "skill");
+        let mcp_on = tool_names.iter().any(|t| t.starts_with("mcp__"));
         prompts::base_prompt(&BasePromptInput {
             kind: self.settings.kind,
             model_display_name: self.model.display_name.clone(),
@@ -444,6 +455,8 @@ impl Run {
             shell: None,
             features: PromptFeatures {
                 memory: memory_on,
+                skills: skills_on,
+                mcp: mcp_on,
                 ..PromptFeatures::default()
             },
             family: spec.family.clone(),
@@ -487,6 +500,38 @@ impl Run {
             ToolChoice::Auto
         };
         req.effort = self.settings.effort.as_deref().and_then(parse_effort);
+        if let Some(policy) = &self.rt.web_search
+            && !final_step
+        {
+            use genie_providers::model::ProtocolKind as P;
+            use genie_tools::web::search::NativeSearchInput;
+            use genie_tools::web::{NativeSearch, SearchProtocol, native_search};
+            let protocol = match self.model.route.protocol.kind() {
+                P::AnthropicMessages => SearchProtocol::AnthropicMessages,
+                P::OpenaiResponses => SearchProtocol::OpenAiResponses,
+                P::Gemini => SearchProtocol::Gemini,
+                _ => SearchProtocol::Other,
+            };
+            if let NativeSearch::Declare {
+                allowed_domains,
+                blocked_domains,
+                max_uses,
+            } = native_search(&NativeSearchInput {
+                protocol,
+                model_supports: self.model.route.model.web_search_native,
+                global_toggle: true,
+                chat_toggle: true,
+                policy,
+                max_uses: genie_tools::web::search::DEFAULT_MAX_USES,
+            }) && !req.tools.iter().any(|t| t.name == "web_search")
+            {
+                req.server_tools.web_search = Some(genie_providers::model::WebSearchConfig {
+                    allowed_domains,
+                    blocked_domains,
+                    max_uses,
+                });
+            }
+        }
         req.baseline_long_ttl = baseline.has_project_knowledge();
         req.prompt_cache_key = Some(self.sid.clone());
         req.wire_records = self.rt.conversation.wire_records(&self.sid);
@@ -565,7 +610,7 @@ impl Run {
         }
         let name = tool.name().to_string();
         let kind = tool.kind();
-        let started = Started::new(self.turn.clone(), call.id.0.clone(), name.clone());
+        let started = Started::new(self.turn.clone(), call.id.0.clone(), name.clone(), kind);
         if !tool.authorizes() {
             started.mark(None);
         }
@@ -583,6 +628,7 @@ impl Run {
                 kind,
                 mode: self.settings.mode,
                 started: started.clone(),
+                taint: self.taint.clone(),
             }),
             events: Arc::new(TurnEvents(self.turn.clone())),
         };
@@ -907,8 +953,17 @@ impl Run {
             {
                 s.mark(None);
             }
+            let mut error_info = None;
             let (content, is_error, oc, spill_ref) = match outcome {
                 Ok(o) => {
+                    if let Some(s) = &c.started
+                        && let Some(src) = self.rt.taint_source(&s.name, s.kind)
+                    {
+                        let mut t = self.taint.lock().unwrap_or_else(|e| e.into_inner());
+                        if t.is_none() {
+                            *t = Some(src);
+                        }
+                    }
                     let lim = apply_limits(
                         o.to_text(),
                         self.env.output_limits,
@@ -924,7 +979,26 @@ impl Run {
                         _ if was_cancelled => ToolOutcome::Cancelled,
                         _ => ToolOutcome::Error,
                     };
-                    (e.model_text(), true, oc, None)
+                    let mut text = e.model_text();
+                    if let ToolError::Blocked { origin, .. } = &e {
+                        let info =
+                            c.started
+                                .as_ref()
+                                .and_then(|s| s.blocked())
+                                .unwrap_or_else(|| genie_protocol::event::ErrorInfo {
+                                    code: match origin {
+                                        crate::error::BlockSource::Policy => {
+                                            "policy_blocked".into()
+                                        }
+                                        crate::error::BlockSource::Rule => e.code().into(),
+                                    },
+                                    message: text.clone(),
+                                    link: None,
+                                });
+                        text = format!("{}.", info.message.trim_end_matches('.'));
+                        error_info = Some(info);
+                    }
+                    (text, true, oc, None)
                 }
             };
             let pid = part_id(&tool_msg, i);
@@ -949,6 +1023,7 @@ impl Run {
                 outcome: oc,
                 result_part_id: pid,
                 spill_ref,
+                error: error_info,
             });
             results.push(p);
         }
@@ -1206,7 +1281,12 @@ impl Run {
         self.meta.compactions.insert(comp_id.clone(), kept_from);
         // Rebuilt baseline from current sources (§2.2).
         let version = self.meta.baseline.as_ref().map_or(1, |b| b.version + 1);
-        let sources = self.rt.instructions.sources(&self.sid, &self.settings);
+        let mut sources = self.rt.instructions.sources(&self.sid, &self.settings);
+        sources.extend(
+            self.rt
+                .instructions
+                .after_compaction(&self.sid, &self.settings),
+        );
         self.meta.baseline = Some(FrozenBaseline::freeze(sources, version));
         self.meta.measured = None;
         let path = self.rt.conversation.path(&self.sid)?;

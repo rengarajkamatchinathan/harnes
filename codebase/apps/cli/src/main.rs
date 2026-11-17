@@ -216,7 +216,32 @@ fn spec_from(run: &RunArgs) -> Spec {
         agent: run.agent.clone(),
         mode: run.mode(),
         worktree: run.worktree.clone(),
+        overlay: overlay_from(run),
     }
+}
+
+/// `--allow`/`--deny`/`--settings`/`--add-dir` as the session-only settings layer.
+fn overlay_from(run: &RunArgs) -> Option<genie_protocol::api::session::SessionSettingsOverlay> {
+    if run.allow.is_empty()
+        && run.deny.is_empty()
+        && run.settings.is_none()
+        && run.add_dir.is_empty()
+    {
+        return None;
+    }
+    let abs = |p: &std::path::PathBuf| {
+        std::path::absolute(p)
+            .unwrap_or_else(|_| p.clone())
+            .to_string_lossy()
+            .into_owned()
+    };
+    Some(genie_protocol::api::session::SessionSettingsOverlay {
+        allow: run.allow.clone(),
+        deny: run.deny.clone(),
+        settings_path: run.settings.as_ref().map(abs),
+        add_dirs: run.add_dir.iter().map(abs).collect(),
+        enable_browser: false,
+    })
 }
 
 fn target_from(run: &RunArgs) -> Target {

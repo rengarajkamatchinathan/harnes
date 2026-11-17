@@ -11,6 +11,7 @@
 //! * [`locks::PathLocks`]: one async mutex per canonical path, shared by all sessions.
 
 pub mod bus;
+pub mod config;
 pub mod dir_context;
 pub mod engine;
 pub mod error;

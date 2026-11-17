@@ -36,14 +36,13 @@ pub enum LayerKind {
 }
 
 impl LayerKind {
-    /// The protocol has no `cli` source; CLI values report as `unknown` (see README gaps).
     pub fn source(self) -> ConfigSource {
         match self {
             LayerKind::Default => ConfigSource::Default,
             LayerKind::User => ConfigSource::User,
             LayerKind::Project => ConfigSource::Project,
             LayerKind::Local => ConfigSource::Local,
-            LayerKind::Cli => ConfigSource::Unknown,
+            LayerKind::Cli => ConfigSource::Cli,
             LayerKind::Policy => ConfigSource::Policy,
         }
     }
@@ -64,7 +63,7 @@ impl LayerKind {
             ConfigScope::User => Some(LayerKind::User),
             ConfigScope::Project => Some(LayerKind::Project),
             ConfigScope::Local => Some(LayerKind::Local),
-            ConfigScope::Unknown => None,
+            ConfigScope::Managed | ConfigScope::Unknown => None,
         }
     }
 }

@@ -29,6 +29,7 @@ export interface Requests {
   "session.inbox.remove": { params: T.InboxRemoveParams; result: T.Empty };
   "session.export": { params: T.ExportParams; result: T.ExportResult };
   "session.search": { params: T.SearchParams; result: T.SearchResult };
+  "tools.list": { params: T.SessionIdParams; result: T.ToolsListResult };
   "permission.pending": { params: T.PendingParams; result: T.PendingResult };
   "permission.respond": { params: T.RespondParams; result: T.Empty };
   "config.get": { params: T.ConfigGetParams; result: T.ConfigGetResult };
@@ -175,6 +176,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "session.inbox.remove", direction: "request", needsLease: true },
   { name: "session.export", direction: "request", needsLease: false },
   { name: "session.search", direction: "request", needsLease: false },
+  { name: "tools.list", direction: "request", needsLease: false },
   { name: "permission.pending", direction: "request", needsLease: false },
   { name: "permission.respond", direction: "request", needsLease: false },
   { name: "permission.ask", direction: "server_request", needsLease: false },
@@ -473,6 +475,9 @@ export class GenieClient {
     input: (params: T.TerminalInputParams): Promise<T.Empty> => this.t.request("terminal.input", params) as Promise<T.Empty>,
     open: (params: T.TerminalOpenParams): Promise<T.TerminalIdParams> => this.t.request("terminal.open", params) as Promise<T.TerminalIdParams>,
     resize: (params: T.TerminalResizeParams): Promise<T.Empty> => this.t.request("terminal.resize", params) as Promise<T.Empty>,
+  };
+  readonly tools = {
+    list: (params: T.SessionIdParams): Promise<T.ToolsListResult> => this.t.request("tools.list", params) as Promise<T.ToolsListResult>,
   };
   readonly trust = {
     approve_definition: (params: T.ApproveDefinitionParams): Promise<T.Empty> => this.t.request("trust.approve_definition", params) as Promise<T.Empty>,

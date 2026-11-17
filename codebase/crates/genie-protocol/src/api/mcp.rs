@@ -39,12 +39,18 @@ pub struct McpAddParams {
     pub name: String,
     /// Server definition as in `settings.json` `mcpServers` (D30).
     pub config: Value,
+    /// The project folder for `project` / `local` scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct McpRemoveParams {
     pub scope: ConfigScope,
     pub name: String,
+    /// The project folder for `project` / `local` scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

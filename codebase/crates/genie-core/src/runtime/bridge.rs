@@ -2,19 +2,20 @@
 //! gate over [`ToolAuthorizer`] + [`TurnCtx::ask_with`], the event sink, blob-backed
 //! spill and store-backed memory.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use genie_protocol::ask::{AskAnswer, Decision};
+use genie_protocol::ask::{AskAnswer, AutoResolver, Decision, ResolvedBy};
 use genie_protocol::common::Mode;
-use genie_protocol::event::{SessionEvent, ToolProgress, ToolStarted};
+use genie_protocol::event::{ErrorInfo, SessionEvent, ToolProgress, ToolStarted};
 use genie_tools::{
     BlockSource, EventSink, MemoryEntry, MemoryPort, PermissionGate, PermissionRequest, SpillStore,
     ToolError as TError, ToolKind,
 };
 
 use crate::error::{BlockSource as CoreBlock, ToolError};
+use crate::ids::new_id;
 use crate::runtime::ports::{AuthzDecision, AuthzRequest, ToolAuthorizer};
 use crate::session::TurnCtx;
 
@@ -46,22 +47,44 @@ impl From<TError> for ToolError {
     }
 }
 
-/// Publishes `tool.started` once per call: after authorisation (02 §4.1).
+/// Per-call state shared by the gate and the turn loop: publishes `tool.started` once,
+/// after authorisation (02 §4.1), and remembers why a call was blocked.
 pub(crate) struct Started {
     flag: AtomicBool,
     turn: Arc<TurnCtx>,
     call_id: String,
-    name: String,
+    pub(crate) name: String,
+    pub(crate) kind: ToolKind,
+    blocked: Mutex<Option<ErrorInfo>>,
 }
 
 impl Started {
-    pub(crate) fn new(turn: Arc<TurnCtx>, call_id: String, name: String) -> Arc<Self> {
+    pub(crate) fn new(
+        turn: Arc<TurnCtx>,
+        call_id: String,
+        name: String,
+        kind: ToolKind,
+    ) -> Arc<Self> {
         Arc::new(Started {
             flag: AtomicBool::new(false),
             turn,
             call_id,
             name,
+            kind,
+            blocked: Mutex::new(None),
         })
+    }
+
+    pub(crate) fn set_blocked(&self, info: ErrorInfo) {
+        *self.blocked.lock().unwrap_or_else(|e| e.into_inner()) = Some(info);
+    }
+
+    /// `tool.ended.error` for a blocked call (`policy_blocked` + the 08 §5.3 text).
+    pub(crate) fn blocked(&self) -> Option<ErrorInfo> {
+        self.blocked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub(crate) fn mark(&self, resource: Option<String>) {
@@ -89,6 +112,8 @@ pub(crate) struct CallGate {
     pub kind: ToolKind,
     pub mode: Mode,
     pub started: Arc<Started>,
+    /// The turn's taint (SA-29), set by earlier tool results.
+    pub taint: Arc<Mutex<Option<String>>>,
 }
 
 #[async_trait]
@@ -96,29 +121,58 @@ impl PermissionGate for CallGate {
     async fn assert(&self, req: PermissionRequest) -> Result<(), TError> {
         let areq = AuthzRequest {
             session_id: self.turn.session_id.clone(),
+            turn_id: self.turn.turn_id.clone(),
             tool: self.tool.clone(),
             kind: self.kind,
             resource: req.resource.clone(),
             preview: req.preview,
             save_suggestions: req.save_suggestions,
             mode: self.mode,
+            taint: self.taint.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         };
         match self.authorizer.authorize(&areq) {
             AuthzDecision::Allow => {}
-            AuthzDecision::Deny { reason } => {
+            AuthzDecision::Deny {
+                rule,
+                source,
+                message,
+            } => {
+                let code = match source {
+                    CoreBlock::Policy => "policy_blocked",
+                    CoreBlock::Rule => "GENIE-TOOL-BLOCKED",
+                };
+                self.started.set_blocked(ErrorInfo {
+                    code: code.into(),
+                    message,
+                    link: None,
+                });
                 return Err(TError::Blocked {
-                    rule: reason,
-                    origin: BlockSource::Rule,
+                    rule,
+                    origin: match source {
+                        CoreBlock::Policy => BlockSource::Policy,
+                        CoreBlock::Rule => BlockSource::Rule,
+                    },
                 });
             }
-            AuthzDecision::Ask(ask) => {
-                let v = self
-                    .turn
-                    .ask_with(*ask)
-                    .await
-                    .map_err(|_| TError::Cancelled)?;
-                let ans: AskAnswer = serde_json::from_value(v)
-                    .unwrap_or_else(|_| AskAnswer::decision(Decision::Cancel));
+            AuthzDecision::Ask(mut ask) => {
+                if ask.id.is_empty() {
+                    ask.id = new_id("ask");
+                }
+                let ask_id = ask.id.clone();
+                self.authorizer.asked(&areq, &ask_id, &ask);
+                let ans = match self.turn.ask_with(*ask).await {
+                    Ok(v) => serde_json::from_value::<AskAnswer>(v)
+                        .unwrap_or_else(|_| AskAnswer::decision(Decision::Cancel)),
+                    Err(_) => AskAnswer::decision(Decision::Cancel),
+                };
+                for other in self.authorizer.answered(&areq, &ask_id, &ans) {
+                    // Released by the new rule (02 §7 step 6); already answered is fine.
+                    let _ = self.turn.resolve_ask(
+                        &other,
+                        AskAnswer::decision(Decision::Once),
+                        ResolvedBy::Auto(AutoResolver::Rule),
+                    );
+                }
                 match ans.decision {
                     Decision::Once | Decision::Always | Decision::Submit => {}
                     Decision::Reject => {

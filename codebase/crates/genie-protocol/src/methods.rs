@@ -128,6 +128,8 @@ methods! {
     SessionInboxRemove = "session.inbox.remove", Request, true, session::InboxRemoveParams => Empty;
     SessionExport = "session.export", Request, false, session::ExportParams => session::ExportResult;
     SessionSearch = "session.search", Request, false, session::SearchParams => session::SearchResult;
+    /// The tools a session's model sees (CLI `system/init`).
+    ToolsList = "tools.list", Request, false, session::SessionIdParams => session::ToolsListResult;
 
     // ---- asks (§6.3, §7)
     PermissionPending = "permission.pending", Request, false, session::PendingParams => session::PendingResult;
