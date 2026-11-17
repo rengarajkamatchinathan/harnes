@@ -22,8 +22,8 @@ pub mod secrets;
 mod server;
 mod services;
 mod terminal;
-mod transfer;
 mod token;
+mod transfer;
 
 use std::fs::File;
 use std::io;
@@ -504,7 +504,10 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     if let Some(sa) = services.runtime.as_ref().and_then(|r| r.subagents.as_ref()) {
         let n = sa.recover_reports();
         if n > 0 {
-            tracing::info!(reports = n, "delivered subagent reports from before a restart");
+            tracing::info!(
+                reports = n,
+                "delivered subagent reports from before a restart"
+            );
         }
     }
 

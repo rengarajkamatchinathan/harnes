@@ -244,10 +244,12 @@ async fn config_import_scan_preview_apply_and_agents() {
     let written: Value =
         serde_json::from_str(&std::fs::read_to_string(home.join(".genie/settings.json")).unwrap())
             .unwrap();
-    assert!(written["permissions"]["allow"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("Bash(ls:*)")));
+    assert!(
+        written["permissions"]["allow"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("Bash(ls:*)"))
+    );
 
     // Idempotent: the same item is now skipped.
     let again = c
@@ -280,5 +282,10 @@ async fn config_import_scan_preview_apply_and_agents() {
     let names: Vec<&str> = agents.agents.iter().map(|a| a.name.as_str()).collect();
     assert!(names.contains(&"general") && names.contains(&"explore") && names.contains(&"plan"));
     assert!(!names.contains(&"title") && !names.contains(&"compaction"));
-    assert!(agents.agents.iter().all(|a| a.source == AgentSourceKind::Builtin));
+    assert!(
+        agents
+            .agents
+            .iter()
+            .all(|a| a.source == AgentSourceKind::Builtin)
+    );
 }

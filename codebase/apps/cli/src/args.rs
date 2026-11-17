@@ -496,7 +496,10 @@ mod tests {
     #[test]
     fn enable_browser_goes_into_the_session_layer() {
         assert!(parse(&["-p", "x"]).run.overlay().is_none());
-        let o = parse(&["-p", "x", "--enable-browser"]).run.overlay().unwrap();
+        let o = parse(&["-p", "x", "--enable-browser"])
+            .run
+            .overlay()
+            .unwrap();
         assert!(o.enable_browser && o.allow.is_empty());
         let o = parse(&["--allow", "WebFetch"]).run.overlay().unwrap();
         assert!(!o.enable_browser);

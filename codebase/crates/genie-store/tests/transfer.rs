@@ -67,7 +67,13 @@ fn export_all_writes_the_sa17_layout() {
         .export_all(std::fs::File::create(&path).unwrap(), true)
         .unwrap();
     assert_eq!(
-        (counts.sessions, counts.projects, counts.memories, counts.blobs, counts.artifacts),
+        (
+            counts.sessions,
+            counts.projects,
+            counts.memories,
+            counts.blobs,
+            counts.artifacts
+        ),
         (1, 1, 1, 1, 1)
     );
     let mut z = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
@@ -118,18 +124,31 @@ fn import_round_trip_keeps_ids_then_remaps_on_conflict() {
     let back = dst.read(|c| export::session_json(c, &sid, false)).unwrap();
     assert_eq!(back["info"]["title"], "Round trip");
     assert_eq!(back["info"]["project_id"], Value::Null, "project not here");
-    assert_eq!(back["messages"], json["messages"].clone().as_array().map(|ms| {
-        Value::Array(
-            ms.iter()
-                .map(|m| {
-                    let mut m = m.clone();
-                    m["seq"] = Value::Null;
-                    m
-                })
-                .collect(),
-        )
-    }).unwrap());
-    assert!(back["parts"].as_array().unwrap().iter().all(|p| p["blob_id"].is_null()));
+    assert_eq!(
+        back["messages"],
+        json["messages"]
+            .clone()
+            .as_array()
+            .map(|ms| {
+                Value::Array(
+                    ms.iter()
+                        .map(|m| {
+                            let mut m = m.clone();
+                            m["seq"] = Value::Null;
+                            m
+                        })
+                        .collect(),
+                )
+            })
+            .unwrap()
+    );
+    assert!(
+        back["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p["blob_id"].is_null())
+    );
     let path = dst.read(|c| messages::active_path(c, &sid)).unwrap();
     assert_eq!(path.len(), 2, "root → branch B");
     let leaf_text = dst
@@ -156,7 +175,10 @@ fn import_round_trip_keeps_ids_then_remaps_on_conflict() {
         .map(|m| &m["id"])
         .collect();
     assert!(msgs.iter().all(|m| !old_ids.contains(&&m["id"])));
-    assert!(msgs.iter().all(|m| m["session_id"] == second.session_id.as_str()));
+    assert!(
+        msgs.iter()
+            .all(|m| m["session_id"] == second.session_id.as_str())
+    );
     let path2 = dst
         .read(|c| messages::active_path(c, &second.session_id))
         .unwrap();
@@ -172,11 +194,13 @@ fn import_round_trip_keeps_ids_then_remaps_on_conflict() {
     let t = src
         .read(|c| export::session_json(c, &third.session_id, false))
         .unwrap();
-    assert!(t["parts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|p| p["blob_id"] == blob.as_str()));
+    assert!(
+        t["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["blob_id"] == blob.as_str())
+    );
 
     // A sanitized export imports without blobs or redacted artifact content.
     let clean = src.read(|c| export::session_json(c, &sid, true)).unwrap();
@@ -187,10 +211,15 @@ fn import_round_trip_keeps_ids_then_remaps_on_conflict() {
     assert!(f["artifacts"][0]["versions"].as_array().unwrap().is_empty());
 
     // Garbage is refused without writing anything.
-    let before = dst.read(|c| sessions::list(c, &Default::default())).unwrap().len();
+    let before = dst
+        .read(|c| sessions::list(c, &Default::default()))
+        .unwrap()
+        .len();
     assert!(dst.import_session(&json!({"info": 3})).is_err());
     assert_eq!(
-        dst.read(|c| sessions::list(c, &Default::default())).unwrap().len(),
+        dst.read(|c| sessions::list(c, &Default::default()))
+            .unwrap()
+            .len(),
         before
     );
 }

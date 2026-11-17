@@ -201,7 +201,11 @@ impl SubagentHub {
     fn mark_delivered(&self, id: Option<String>) {
         if let (Some(store), Some(id)) = (self.outbox.get(), id)
             && let Err(e) = store.write(|tx| {
-                genie_store::events::inbox_set_state(tx, &id, genie_store::events::InboxState::Admitted)
+                genie_store::events::inbox_set_state(
+                    tx,
+                    &id,
+                    genie_store::events::InboxState::Admitted,
+                )
             })
         {
             tracing::warn!(error = %e, "subagent report not marked delivered");
@@ -214,7 +218,8 @@ impl SubagentHub {
         let (Some(store), Some(engine)) = (self.outbox.get(), self.engine.get()) else {
             return 0;
         };
-        let items = match store.read(|c| genie_store::events::inbox_pending_from(c, REPORT_SOURCE)) {
+        let items = match store.read(|c| genie_store::events::inbox_pending_from(c, REPORT_SOURCE))
+        {
             Ok(v) => v,
             Err(e) => {
                 tracing::warn!(error = %e, "reading pending subagent reports failed");

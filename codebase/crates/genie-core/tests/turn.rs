@@ -1840,7 +1840,10 @@ impl Tool for FakeMcp {
     }
     async fn execute(&self, input: Value, _ctx: ToolCtx) -> Result<ToolOutput, ToolError> {
         let i: TextIn = genie_tools::parse_input(input, Echo::schema())?;
-        Ok(ToolOutput::Text(format!("{} ran with {}", self.name, i.text)))
+        Ok(ToolOutput::Text(format!(
+            "{} ran with {}",
+            self.name, i.text
+        )))
     }
 }
 
@@ -1926,17 +1929,34 @@ async fn large_mcp_tool_sets_are_deferred_behind_tool_search() {
     });
     assert!(searched, "{ev:?}");
     let second = tool_names(&bodies[1]);
-    assert!(second.contains(&"mcp__jira__create_issue".to_string()), "{second:?}");
-    assert!(!second.contains(&"mcp__jira__search".to_string()), "{second:?}");
-    assert!(!second.contains(&"mcp__drive__upload".to_string()), "{second:?}");
-    assert!(bodies[1].to_string().contains("These tools are now available"));
+    assert!(
+        second.contains(&"mcp__jira__create_issue".to_string()),
+        "{second:?}"
+    );
+    assert!(
+        !second.contains(&"mcp__jira__search".to_string()),
+        "{second:?}"
+    );
+    assert!(
+        !second.contains(&"mcp__drive__upload".to_string()),
+        "{second:?}"
+    );
+    assert!(
+        bodies[1]
+            .to_string()
+            .contains("These tools are now available")
+    );
 
     // The loaded tool ran.
     let ran = ev.iter().any(|e| {
         matches!(e, SessionEvent::ToolEnded(t) if t.call_id == "tu_2" && t.outcome == ToolOutcome::Ok)
     });
     assert!(ran, "{ev:?}");
-    assert!(bodies[2].to_string().contains("mcp__jira__create_issue ran with bug"));
+    assert!(
+        bodies[2]
+            .to_string()
+            .contains("mcp__jira__create_issue ran with bug")
+    );
 }
 
 #[tokio::test]

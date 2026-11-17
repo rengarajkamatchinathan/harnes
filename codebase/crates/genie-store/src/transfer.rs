@@ -76,7 +76,8 @@ impl Store {
     /// output is plaintext.
     pub fn export_all<W: Write + Seek>(&self, out: W, include_blobs: bool) -> Result<ExportCounts> {
         let mut zip = zip::ZipWriter::new(out);
-        let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let opts =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         let mut counts = ExportCounts::default();
         let put = |zip: &mut zip::ZipWriter<W>, name: &str, data: &[u8]| -> Result<()> {
             zip.start_file(name, opts).map_err(zip_err)?;
@@ -91,7 +92,11 @@ impl Store {
         })?;
         for id in &session_ids {
             let v = self.read(|c| crate::export::session_json(c, id, false))?;
-            put(&mut zip, &format!("sessions/{id}.json"), &serde_json::to_vec_pretty(&v)?)?;
+            put(
+                &mut zip,
+                &format!("sessions/{id}.json"),
+                &serde_json::to_vec_pretty(&v)?,
+            )?;
             counts.sessions += 1;
             let arts = self.read(|c| artifacts::for_session(c, id))?;
             for a in arts {
@@ -110,7 +115,11 @@ impl Store {
         for p in self.read(projects::list)? {
             let files = self.read(|c| projects::files(c, &p.id))?;
             let v = json!({ "project": p, "files": files });
-            put(&mut zip, &format!("projects/{}.json", p.id), &serde_json::to_vec_pretty(&v)?)?;
+            put(
+                &mut zip,
+                &format!("projects/{}.json", p.id),
+                &serde_json::to_vec_pretty(&v)?,
+            )?;
             counts.projects += 1;
         }
         let mems = self.read(memory::all)?;
@@ -137,7 +146,11 @@ impl Store {
             "exported_at": genie_protocol::rfc3339_ms(u64::try_from(now_ms()).unwrap_or(0)),
             "counts": counts,
         });
-        put(&mut zip, "manifest.json", &serde_json::to_vec_pretty(&manifest)?)?;
+        put(
+            &mut zip,
+            "manifest.json",
+            &serde_json::to_vec_pretty(&manifest)?,
+        )?;
         zip.finish().map_err(zip_err)?;
         Ok(counts)
     }
@@ -157,7 +170,11 @@ struct ArtifactEntry {
 
 fn exists(conn: &Connection, table: &str, id: &str) -> Result<bool> {
     Ok(conn
-        .query_row(&format!("SELECT 1 FROM {table} WHERE id = ?1"), [id], |_| Ok(()))
+        .query_row(
+            &format!("SELECT 1 FROM {table} WHERE id = ?1"),
+            [id],
+            |_| Ok(()),
+        )
         .optional()?
         .is_some())
 }
@@ -171,9 +188,8 @@ struct Ids<'c> {
 impl Ids<'_> {
     /// The id to use for `old` in `table`: itself, or a fresh one when taken.
     fn claim(&mut self, table: &str, prefix: &str, old: &str) -> Result<String> {
-        let taken = old.is_empty()
-            || exists(self.conn, table, old)?
-            || self.map.values().any(|v| v == old);
+        let taken =
+            old.is_empty() || exists(self.conn, table, old)? || self.map.values().any(|v| v == old);
         let id = if taken {
             self.remapped = true;
             new_id(prefix)
@@ -307,10 +323,7 @@ pub fn import_session(conn: &Connection, json: &Value) -> Result<Imported> {
                 continue;
             };
             let blob = blob_ok(&v.blob_id)?;
-            let content = v
-                .content
-                .clone()
-                .filter(|c| c != crate::export::REDACTED);
+            let content = v.content.clone().filter(|c| c != crate::export::REDACTED);
             if content.is_none() && blob.is_none() {
                 continue; // sanitized or missing content
             }

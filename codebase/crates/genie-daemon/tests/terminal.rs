@@ -136,7 +136,10 @@ fn input(tid: &str, s: &str) -> TerminalInputParams {
 async fn wait_terminals(state: &DaemonState, n: u32) {
     let deadline = tokio::time::Instant::now() + WAIT;
     while state.engine().busy().terminals != n {
-        assert!(tokio::time::Instant::now() < deadline, "terminal guard count");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "terminal guard count"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
@@ -220,7 +223,10 @@ async fn terminal_open_attach_input_resize_reattach_exit() {
         .unwrap();
     assert!(!again.truncated && again.checkpoint_b64.is_none());
     let replay = String::from_utf8_lossy(&B64.decode(&again.replay_b64).unwrap()).to_string();
-    assert!(replay.contains("after-mark") && !replay.contains("30 100"), "{replay:?}");
+    assert!(
+        replay.contains("after-mark") && !replay.contains("30 100"),
+        "{replay:?}"
+    );
     assert!(again.end_offset >= now);
 
     conn.call::<m::TerminalInput>(input(&tid, "exit 3\n"))

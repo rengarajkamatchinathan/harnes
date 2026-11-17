@@ -179,7 +179,10 @@ pub async fn unlock_with(
         if passphrase.is_empty() {
             bail!("no passphrase given");
         }
-        match conn.call::<m::SecretsUnlock>(UnlockParams { passphrase }).await {
+        match conn
+            .call::<m::SecretsUnlock>(UnlockParams { passphrase })
+            .await
+        {
             Ok(r) if r.ok => return Ok(true),
             Ok(_) => {}
             Err(ClientError::Rpc(e)) if e.kind() == ErrorKind::InvalidParams => {}
@@ -338,9 +341,10 @@ mod tests {
     async fn three_wrong_passphrases_give_up() {
         let (client, server) = genie_testkit::memory_pair();
         let _fake = tokio::spawn(fake_locked(server));
-        let conn = Connection::handshake(Box::new(client), &client_info(ClientKind::Cli), "t".into())
-            .await
-            .unwrap();
+        let conn =
+            Connection::handshake(Box::new(client), &client_info(ClientKind::Cli), "t".into())
+                .await
+                .unwrap();
         let mut ask = |_| Ok("bad".to_string());
         let e = unlock_with(&conn, &mut ask).await.unwrap_err();
         assert!(e.to_string().contains("wrong passphrase"), "{e}");

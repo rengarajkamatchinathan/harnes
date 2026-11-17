@@ -12,7 +12,10 @@ fn sh() -> PtySpec {
     let mut env = BTreeMap::new();
     env.insert("PATH".to_string(), "/usr/bin:/bin".to_string());
     env.insert("PS1".to_string(), "$ ".to_string());
-    env.insert("HOME".to_string(), std::env::temp_dir().display().to_string());
+    env.insert(
+        "HOME".to_string(),
+        std::env::temp_dir().display().to_string(),
+    );
     PtySpec::new("/bin/sh").env(Env::exact(env)).size(80, 24)
 }
 
@@ -25,7 +28,10 @@ fn wait_for(pty: &Pty, what: &str, pred: impl Fn(&str) -> bool) -> String {
         if pred(&text) {
             return text;
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}: {text:?}");
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {what}: {text:?}"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -124,7 +130,8 @@ async fn kill_tree_takes_foreground_and_background_jobs() {
     let pty = Pty::spawn(sh()).expect("spawn");
     pty.write(b"sleep 300 & echo BG=$!\n").expect("write");
     let text = wait_for(&pty, "background pid", |t| {
-        t.lines().any(|l| l.trim_start().starts_with("BG=") && l.trim().len() > 3)
+        t.lines()
+            .any(|l| l.trim_start().starts_with("BG=") && l.trim().len() > 3)
     });
     let bg: i32 = text
         .lines()

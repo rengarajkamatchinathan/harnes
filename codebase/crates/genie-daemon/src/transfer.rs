@@ -57,11 +57,17 @@ pub(crate) fn dispatch(
         n if n == m::SessionImport::NAME => {
             params::<m::SessionImport>(r).and_then(|p| session_import(svc, state, &p))
         }
-        n if n == m::ImportScan::NAME || n == m::ImportPreview::NAME || n == m::ImportApply::NAME => {
+        n if n == m::ImportScan::NAME
+            || n == m::ImportPreview::NAME
+            || n == m::ImportApply::NAME =>
+        {
             params::<m::ImportScan>(r).and_then(|p| config_import(svc, name, &p.options))
         }
         n if n == m::AgentsList::NAME => params::<m::AgentsList>(r).and_then(|p| {
-            let ws = p.cwd.filter(|c| !c.is_empty()).map(|c| PathBuf::from(canonical(&c)));
+            let ws = p
+                .cwd
+                .filter(|c| !c.is_empty())
+                .map(|c| PathBuf::from(canonical(&c)));
             agents_list(svc, ws.as_deref())
         }),
         _ => return None,
@@ -88,10 +94,15 @@ fn export_all(
     p: &genie_protocol::api::code::ExportAllParams,
 ) -> Result<Value, RpcError> {
     export_blocked(svc)?;
-    let store = svc.store.as_ref().ok_or_else(|| not_implemented(m::ExportAll::NAME))?;
+    let store = svc
+        .store
+        .as_ref()
+        .ok_or_else(|| not_implemented(m::ExportAll::NAME))?;
     let dest = PathBuf::from(&p.path);
     if p.path.is_empty() || !dest.is_absolute() {
-        return Err(RpcError::invalid_params("path must be an absolute file path"));
+        return Err(RpcError::invalid_params(
+            "path must be an absolute file path",
+        ));
     }
     let dir = dest
         .parent()
@@ -128,10 +139,15 @@ fn session_import(
         .as_ref()
         .ok_or_else(|| not_implemented(m::SessionImport::NAME))?;
     let bytes = match (&p.path, &p.blob_id) {
-        (Some(path), None) => std::fs::read(path)
-            .map_err(|e| RpcError::invalid_params(format!("{path}: {e}")))?,
+        (Some(path), None) => {
+            std::fs::read(path).map_err(|e| RpcError::invalid_params(format!("{path}: {e}")))?
+        }
         (None, Some(b)) => store.read_blob(b).map_err(store_err)?,
-        _ => return Err(RpcError::invalid_params("give exactly one of path or blob_id")),
+        _ => {
+            return Err(RpcError::invalid_params(
+                "give exactly one of path or blob_id",
+            ));
+        }
     };
     let json: Value = serde_json::from_slice(&bytes)
         .map_err(|e| RpcError::invalid_params(format!("not a session export: {e}")))?;
@@ -146,8 +162,12 @@ fn session_import(
         &done.session_id,
         &CreateParams {
             kind: match row.kind {
-                genie_store::sessions::SessionKind::Chat => genie_protocol::common::SessionKind::Chat,
-                genie_store::sessions::SessionKind::Code => genie_protocol::common::SessionKind::Code,
+                genie_store::sessions::SessionKind::Chat => {
+                    genie_protocol::common::SessionKind::Chat
+                }
+                genie_store::sessions::SessionKind::Code => {
+                    genie_protocol::common::SessionKind::Code
+                }
             },
             project_id: row.project_id.clone(),
             model: row.model.clone().unwrap_or_default(),

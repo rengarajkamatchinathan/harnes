@@ -117,10 +117,11 @@ pub(crate) fn dispatch(
         return None;
     }
     let res = match name {
-        n if n == m::TerminalOpen::NAME => params::<m::TerminalOpen>(r).and_then(|p| open(state, p)),
-        n if n == m::TerminalAttach::NAME => {
-            params::<m::TerminalAttach>(r).and_then(|p| attach(state, conn, &p.terminal_id, p.offset))
+        n if n == m::TerminalOpen::NAME => {
+            params::<m::TerminalOpen>(r).and_then(|p| open(state, p))
         }
+        n if n == m::TerminalAttach::NAME => params::<m::TerminalAttach>(r)
+            .and_then(|p| attach(state, conn, &p.terminal_id, p.offset)),
         n if n == m::TerminalInput::NAME => params::<m::TerminalInput>(r).and_then(|p| {
             let t = state.terminals().get(&p.terminal_id)?;
             let data = B64
@@ -220,7 +221,10 @@ fn open(
         .env(Env::inherit())
         .size(p.cols.max(2), p.rows.max(1));
     let pty = Pty::spawn(spec).map_err(|e| {
-        RpcError::new(ErrorKind::InvalidState, format!("couldn't start the shell: {e}"))
+        RpcError::new(
+            ErrorKind::InvalidState,
+            format!("couldn't start the shell: {e}"),
+        )
     })?;
     let id = genie_core::ids::new_id("term");
     let term = Arc::new(Term {
@@ -233,24 +237,27 @@ fn open(
     // Exit watcher: `terminal.exited` on the workspace feed, then forget the terminal.
     let st = state.clone();
     let tid = id.clone();
-    state.root_scope().child("terminal").spawn_cancellable(async move {
-        let code = term.pty.wait().await;
-        st.workspace_send(
-            m::TerminalExited::NAME,
-            &TerminalExited {
-                terminal_id: tid.clone(),
-                code,
-            },
-        );
-        // Let the streams flush the last output before they are stopped.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let mut map = st.terminals().map();
-        if map.get(&tid).is_some_and(|t| Arc::ptr_eq(t, &term)) {
-            map.remove(&tid);
-        }
-        drop(map);
-        term.stop_streams();
-    });
+    state
+        .root_scope()
+        .child("terminal")
+        .spawn_cancellable(async move {
+            let code = term.pty.wait().await;
+            st.workspace_send(
+                m::TerminalExited::NAME,
+                &TerminalExited {
+                    terminal_id: tid.clone(),
+                    code,
+                },
+            );
+            // Let the streams flush the last output before they are stopped.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let mut map = st.terminals().map();
+            if map.get(&tid).is_some_and(|t| Arc::ptr_eq(t, &term)) {
+                map.remove(&tid);
+            }
+            drop(map);
+            term.stop_streams();
+        });
     to_result(&TerminalIdParams { terminal_id: id })
 }
 
@@ -288,7 +295,13 @@ fn attach(
                             continue;
                         }
                         let skip = usize::try_from(next.saturating_sub(start)).unwrap_or(0);
-                        send(&conn, &term.session_id, &tid, next.max(start), &data[skip..]);
+                        send(
+                            &conn,
+                            &term.session_id,
+                            &tid,
+                            next.max(start),
+                            &data[skip..],
+                        );
                         next = end;
                     }
                     Ok(PtyEvent::Exited { .. }) | Err(RecvError::Closed) => break,

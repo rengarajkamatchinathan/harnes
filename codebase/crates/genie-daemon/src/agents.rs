@@ -93,7 +93,9 @@ mod tests {
         let seen: Seen = Arc::default();
         let s2 = seen.clone();
         reg.set_listener(Arc::new(move |c, s| {
-            s2.lock().unwrap().push((c, s.session_id.clone(), s.title.clone()));
+            s2.lock()
+                .unwrap()
+                .push((c, s.session_id.clone(), s.title.clone()));
         }));
         let settings = SessionSettings {
             model: "m".into(),
@@ -117,7 +119,11 @@ mod tests {
         assert_eq!(
             *seen,
             [
-                (ListedChange::Created, "ses_child".to_string(), title.clone()),
+                (
+                    ListedChange::Created,
+                    "ses_child".to_string(),
+                    title.clone()
+                ),
                 (ListedChange::Deleted, "ses_child".to_string(), title),
             ]
         );

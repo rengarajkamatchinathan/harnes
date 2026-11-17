@@ -175,7 +175,11 @@ impl ReplayRing {
         let truncated = offset < self.head;
         let start = offset.clamp(self.head, self.end());
         let skip = usize::try_from(start - self.head).unwrap_or(usize::MAX);
-        (truncated, start, self.buf.iter().skip(skip).copied().collect())
+        (
+            truncated,
+            start,
+            self.buf.iter().skip(skip).copied().collect(),
+        )
     }
 }
 
@@ -323,7 +327,11 @@ impl Pty {
             .name("genie-pty-writer".into())
             .spawn(move || {
                 while let Ok(chunk) = input_rx.recv() {
-                    if writer.write_all(&chunk).and_then(|()| writer.flush()).is_err() {
+                    if writer
+                        .write_all(&chunk)
+                        .and_then(|()| writer.flush())
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -477,7 +485,10 @@ impl Pty {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .process_group_leader();
-            for pg in fg.into_iter().chain(self.pid.and_then(|p| i32::try_from(p).ok())) {
+            for pg in fg
+                .into_iter()
+                .chain(self.pid.and_then(|p| i32::try_from(p).ok()))
+            {
                 if pg > 1 {
                     // SAFETY: plain syscall; a negative pid targets a process group.
                     unsafe { libc::kill(-pg, libc::SIGKILL) };
@@ -492,11 +503,7 @@ impl Pty {
         if let Some(j) = &self._job {
             let _ = j.terminate();
         }
-        let _ = self
-            .killer
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .kill();
+        let _ = self.killer.lock().unwrap_or_else(|p| p.into_inner()).kill();
     }
 }
 

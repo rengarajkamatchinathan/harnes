@@ -14,7 +14,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
-use genie_tools::{Tool, ToolCtx, ToolEnv, ToolError, ToolKind, ToolOutput, ToolRegistry, ToolSpec};
+use genie_tools::{
+    Tool, ToolCtx, ToolEnv, ToolError, ToolKind, ToolOutput, ToolRegistry, ToolSpec,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -144,7 +146,11 @@ impl ToolSearch {
         };
         let all: Vec<String> = st.deferred.iter().map(|s| s.name.clone()).collect();
         let picked: Vec<ToolSpec> = if let Some(list) = query.trim().strip_prefix("select:") {
-            let want: Vec<&str> = list.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+            let want: Vec<&str> = list
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
             st.deferred
                 .iter()
                 .filter(|s| want.contains(&s.name.as_str()))
@@ -175,7 +181,11 @@ impl ToolSearch {
                 .filter(|(score, _)| *score > 0)
                 .collect();
             scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
-            scored.into_iter().take(max).map(|(_, s)| s.clone()).collect()
+            scored
+                .into_iter()
+                .take(max)
+                .map(|(_, s)| s.clone())
+                .collect()
         };
         for s in &picked {
             st.loaded.insert(s.name.clone());

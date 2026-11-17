@@ -467,7 +467,11 @@ async fn memory_methods_and_state() {
     );
     let note = changed(&mut rx).await;
     assert_eq!(
-        (note.memory_id.as_str(), note.op.as_str(), note.scope.as_str()),
+        (
+            note.memory_id.as_str(),
+            note.op.as_str(),
+            note.scope.as_str()
+        ),
         (a.id.as_str(), "update", "global")
     );
 
@@ -490,7 +494,10 @@ async fn memory_methods_and_state() {
     .await
     .unwrap();
     let note = changed(&mut rx).await;
-    assert_eq!((note.op.as_str(), note.scope.as_str()), ("delete", "global"));
+    assert_eq!(
+        (note.op.as_str(), note.scope.as_str()),
+        ("delete", "global")
+    );
     let e = c
         .call::<m::MemoryDelete>(MemoryIdParams { memory_id: a.id })
         .await
