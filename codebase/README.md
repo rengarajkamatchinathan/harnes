@@ -4,8 +4,8 @@ Implementation of [spec/01-architecture.md](../spec/01-architecture.md): the Car
 crate graph and dependency rules, the shared daemon with its lifecycle, the client `ensure`
 path, the session actor, the cancellation tree, the error taxonomy and log files; and of
 [spec/04-storage.md](../spec/04-storage.md) in `genie-store` (see its coverage table and gaps below),
-and of [spec/06-agent-runtime.md](../spec/06-agent-runtime.md) §7 (MCP client, `genie-mcp`) and
-§13.4 (pipe mode, `genie-process`).
+and of [spec/06-agent-runtime.md](../spec/06-agent-runtime.md) §7 (MCP client, `genie-mcp`),
+§9 (skills and commands, `genie-skills`) and §13.4 (pipe mode, `genie-process`).
 
 ## Layout
 
@@ -38,7 +38,10 @@ crates/
                    prompts, progress, cancellation, elicitation/sampling/OAuth ports (06 §7)
   genie-tools      Tool trait + ports, registry, input repair/validation, output limits + spill,
                    v1 chat tools (`tool_output_read`, `memory_*`) (spec 06 §2.4, §4)
-  genie-{skills,sandbox,browser,markdown}
+  genie-skills     skills: scanner (built-in / user / trusted project), SKILL.md schema, catalogue
+                   (policy, enable state, index, load, skill_read), .zip/.skill import, signed
+                   skills directory; Markdown slash commands (06 §9)
+  genie-{sandbox,browser,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary (spec 07): inline TUI, `genie -p` headless, subcommands,
                    `genie chat`, importer, `hook-adapter`; also runs `genie daemon`
@@ -278,6 +281,26 @@ session expiry → reconnect, 401 → `needs_auth` → restart, 401 → refresh.
 | Error split | `SpawnError` / `RunError::Spawn` = couldn't start, safe to retry; `RunError::Io` = may have run | `pipe` |
 | Spawn hook | `SpawnHook::wrap(&mut PipeSpec)` for the v2 sandbox (D44) | `pipe::SpawnHook` |
 
+### Spec 06 §9 (skills and commands, `genie-skills`)
+
+| 06 § | What | Where |
+|---|---|---|
+| 9 Format | `SKILL.md` frontmatter (`name`, `description`, `disable-model-invocation`, `allowed-tools` as list or string, `metadata`; other keys kept); name rules (a-z0-9-, ≤ 64), description ≤ 1024 and no `<`/`>` (it is rendered into `<available_skills>`); YAML-subset frontmatter parser | `genie-skills::{manifest, frontmatter}` |
+| 9 Locations | built-in < `~/.genie/skills` < `.agents/skills` < `.genie/skills` (project roots only when trusted; `.claude/skills` never); id = folder name; depth-limited scan (3) that stops at `SKILL.md`; diagnostics for invalid/shadowed/renamed skills; fingerprint (folder listings + `SKILL.md` size/mtime) → `refresh()` for hot reload | `genie-skills::scan`, `SkillCatalog::{rescan, refresh}` |
+| 9 Use | progressive disclosure: `index()` (enabled, model-invocable `(id, description)` for `context::skills_index`), `load()` (fresh `SKILL.md` body + base path + sampled file list ≤ 50, scripts marked "runs in Code mode" in chat / "run with shell" in code, D44), `read_file()` (traversal, hidden-file and symlink-escape guards, 256 KiB cap, binary refused); `Invoker::Model` refused for `disable-model-invocation`; policy + enabled checked for user invocation too; `LoadedSkill::render()` is also the re-injection text after compaction | `genie-skills::catalog` |
+| 9 / 02 §6.8 | `skill.list` → `SkillListResult`, `skill.set_enabled` (persisted via `SkillStateStore`: `JsonStateFile` / `MemoryState`), `skill.upload` → `SkillCatalog::upload`, `uninstall` | `SkillCatalog` |
+| 9 Sources | `.zip`/`.skill` import: archive ≤ 20 MiB, ≤ 1000 entries, ≤ 16 MiB/file, ≤ 64 MiB total counted while inflating, ratio cap 200 for files > 1 MiB, no symlinks/encrypted/absolute/`..`/drive/backslash paths, `SKILL.md` at root or in one top folder, frontmatter schema, dotfiles/`__MACOSX` skipped, atomic temp-dir + rename (replace = swap), install marker with archive SHA-256 | `genie-skills::package` |
+| 9 Sources | 4 built-in skills compiled in (`create-skill`, `write-spec`, `summarise-meeting`, `review-document`), can be disabled or overridden | `crates/genie-skills/builtin/`, `scan::BUILTIN` |
+| 9 Sources / 08 §2 | signed skills directory: Ed25519 detached signature over the feed, pinned keys; `directory.list` with query and details manifest in `extra`; `directory.install` returns the "what will run" manifest, installs only with `confirm`, checks pinned version, size, SHA-256 and the exact file list, entry id = package name; fetching is the `DirectoryTransport` port | `genie-skills::directory` |
+| 08 §5.2 | `skills.allowed` (allowlist), `skills.directoryOnly` (built-in + directory only, no upload), `skills.disableUserUpload` | `SkillPolicy` |
+| 9 Slash commands | `~/.genie/commands` + trusted `.genie/commands` (`command_dirs`), CLI-compatible names (`dir:name`, later wins) and description fallback; `description`, `model`, `agent`, `argument-hint`, `allowed-tools`; `$ARGUMENTS`, `$1..$N` (highest takes the rest, shell-like quoting), `@file` refs (not `@server:resource`, e-mails or URLs), `` !`cmd` `` extracted, never run (`fill_shell` / `without_shell`); built-ins `/compact /init /memory /skills /model /help` shadow user files | `genie-skills::command` |
+| 4.1 | `skill` / `skill_read` names, descriptions, schemas and bodies (`run_skill`, `run_skill_read`) | `genie-skills::tools` |
+
+Tests: `crates/genie-skills/tests/{skills,commands}.rs` on temp fixture folders and generated zips
+(precedence and trust, diagnostics, enable state persistence, load/read guards incl. symlink
+escape, policy, hot reload, upload layouts and every rejection, zip bomb, signed directory list /
+confirm / tampered package / wrong file list / wrong key).
+
 ### Spec 06 (turn loop, context, compaction, tools)
 
 | 06 § | What | Where |
@@ -479,3 +502,31 @@ compaction; `length` continuation; max steps; interrupt; regenerate; title; base
   user commands may legitimately need them.
 - The `genie-mcp-fake-server` test binary is built with the workspace (it is tiny and only used by
   tests).
+
+### Spec 06 §9 (`genie-skills`) gaps and deviations
+
+- **Not wired yet (integration owner):** `genie-core` must build a `SkillCatalog` per DirContext,
+  feed `index()` to `InstructionSource::skills_index` (and the `feature.skills` flag), implement
+  `skill` / `skill_read` as `genie-tools` `Tool`s (genie-skills may not depend on genie-tools),
+  check `skill.use` permissions, resolve `InputPart::Skill` via `load(.., Invoker::User, ..)`,
+  re-inject invoked skills after compaction, and map `skill.*` / `directory.*` RPCs and the
+  audit event "skill installed (hash)". Commands: the CLI still uses its own loader in
+  `apps/cli/src/tui/commands.rs`; `genie_skills::command` is a compatible superset to switch to.
+- **Hot reload is polling-based:** `refresh()` compares a fingerprint; no OS file watcher
+  (`notify` is not a dependency). The caller decides when to poll and diffs `index()` into
+  `<system-update>`s.
+- **Frontmatter is a YAML subset** (no anchors/aliases/tags/multi-doc/complex keys) to avoid
+  a YAML dependency; unusual Claude skills using those fail validation with a line number.
+- **Assumptions:** precedence built-in < user < `.agents/skills` < `.genie/skills` (later
+  wins, with a diagnostic); `name` differing from the folder name is a warning (the folder is
+  the id) on disk, while uploads take the id from `name`; package limits (20 MiB archive,
+  64 MiB unpacked, 16 MiB/file, 1000 entries, ratio 200) and the 256 KiB `SKILL.md` /
+  `skill_read` caps are Genie choices; enable state lives in a JSON file (or a caller-supplied
+  `SkillStateStore`) rather than settings.
+- **Directory:** `PINNED_KEYS_HEX` is empty until D40's key exists, so the production
+  directory refuses every feed; update re-verification/notifications for installed directory
+  skills, a details page UI and the HTTP transport are not built.
+- **Not implemented:** `/skill-name` argument passing, `skill_run` + sandbox (v2, D44),
+  `skills.scriptsAllowed` (v2), `/server:prompt` (MCP), `@file` reading and `` !`cmd` ``
+  execution (engine, via tools and shell permissions), fuzzing of zip unpacking (08 §7).
+- **New external dependency:** `zip` 2.4 (MIT, `deflate` feature: flate2/miniz_oxide/zopfli).

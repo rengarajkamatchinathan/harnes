@@ -28,6 +28,7 @@ genie-tools = { path = "crates/genie-tools" }
 genie-config = { path = "crates/genie-config" }
 genie-permissions = { path = "crates/genie-permissions" }
 genie-mcp = { path = "crates/genie-mcp" }
+genie-skills = { path = "crates/genie-skills" }
 # external
 anyhow = "1"
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
@@ -68,6 +69,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ulid = "1"
 unicode-width = "0.2"
 zeroize = { version = "1", features = ["derive"] }
+# Skill package import (06 §9): read-only use, deflate only.
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",
