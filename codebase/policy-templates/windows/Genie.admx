@@ -1,0 +1,391 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Genie managed policy (spec 08 §5.1). Writes HKLM\Software\Policies\Genie; see
+     crates/genie-config/src/mdm.rs for how values map to policy keys and the "Managed
+     policy templates" section of codebase/README.md. -->
+<policyDefinitions xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" revision="1.0" schemaVersion="1.0" xmlns="http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions">
+  <policyNamespaces>
+    <target prefix="genie" namespace="Synergech.Policies.Genie" />
+    <using prefix="windows" namespace="Microsoft.Policies.Windows" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <supportedOn>
+    <definitions>
+      <definition name="SUPPORTED_Genie1" displayName="$(string.SUPPORTED_Genie1)" />
+    </definitions>
+  </supportedOn>
+  <categories>
+    <category name="Genie" displayName="$(string.Genie)" />
+    <category name="Genie_Org" displayName="$(string.Cat_Org)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Delivery" displayName="$(string.Cat_Delivery)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Providers" displayName="$(string.Cat_Providers)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Permissions" displayName="$(string.Cat_Permissions)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_MCP" displayName="$(string.Cat_MCP)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Skills" displayName="$(string.Cat_Skills)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Capabilities" displayName="$(string.Cat_Capabilities)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Data" displayName="$(string.Cat_Data)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Trust" displayName="$(string.Cat_Trust)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Telemetry" displayName="$(string.Cat_Telemetry)"><parentCategory ref="Genie" /></category>
+    <category name="Genie_Updates" displayName="$(string.Cat_Updates)"><parentCategory ref="Genie" /></category>
+  </categories>
+  <policies>
+    <policy name="OrgName" class="Machine" displayName="$(string.OrgName)" explainText="$(string.OrgName_Explain)" key="Software\Policies\Genie" presentation="$(presentation.OrgName)">
+      <parentCategory ref="Genie_Org" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="OrgName_Text" valueName="org.name" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="OrgInstructions" class="Machine" displayName="$(string.OrgInstructions)" explainText="$(string.OrgInstructions_Explain)" key="Software\Policies\Genie" presentation="$(presentation.OrgInstructions)">
+      <parentCategory ref="Genie_Org" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="OrgInstructions_Text" valueName="org.instructions" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="PolicyUrl" class="Machine" displayName="$(string.PolicyUrl)" explainText="$(string.PolicyUrl_Explain)" key="Software\Policies\Genie" presentation="$(presentation.PolicyUrl)">
+      <parentCategory ref="Genie_Delivery" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="PolicyUrl_Text" valueName="policyUrl" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="PolicyKeys" class="Machine" displayName="$(string.PolicyKeys)" explainText="$(string.PolicyKeys_Explain)" key="Software\Policies\Genie" presentation="$(presentation.PolicyKeys)">
+      <parentCategory ref="Genie_Delivery" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="PolicyKeys_List" key="Software\Policies\Genie\policyKeys" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="ProvidersAllowed" class="Machine" displayName="$(string.ProvidersAllowed)" explainText="$(string.ProvidersAllowed_Explain)" key="Software\Policies\Genie" presentation="$(presentation.ProvidersAllowed)">
+      <parentCategory ref="Genie_Providers" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="ProvidersAllowed_List" key="Software\Policies\Genie\providers.allowed" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="EndpointsAllowed" class="Machine" displayName="$(string.EndpointsAllowed)" explainText="$(string.EndpointsAllowed_Explain)" key="Software\Policies\Genie" presentation="$(presentation.EndpointsAllowed)">
+      <parentCategory ref="Genie_Providers" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="EndpointsAllowed_List" key="Software\Policies\Genie\endpoints.allowed" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="ModelsAllowed" class="Machine" displayName="$(string.ModelsAllowed)" explainText="$(string.ModelsAllowed_Explain)" key="Software\Policies\Genie" presentation="$(presentation.ModelsAllowed)">
+      <parentCategory ref="Genie_Providers" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="ModelsAllowed_List" key="Software\Policies\Genie\models.allowed" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="ModelsBlocked" class="Machine" displayName="$(string.ModelsBlocked)" explainText="$(string.ModelsBlocked_Explain)" key="Software\Policies\Genie" presentation="$(presentation.ModelsBlocked)">
+      <parentCategory ref="Genie_Providers" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="ModelsBlocked_List" key="Software\Policies\Genie\models.blocked" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="AuthMethods" class="Machine" displayName="$(string.AuthMethods)" explainText="$(string.AuthMethods_Explain)" key="Software\Policies\Genie" presentation="$(presentation.AuthMethods)">
+      <parentCategory ref="Genie_Providers" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="AuthMethods_List" key="Software\Policies\Genie\auth.methods" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="CatalogUrl" class="Machine" displayName="$(string.CatalogUrl)" explainText="$(string.CatalogUrl_Explain)" key="Software\Policies\Genie" presentation="$(presentation.CatalogUrl)">
+      <parentCategory ref="Genie_Providers" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="CatalogUrl_Text" valueName="catalog.url" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="PermissionsDeny" class="Machine" displayName="$(string.PermissionsDeny)" explainText="$(string.PermissionsDeny_Explain)" key="Software\Policies\Genie" presentation="$(presentation.PermissionsDeny)">
+      <parentCategory ref="Genie_Permissions" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="PermissionsDeny_List" key="Software\Policies\Genie\permissions.deny" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="PermissionsAsk" class="Machine" displayName="$(string.PermissionsAsk)" explainText="$(string.PermissionsAsk_Explain)" key="Software\Policies\Genie" presentation="$(presentation.PermissionsAsk)">
+      <parentCategory ref="Genie_Permissions" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="PermissionsAsk_List" key="Software\Policies\Genie\permissions.ask" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="DisableBypassMode" class="Machine" displayName="$(string.DisableBypassMode)" explainText="$(string.DisableBypassMode_Explain)" key="Software\Policies\Genie" valueName="disableBypassMode">
+      <parentCategory ref="Genie_Permissions" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="DefaultMode" class="Machine" displayName="$(string.DefaultMode)" explainText="$(string.DefaultMode_Explain)" key="Software\Policies\Genie" presentation="$(presentation.DefaultMode)">
+      <parentCategory ref="Genie_Permissions" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <enum id="DefaultMode_Enum" valueName="defaultMode">
+          <item displayName="$(string.DefaultMode_plan)"><value><string>plan</string></value></item>
+          <item displayName="$(string.DefaultMode_default)"><value><string>default</string></value></item>
+          <item displayName="$(string.DefaultMode_accept_edits)"><value><string>accept_edits</string></value></item>
+          <item displayName="$(string.DefaultMode_bypass)"><value><string>bypass</string></value></item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="McpAllowed" class="Machine" displayName="$(string.McpAllowed)" explainText="$(string.McpAllowed_Explain)" key="Software\Policies\Genie" presentation="$(presentation.McpAllowed)">
+      <parentCategory ref="Genie_MCP" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="McpAllowed_Text" valueName="mcp.allowed" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="McpDirectoryOnly" class="Machine" displayName="$(string.McpDirectoryOnly)" explainText="$(string.McpDirectoryOnly_Explain)" key="Software\Policies\Genie" valueName="mcp.directoryOnly">
+      <parentCategory ref="Genie_MCP" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="McpDisableLocal" class="Machine" displayName="$(string.McpDisableLocal)" explainText="$(string.McpDisableLocal_Explain)" key="Software\Policies\Genie" valueName="mcp.disableLocal">
+      <parentCategory ref="Genie_MCP" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="McpSampling" class="Machine" displayName="$(string.McpSampling)" explainText="$(string.McpSampling_Explain)" key="Software\Policies\Genie" presentation="$(presentation.McpSampling)">
+      <parentCategory ref="Genie_MCP" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <enum id="McpSampling_Enum" valueName="mcp.sampling">
+          <item displayName="$(string.McpSampling_off)"><value><string>off</string></value></item>
+          <item displayName="$(string.McpSampling_ask)"><value><string>ask</string></value></item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="SkillsAllowed" class="Machine" displayName="$(string.SkillsAllowed)" explainText="$(string.SkillsAllowed_Explain)" key="Software\Policies\Genie" presentation="$(presentation.SkillsAllowed)">
+      <parentCategory ref="Genie_Skills" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="SkillsAllowed_List" key="Software\Policies\Genie\skills.allowed" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="SkillsDirectoryOnly" class="Machine" displayName="$(string.SkillsDirectoryOnly)" explainText="$(string.SkillsDirectoryOnly_Explain)" key="Software\Policies\Genie" valueName="skills.directoryOnly">
+      <parentCategory ref="Genie_Skills" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="SkillsDisableUserUpload" class="Machine" displayName="$(string.SkillsDisableUserUpload)" explainText="$(string.SkillsDisableUserUpload_Explain)" key="Software\Policies\Genie" valueName="skills.disableUserUpload">
+      <parentCategory ref="Genie_Skills" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="WebSearchEnabled" class="Machine" displayName="$(string.WebSearchEnabled)" explainText="$(string.WebSearchEnabled_Explain)" key="Software\Policies\Genie" valueName="webSearch.enabled">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="WebSearchAllowedDomains" class="Machine" displayName="$(string.WebSearchAllowedDomains)" explainText="$(string.WebSearchAllowedDomains_Explain)" key="Software\Policies\Genie" presentation="$(presentation.WebSearchAllowedDomains)">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="WebSearchAllowedDomains_List" key="Software\Policies\Genie\webSearch.allowedDomains" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="WebSearchBlockedDomains" class="Machine" displayName="$(string.WebSearchBlockedDomains)" explainText="$(string.WebSearchBlockedDomains_Explain)" key="Software\Policies\Genie" presentation="$(presentation.WebSearchBlockedDomains)">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="WebSearchBlockedDomains_List" key="Software\Policies\Genie\webSearch.blockedDomains" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="WebFetchEnabled" class="Machine" displayName="$(string.WebFetchEnabled)" explainText="$(string.WebFetchEnabled_Explain)" key="Software\Policies\Genie" valueName="webFetch.enabled">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="WebFetchDomains" class="Machine" displayName="$(string.WebFetchDomains)" explainText="$(string.WebFetchDomains_Explain)" key="Software\Policies\Genie" presentation="$(presentation.WebFetchDomains)">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="WebFetchDomains_List" key="Software\Policies\Genie\webFetch.domains" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="CodeExecutionEnabled" class="Machine" displayName="$(string.CodeExecutionEnabled)" explainText="$(string.CodeExecutionEnabled_Explain)" key="Software\Policies\Genie" valueName="codeExecution.enabled">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="ArtifactsEnabled" class="Machine" displayName="$(string.ArtifactsEnabled)" explainText="$(string.ArtifactsEnabled_Explain)" key="Software\Policies\Genie" valueName="artifacts.enabled">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="BrowserEnabled" class="Machine" displayName="$(string.BrowserEnabled)" explainText="$(string.BrowserEnabled_Explain)" key="Software\Policies\Genie" valueName="browser.enabled">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="BrowserSiteAllowlist" class="Machine" displayName="$(string.BrowserSiteAllowlist)" explainText="$(string.BrowserSiteAllowlist_Explain)" key="Software\Policies\Genie" presentation="$(presentation.BrowserSiteAllowlist)">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="BrowserSiteAllowlist_List" key="Software\Policies\Genie\browser.siteAllowlist" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="BrowserSiteBlocklist" class="Machine" displayName="$(string.BrowserSiteBlocklist)" explainText="$(string.BrowserSiteBlocklist_Explain)" key="Software\Policies\Genie" presentation="$(presentation.BrowserSiteBlocklist)">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="BrowserSiteBlocklist_List" key="Software\Policies\Genie\browser.siteBlocklist" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="BrowserProfile" class="Machine" displayName="$(string.BrowserProfile)" explainText="$(string.BrowserProfile_Explain)" key="Software\Policies\Genie" presentation="$(presentation.BrowserProfile)">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <enum id="BrowserProfile_Enum" valueName="browser.profile">
+          <item displayName="$(string.BrowserProfile_ephemeral)"><value><string>ephemeral</string></value></item>
+          <item displayName="$(string.BrowserProfile_persistent)"><value><string>persistent</string></value></item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="MemoryEnabled" class="Machine" displayName="$(string.MemoryEnabled)" explainText="$(string.MemoryEnabled_Explain)" key="Software\Policies\Genie" valueName="memory.enabled">
+      <parentCategory ref="Genie_Data" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="ChatSearchEnabled" class="Machine" displayName="$(string.ChatSearchEnabled)" explainText="$(string.ChatSearchEnabled_Explain)" key="Software\Policies\Genie" valueName="chatSearch.enabled">
+      <parentCategory ref="Genie_Data" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="RetentionMaxDays" class="Machine" displayName="$(string.RetentionMaxDays)" explainText="$(string.RetentionMaxDays_Explain)" key="Software\Policies\Genie" presentation="$(presentation.RetentionMaxDays)">
+      <parentCategory ref="Genie_Data" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <decimal id="RetentionMaxDays_Value" valueName="retention.maxDays" minValue="1" maxValue="36500" />
+      </elements>
+    </policy>
+    <policy name="EncryptionRequired" class="Machine" displayName="$(string.EncryptionRequired)" explainText="$(string.EncryptionRequired_Explain)" key="Software\Policies\Genie" valueName="encryption.required">
+      <parentCategory ref="Genie_Data" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="ExportAllowed" class="Machine" displayName="$(string.ExportAllowed)" explainText="$(string.ExportAllowed_Explain)" key="Software\Policies\Genie" valueName="export.allowed">
+      <parentCategory ref="Genie_Data" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="IncognitoAllowed" class="Machine" displayName="$(string.IncognitoAllowed)" explainText="$(string.IncognitoAllowed_Explain)" key="Software\Policies\Genie" valueName="incognito.allowed">
+      <parentCategory ref="Genie_Data" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="TrustMode" class="Machine" displayName="$(string.TrustMode)" explainText="$(string.TrustMode_Explain)" key="Software\Policies\Genie" presentation="$(presentation.TrustMode)">
+      <parentCategory ref="Genie_Trust" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <enum id="TrustMode_Enum" valueName="trust.mode">
+          <item displayName="$(string.TrustMode_never)"><value><string>never</string></value></item>
+          <item displayName="$(string.TrustMode_prompt)"><value><string>prompt</string></value></item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="TrustAllowedRoots" class="Machine" displayName="$(string.TrustAllowedRoots)" explainText="$(string.TrustAllowedRoots_Explain)" key="Software\Policies\Genie" presentation="$(presentation.TrustAllowedRoots)">
+      <parentCategory ref="Genie_Trust" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <list id="TrustAllowedRoots_List" key="Software\Policies\Genie\trust.allowedRoots" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="HooksEnabled" class="Machine" displayName="$(string.HooksEnabled)" explainText="$(string.HooksEnabled_Explain)" key="Software\Policies\Genie" valueName="hooks.enabled">
+      <parentCategory ref="Genie_Trust" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="HooksManagedOnly" class="Machine" displayName="$(string.HooksManagedOnly)" explainText="$(string.HooksManagedOnly_Explain)" key="Software\Policies\Genie" valueName="hooks.managedOnly">
+      <parentCategory ref="Genie_Trust" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="SubagentsMaxDepth" class="Machine" displayName="$(string.SubagentsMaxDepth)" explainText="$(string.SubagentsMaxDepth_Explain)" key="Software\Policies\Genie" presentation="$(presentation.SubagentsMaxDepth)">
+      <parentCategory ref="Genie_Trust" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <decimal id="SubagentsMaxDepth_Value" valueName="subagents.maxDepth" minValue="1" maxValue="3" />
+      </elements>
+    </policy>
+    <policy name="TelemetryLevel" class="Machine" displayName="$(string.TelemetryLevel)" explainText="$(string.TelemetryLevel_Explain)" key="Software\Policies\Genie" presentation="$(presentation.TelemetryLevel)">
+      <parentCategory ref="Genie_Telemetry" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <enum id="TelemetryLevel_Enum" valueName="telemetry.level">
+          <item displayName="$(string.TelemetryLevel_off)"><value><string>off</string></value></item>
+          <item displayName="$(string.TelemetryLevel_crash_only)"><value><string>crash-only</string></value></item>
+          <item displayName="$(string.TelemetryLevel_usage)"><value><string>usage</string></value></item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="TelemetryEndpoint" class="Machine" displayName="$(string.TelemetryEndpoint)" explainText="$(string.TelemetryEndpoint_Explain)" key="Software\Policies\Genie" presentation="$(presentation.TelemetryEndpoint)">
+      <parentCategory ref="Genie_Telemetry" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="TelemetryEndpoint_Text" valueName="telemetry.endpoint" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="AuditOtlpEndpoint" class="Machine" displayName="$(string.AuditOtlpEndpoint)" explainText="$(string.AuditOtlpEndpoint_Explain)" key="Software\Policies\Genie" presentation="$(presentation.AuditOtlpEndpoint)">
+      <parentCategory ref="Genie_Telemetry" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="AuditOtlpEndpoint_Text" valueName="audit.otlp.endpoint" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="AuditJsonlDir" class="Machine" displayName="$(string.AuditJsonlDir)" explainText="$(string.AuditJsonlDir_Explain)" key="Software\Policies\Genie" presentation="$(presentation.AuditJsonlDir)">
+      <parentCategory ref="Genie_Telemetry" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="AuditJsonlDir_Text" valueName="audit.jsonl.dir" maxLength="4096" />
+      </elements>
+    </policy>
+    <policy name="AuditIncludeContent" class="Machine" displayName="$(string.AuditIncludeContent)" explainText="$(string.AuditIncludeContent_Explain)" key="Software\Policies\Genie" valueName="audit.includeContent">
+      <parentCategory ref="Genie_Telemetry" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="UpdatesChannel" class="Machine" displayName="$(string.UpdatesChannel)" explainText="$(string.UpdatesChannel_Explain)" key="Software\Policies\Genie" presentation="$(presentation.UpdatesChannel)">
+      <parentCategory ref="Genie_Updates" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <enum id="UpdatesChannel_Enum" valueName="updates.channel">
+          <item displayName="$(string.UpdatesChannel_stable)"><value><string>stable</string></value></item>
+          <item displayName="$(string.UpdatesChannel_beta)"><value><string>beta</string></value></item>
+        </enum>
+      </elements>
+    </policy>
+    <policy name="UpdatesAuto" class="Machine" displayName="$(string.UpdatesAuto)" explainText="$(string.UpdatesAuto_Explain)" key="Software\Policies\Genie" valueName="updates.auto">
+      <parentCategory ref="Genie_Updates" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="UpdatesMinVersion" class="Machine" displayName="$(string.UpdatesMinVersion)" explainText="$(string.UpdatesMinVersion_Explain)" key="Software\Policies\Genie" presentation="$(presentation.UpdatesMinVersion)">
+      <parentCategory ref="Genie_Updates" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <elements>
+        <text id="UpdatesMinVersion_Text" valueName="updates.minVersion" maxLength="4096" />
+      </elements>
+    </policy>
+  </policies>
+</policyDefinitions>

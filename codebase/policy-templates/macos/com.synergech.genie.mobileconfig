@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Sample Genie configuration profile (spec 08 §5.1). Admins edit the payload keys, sign the
+  profile and deploy it with their MDM. macOS installs it into
+  /Library/Managed Preferences/com.synergech.genie.plist, which the daemon reads.
+  Keys are the managed-policy keys of spec 08 §5.2, dotted or as nested dictionaries.
+  Replace every PayloadUUID before deploying.
+-->
+<plist version="1.0">
+<dict>
+  <key>PayloadDisplayName</key>
+  <string>Genie managed policy</string>
+  <key>PayloadIdentifier</key>
+  <string>com.example.genie.policy</string>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>6C1F0B9E-4E55-4C7B-9C1A-2B7E4D2A0001</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadScope</key>
+  <string>System</string>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>com.synergech.genie</string>
+      <key>PayloadIdentifier</key>
+      <string>com.example.genie.policy.settings</string>
+      <key>PayloadUUID</key>
+      <string>6C1F0B9E-4E55-4C7B-9C1A-2B7E4D2A0002</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+
+      <key>org.name</key>
+      <string>Example Corp</string>
+      <key>providers.allowed</key>
+      <array>
+        <string>azure-foundry</string>
+      </array>
+      <key>endpoints.allowed</key>
+      <array>
+        <string>*.services.ai.azure.com</string>
+      </array>
+      <key>auth.methods</key>
+      <array>
+        <string>entra</string>
+      </array>
+      <key>disableBypassMode</key>
+      <true/>
+      <key>permissions</key>
+      <dict>
+        <key>deny</key>
+        <array>
+          <string>Bash(curl:*)</string>
+        </array>
+      </dict>
+      <key>mcp.disableLocal</key>
+      <false/>
+      <key>telemetry.level</key>
+      <string>crash-only</string>
+      <key>audit.jsonl.dir</key>
+      <string>/Library/Logs/Genie/audit</string>
+      <key>audit.includeContent</key>
+      <false/>
+      <!-- Optional signed remote policy (Ed25519, hex or base64 public keys). -->
+      <!--
+      <key>policyUrl</key>
+      <string>https://policy.example.com/genie/policy.json</string>
+      <key>policyKeys</key>
+      <array><string>REPLACE_WITH_PUBLIC_KEY</string></array>
+      -->
+    </dict>
+  </array>
+</dict>
+</plist>
