@@ -1,0 +1,66 @@
+{
+  "anthropic_version": "vertex-2023-10-16",
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "hi",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "output_config": {
+    "effort": "high"
+  },
+  "stream": true,
+  "system": [
+    {
+      "cache_control": {
+        "ttl": "1h",
+        "type": "ephemeral"
+      },
+      "text": "You are Genie.",
+      "type": "text"
+    },
+    {
+      "cache_control": {
+        "ttl": "1h",
+        "type": "ephemeral"
+      },
+      "text": "Project: demo",
+      "type": "text"
+    }
+  ],
+  "tool_choice": {
+    "type": "auto"
+  },
+  "tools": [
+    {
+      "cache_control": {
+        "ttl": "1h",
+        "type": "ephemeral"
+      },
+      "description": "Read a file",
+      "input_schema": {
+        "$schema": "x",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read_file"
+    }
+  ]
+}

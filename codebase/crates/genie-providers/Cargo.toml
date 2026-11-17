@@ -7,5 +7,28 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[dependencies]
+async-stream.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
+genie-secrets.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+http.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

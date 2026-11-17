@@ -20,13 +20,23 @@ genie-audit = { path = "crates/genie-audit" }
 genie-daemon = { path = "crates/genie-daemon" }
 genie-client = { path = "crates/genie-client" }
 genie-testkit = { path = "crates/genie-testkit" }
+genie-secrets = { path = "crates/genie-secrets" }
 # external
 anyhow = "1"
+async-stream = "0.3"
+async-trait = "0.1"
+base64 = "0.22"
+bytes = "1"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 getrandom = "0.3"
 hex = "0.4"
+http = "1"
 libc = "0.2"
+regex = "1"
+# HTTP plumbing for the provider Executor (03 §3, D18): rustls only, never native-tls.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
 schemars = "1"
 secrecy = "0.10"
 semver = "1"
