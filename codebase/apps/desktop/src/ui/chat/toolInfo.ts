@@ -87,3 +87,21 @@ export function headTail(text: string, head = 20, tail = 20): { text: string; hi
   if (lines.length <= head + tail + 1) return { text, hidden: 0 };
   return { text: [...lines.slice(0, head), "…", ...lines.slice(-tail)].join("\n"), hidden: lines.length - head - tail };
 }
+
+/** Present-tense label for a tool that is running now ("Running a command"), for the turn indicator. */
+export function toolActivity(name: string): string {
+  if (name.startsWith("mcp__")) return `Using ${name.split("__")[1] ?? "a connector"}`;
+  if (name === "shell" || name === "bash") return "Running a command";
+  if (["edit", "write", "apply_patch", "multi_edit"].includes(name)) return "Editing files";
+  if (name === "read" || name === "read_file") return "Reading files";
+  if (name === "grep" || name === "glob" || name === "list") return "Searching the code";
+  if (name === "web_search") return "Searching the web";
+  if (name === "web_fetch") return "Reading a web page";
+  if (name.startsWith("browser_")) return "Using the browser";
+  if (name.startsWith("memory_")) return "Updating memory";
+  if (name.startsWith("artifact_")) return "Creating an artifact";
+  if (name === "todo_write") return "Planning";
+  if (name === "task" || name === "subagent") return "Running a subagent";
+  if (/skill/i.test(name)) return "Using a skill";
+  return `Using ${name.replace(/_/g, " ")}`;
+}

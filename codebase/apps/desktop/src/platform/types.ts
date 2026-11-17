@@ -34,6 +34,8 @@ export interface HostInfo {
   os: string;
   app_version: string;
   batch_ms: number;
+  /** OS account's full name; fallback for the display name. */
+  user_name?: string;
 }
 
 export interface CliInstall {

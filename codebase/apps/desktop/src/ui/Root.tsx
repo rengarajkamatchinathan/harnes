@@ -15,7 +15,24 @@ export function Root() {
   const { appearance } = app.ui;
 
   useEffect(() => applyAppearance(appearance), [appearance]);
+  // macOS draws its window buttons over our title-bar strip (Overlay title bar), so CSS
+  // leaves room for them there only.
+  useEffect(() => {
+    if (app.info?.os) document.documentElement.dataset.os = app.info.os;
+  }, [app.info?.os]);
   useEffect(() => preloadOnIdle(document.documentElement.dataset.theme === "dark"), []);
+  // The page frame must never scroll: WebKit scrolls overflow:hidden ancestors to reveal a
+  // focused or growing element, which slid the whole UI under the title bar while streaming.
+  useEffect(() => {
+    const frame = (el: EventTarget | null) => el === document || (el instanceof HTMLElement && el.matches("html, body, #root, .shell, .main, .sidebar, .chat, .panel"));
+    const onScroll = (e: Event) => {
+      if (!frame(e.target)) return;
+      const el = e.target === document ? document.scrollingElement : (e.target as HTMLElement);
+      if (el && (el.scrollTop || el.scrollLeft)) el.scrollTop = el.scrollLeft = 0;
+    };
+    document.addEventListener("scroll", onScroll, true);
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, []);
 
   // Links in rendered Markdown open in the system browser; code blocks copy (05 §2.2).
   useEffect(() => {
@@ -70,9 +87,9 @@ function Shell() {
   const app = useApp();
   const { ui, status } = app;
   return (
-    <div className="shell" style={{ ["--sidebar-w" as string]: `${ui.sidebarWidth}px`, ["--panel-w" as string]: `${ui.panelWidth}px` }}>
-      <Sidebar />
-      <main className="main" aria-label={ui.view === "settings" ? t("settings.title") : undefined}>
+    <div className={`shell ${ui.sidebarCollapsed ? "shell--collapsed" : ""}`} style={{ ["--sidebar-w" as string]: `${ui.sidebarWidth}px`, ["--panel-w" as string]: `${ui.panelWidth}px` }}>
+      {!ui.sidebarCollapsed && <Sidebar />}
+      <main className="main">
         {status.state === "reconnecting" && (
           <div className="top-banner">
             <Banner tone="warning" icon="refresh">
@@ -85,9 +102,10 @@ function Shell() {
             <Banner tone="neutral">{t("conn.degraded")}</Banner>
           </div>
         )}
-        {ui.view === "settings" ? <SettingsPage /> : ui.view === "project" && ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />}
+        {ui.view === "project" && ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />}
       </main>
-      {ui.view === "main" && ui.panelOpen && <RightPanel />}
+      {ui.view !== "project" && ui.panelOpen && <RightPanel />}
+      {ui.view === "settings" && <SettingsPage />}
       <Toasts />
     </div>
   );

@@ -1,8 +1,8 @@
 /*
  * Genie design tokens (spec 05 §6, D19, t29).
  *
- * Seed colours → 12-step OKLCH scales → semantic variables. Neutral greys come from a
- * cool-grey seed (hue 255); the accent is the SA-20 placeholder teal oklch(0.62 0.13 195)
+ * Seed colours → 12-step OKLCH scales → semantic variables. Neutral greys are near
+ * chroma-free (0.003, hue 260); the accent is the SA-20 placeholder teal oklch(0.62 0.13 195)
  * (step 9) until brand input arrives. It must not resemble Anthropic's palette (C1).
  *
  * The theme is chosen by `data-theme="light" | "dark"` on <html>; `applyTheme()` sets it
@@ -68,18 +68,18 @@
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --gray-1: oklch(0.992 0.002 255);
-  --gray-2: oklch(0.975 0.004 255);
-  --gray-3: oklch(0.950 0.006 255);
-  --gray-4: oklch(0.925 0.008 255);
-  --gray-5: oklch(0.900 0.009 255);
-  --gray-6: oklch(0.870 0.010 255);
-  --gray-7: oklch(0.830 0.011 255);
-  --gray-8: oklch(0.760 0.012 255);
-  --gray-9: oklch(0.620 0.012 255);
-  --gray-10: oklch(0.560 0.012 255);
-  --gray-11: oklch(0.450 0.012 255);
-  --gray-12: oklch(0.220 0.012 255);
+  --gray-1: oklch(0.995 0.003 260);
+  --gray-2: oklch(0.982 0.003 260);
+  --gray-3: oklch(0.962 0.003 260);
+  --gray-4: oklch(0.940 0.003 260);
+  --gray-5: oklch(0.918 0.003 260);
+  --gray-6: oklch(0.890 0.003 260);
+  --gray-7: oklch(0.850 0.003 260);
+  --gray-8: oklch(0.780 0.003 260);
+  --gray-9: oklch(0.640 0.003 260);
+  --gray-10: oklch(0.570 0.003 260);
+  --gray-11: oklch(0.450 0.003 260);
+  --gray-12: oklch(0.220 0.003 260);
 
   --accent-1: oklch(0.990 0.008 195);
   --accent-2: oklch(0.975 0.018 195);
@@ -128,18 +128,18 @@
 /* ---------- Dark ---------- */
 [data-theme="dark"] {
   color-scheme: dark;
-  --gray-1: oklch(0.170 0.008 255);
-  --gray-2: oklch(0.200 0.009 255);
-  --gray-3: oklch(0.235 0.010 255);
-  --gray-4: oklch(0.260 0.011 255);
-  --gray-5: oklch(0.290 0.012 255);
-  --gray-6: oklch(0.320 0.013 255);
-  --gray-7: oklch(0.370 0.014 255);
-  --gray-8: oklch(0.450 0.015 255);
-  --gray-9: oklch(0.580 0.014 255);
-  --gray-10: oklch(0.640 0.013 255);
-  --gray-11: oklch(0.790 0.010 255);
-  --gray-12: oklch(0.950 0.005 255);
+  --gray-1: oklch(0.205 0.003 260);
+  --gray-2: oklch(0.225 0.003 260);
+  --gray-3: oklch(0.250 0.003 260);
+  --gray-4: oklch(0.280 0.003 260);
+  --gray-5: oklch(0.310 0.003 260);
+  --gray-6: oklch(0.345 0.003 260);
+  --gray-7: oklch(0.400 0.003 260);
+  --gray-8: oklch(0.480 0.003 260);
+  --gray-9: oklch(0.590 0.003 260);
+  --gray-10: oklch(0.660 0.003 260);
+  --gray-11: oklch(0.800 0.003 260);
+  --gray-12: oklch(0.950 0.003 260);
 
   --accent-1: oklch(0.180 0.020 195);
   --accent-2: oklch(0.210 0.030 195);

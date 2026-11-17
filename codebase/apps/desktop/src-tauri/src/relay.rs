@@ -112,6 +112,34 @@ pub struct HostInfo {
     pub os: &'static str,
     pub app_version: &'static str,
     pub batch_ms: u64,
+    /// The OS account's full name (or login), for the greeting and profile row
+    /// until the user sets a display name. Empty when unknown.
+    pub user_name: String,
+}
+
+/// Best-effort full name of the signed-in OS user: macOS `id -F`, the passwd GECOS field
+/// on Linux, then the login name from the environment.
+pub fn os_user_name() -> String {
+    #[cfg(target_os = "macos")]
+    if let Ok(out) = std::process::Command::new("/usr/bin/id").arg("-F").output() {
+        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if out.status.success() && !name.is_empty() {
+            return name;
+        }
+    }
+    let login = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();
+    #[cfg(target_os = "linux")]
+    if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
+        let gecos = passwd
+            .lines()
+            .map(|l| l.split(':').collect::<Vec<_>>())
+            .find(|f| f.len() > 4 && f[0] == login)
+            .map(|f| f[4].split(',').next().unwrap_or("").trim().to_string());
+        if let Some(g) = gecos.filter(|g| !g.is_empty()) {
+            return g;
+        }
+    }
+    login
 }
 
 /// The webview end of the relay.
@@ -179,6 +207,7 @@ pub struct Relay {
     tasks: TaskTracker,
     shutdown: CancellationToken,
     instance_id: String,
+    user_name: String,
     conn: Mutex<Option<(u64, Arc<Connection>)>>,
     generation: AtomicU64,
     sink: Mutex<Option<Arc<dyn Sink>>>,
@@ -202,6 +231,7 @@ impl Relay {
             tasks: TaskTracker::new(),
             shutdown: CancellationToken::new(),
             instance_id: instance_id.into(),
+            user_name: os_user_name(),
             conn: Mutex::new(None),
             generation: AtomicU64::new(0),
             sink: Mutex::new(None),
@@ -249,6 +279,7 @@ impl Relay {
             os: std::env::consts::OS,
             app_version: env!("CARGO_PKG_VERSION"),
             batch_ms: crate::batch::BATCH_MS,
+            user_name: self.user_name.clone(),
         }
     }
 

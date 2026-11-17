@@ -2,7 +2,7 @@
 // strip, take over (input forwarded with device-scale mapping), hand back, stop, pop out.
 import { useEffect, useRef, useState } from "react";
 import type { BrowserStatus, InputEvent, TabInfo } from "@genie/protocol";
-import { Badge, Button, Icon } from "@genie/ui";
+import { Badge, Button, EmptyState } from "@genie/ui";
 import { t } from "../../i18n";
 import { useApp, useSession } from "../context";
 
@@ -80,10 +80,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
 
   if (status && !status.installed.length)
     return (
-      <div className="empty">
-        <Icon name="globe" />
-        <p>{t("browser.none")}</p>
-      </div>
+      <EmptyState icon="globe" title={t("browser.noneTitle")} hint={t("browser.noneHint")} />
     );
 
   const pill = control === "user" ? t("browser.user") : control === "waiting_for_approval" ? t("browser.waiting") : control ? t("browser.agent") : t("browser.idle");
@@ -150,7 +147,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
           }}
         />
       ) : (
-        <div className="empty muted">{t("browser.idle")}</div>
+        <EmptyState icon="globe" title={t("browser.idleTitle")} hint={t("browser.idleHint")} />
       )}
       {actions.length > 0 && (
         <details className="browser__steps">

@@ -28,24 +28,36 @@ export const MarkdownText = memo(function MarkdownText({ text, citations }: { te
 // One splitter per streaming part, fed with what arrived since the last render.
 const splitters = new WeakMap<PartView, { s: BlockSplitter; consumed: number }>();
 
-/** A part still streaming: settled blocks memoised, only the tail re-renders (05 §7). */
-export function StreamingText({ part }: { part: PartView }) {
-  let st = splitters.get(part);
-  if (!st) {
-    st = { s: new BlockSplitter(), consumed: 0 };
-    splitters.set(part, st);
-  }
-  if (part.text.length > st.consumed) {
-    st.s.push(part.text.slice(st.consumed));
-    st.consumed = part.text.length;
+/**
+ * A text part, streaming or final, in one component so finishing a reply never remounts it
+ * (that swap was a visible flash). Settled blocks are memoised; only the tail re-renders
+ * (05 §7). Block keys are positional, so when the tail settles it updates in place.
+ */
+export function TextPart({ part, citations }: { part: PartView; citations?: Citation[] }) {
+  let blocks: string[];
+  let settledCount: number;
+  if (part.streaming) {
+    let st = splitters.get(part);
+    if (!st) {
+      st = { s: new BlockSplitter(), consumed: 0 };
+      splitters.set(part, st);
+    }
+    if (part.text.length > st.consumed) {
+      st.s.push(part.text.slice(st.consumed));
+      st.consumed = part.text.length;
+    }
+    const tail = st.s.tail();
+    blocks = tail ? [...st.s.settled, tail] : st.s.settled;
+    settledCount = st.s.settled.length;
+  } else {
+    blocks = splitAll(withCitations(part.text, citations ?? []));
+    settledCount = blocks.length;
   }
   return (
     <div className="markdown">
-      {st.s.settled.map((b, i) => (
-        <Block key={i} src={b} settled />
+      {blocks.map((b, i) => (
+        <Block key={i} src={b} settled={i < settledCount} />
       ))}
-      <Block key="tail" src={st.s.tail()} settled={false} />
-      <span className="caret" aria-hidden />
     </div>
   );
 }

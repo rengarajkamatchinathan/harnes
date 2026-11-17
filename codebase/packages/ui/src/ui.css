@@ -10,6 +10,8 @@ html,
 body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
@@ -158,6 +160,61 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+.g-field--inline {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-6);
+  min-height: 52px;
+}
+.g-field__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.g-field__control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.g-field__control .g-input,
+.g-field__control .g-select {
+  width: 260px;
+}
+.g-field--inline .g-field__error {
+  grid-column: 1 / -1;
+}
+
+/* ---------- Empty state ---------- */
+.g-empty {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 4px;
+  min-height: 100%;
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+}
+.g-empty__icon {
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-2);
+  color: var(--text-muted);
+}
+.g-empty__title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+.g-empty__hint {
+  max-width: 320px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.g-empty__action {
+  margin-top: var(--space-3);
 }
 .g-field__label {
   font-weight: 500;
@@ -444,7 +501,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .g-spinner { animation-duration: 3s; }
 }
-.g-ring__track { stroke: var(--border); }
+.g-ring__track { stroke: var(--text-muted); opacity: 0.35; }
 .g-ring__value { stroke: var(--accent); transition: stroke-dashoffset var(--dur-base) var(--ease); }
 .g-ring--warn .g-ring__value { stroke: var(--warning); }
 

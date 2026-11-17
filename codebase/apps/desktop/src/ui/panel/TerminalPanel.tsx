@@ -4,11 +4,13 @@
 // `Terminals` controller (replay or checkpoint on attach, live `terminal.output` after).
 // xterm.js is loaded lazily so the rest of the app (and node tests) never pull it in.
 import { useEffect, useRef, useState } from "react";
-import { Button, Icon, IconButton } from "@genie/ui";
+import { Button, EmptyState, IconButton } from "@genie/ui";
 import { t } from "../../i18n";
 import { useEmitter } from "../../state/emitter";
 import { MAX_TERMINALS, type TermInfo } from "../../state/terminals";
 import { useApp, useAppStatic } from "../context";
+
+const autoOpened = new Set<string>();
 
 export function TerminalPanel({ sessionId }: { sessionId: string }) {
   const app = useApp();
@@ -30,17 +32,27 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
       setBusy(false);
     }
   };
+  // Opening the Terminal tab gives you a shell right away, like the reference; once per session.
+  useEffect(() => {
+    if (list.length || autoOpened.has(sessionId)) return;
+    autoOpened.add(sessionId);
+    void open();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
   const close = (id: string) => void app.terminals.close(id).catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }));
 
   if (!list.length)
     return (
-      <div className="empty">
-        <Icon name="terminal" />
-        <p className="muted">{t("terminal.empty")}</p>
-        <Button variant="primary" icon="plus" disabled={busy} onClick={() => void open()}>
-          {t("terminal.new")}
-        </Button>
-      </div>
+      <EmptyState
+        icon="terminal"
+        title={busy ? t("terminal.starting") : t("terminal.emptyTitle")}
+        hint={t("terminal.empty")}
+        action={
+          <Button icon="plus" disabled={busy} onClick={() => void open()}>
+            {t("terminal.new")}
+          </Button>
+        }
+      />
     );
 
   return (

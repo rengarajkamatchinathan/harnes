@@ -1,9 +1,9 @@
 // Composer (05 §2.3): Enter sends, Shift+Enter newline; while a turn runs Enter steers and
 // Alt+Enter queues (SA-06); attachments via blob.put; model + effort pickers; "+" menu;
 // context meter ring (D32); queued items as chips.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Delivery, InputPart, McpServerInfo, ModelInfo, SkillInfo } from "@genie/protocol";
-import { Button, Chip, Dialog, IconButton, Menu, Ring, Select, Switch } from "@genie/ui";
+import { Button, Chip, Dialog, Icon, IconButton, Menu, Ring, Switch } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
 import { formatBytes, guessMime, rejectReason, uploadBlob, type Attachment } from "../../state/attachments";
 import type { SessionStore } from "../../state/session";
@@ -13,8 +13,13 @@ import { McpPromptPicker, McpResourcePicker, type McpResource } from "./McpPicke
 export interface ComposerProps {
   store: SessionStore | null;
   /** New chat: create the session first, then send. */
-  onCreate?: () => Promise<SessionStore>;
+  onCreate?: () => Promise<SessionStore | null>;
   readOnly?: boolean;
+  /** "hero": empty-state box with the model picker inside; "reply": one row, pickers below. */
+  layout?: "hero" | "reply";
+  placeholder?: string;
+  /** Prefill the box (e.g. an "Ideas for you" row); a new `n` re-applies the text. */
+  seed?: { text: string; n: number };
 }
 
 /** Which key does what (pure, for tests). */
@@ -31,9 +36,74 @@ export function groupModels(models: ModelInfo[]) {
 
 let keySeq = 0;
 
-export function Composer({ store, onCreate, readOnly }: ComposerProps) {
+/** Model + effort as quiet text buttons ("Genie Small  Medium ⌄"), like the reference. */
+export function ModelPicker({ store }: { store: SessionStore | null }) {
+  const app = useApp();
+  const info = store?.model.info;
+  const currentModel = info?.model ?? app.ui.model ?? app.models[0]?.id ?? "";
+  const modelInfo = app.models.find((m) => m.id === currentModel);
+  const effortLevels = modelInfo?.effort_levels ?? [];
+  const effort = info?.effort ?? app.ui.effort ?? effortLevels[0] ?? null;
+  const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
+  const setModel = (id: string) => {
+    app.setUi({ model: id });
+    if (store) void app.client.session.update({ session_id: store.id, model: id }).catch(fail);
+  };
+  const setEffort = (e: string) => {
+    app.setUi({ effort: e });
+    if (store) void app.client.session.update({ session_id: store.id, effort: e }).catch(fail);
+  };
+  return (
+    <span className="modelpick">
+      <Menu
+        label={t("composer.model")}
+        placement="up"
+        align="right"
+        items={app.models.map((m) => ({ id: m.id, label: m.name || m.id, title: m.provider, icon: m.id === currentModel ? "check" : undefined, onSelect: () => setModel(m.id) }))}
+        trigger={(p) => (
+          <button className="textbtn" aria-label={t("composer.model")} {...p}>
+            {modelInfo?.name || currentModel || "—"}
+          </button>
+        )}
+      />
+      {effortLevels.length > 0 && (
+        <Menu
+          label={t("composer.effort")}
+          placement="up"
+          align="right"
+          items={effortLevels.map((e) => ({ id: e, label: e[0].toUpperCase() + e.slice(1), icon: e === effort ? "check" : undefined, onSelect: () => setEffort(e) }))}
+          trigger={(p) => (
+            <button className="textbtn textbtn--muted" aria-label={t("composer.effort")} {...p}>
+              {effort ? effort[0].toUpperCase() + effort.slice(1) : ""}
+              <Icon name="chevronDown" size={12} />
+            </button>
+          )}
+        />
+      )}
+    </span>
+  );
+}
+
+/** Context-window meter for the composer footer (D32); hidden until the session has usage. */
+export function ContextRing({ store }: { store: SessionStore | null }) {
+  const usage = store?.model.usage;
+  if (!usage || !usage.context_window) return null;
+  const ctx = usage.context_tokens / usage.context_window;
+  return (
+    <span className="composer__ring" title={t("composer.context", { used: formatTokens(usage.context_tokens), window: formatTokens(usage.context_window), cost: formatCost(usage.cost.usd) })}>
+      <Ring value={ctx} size={16} warn={ctx > 0.8} label={`${Math.round(ctx * 100)}%`} />
+    </span>
+  );
+}
+
+export function Composer({ store, onCreate, readOnly, layout = "reply", placeholder, seed }: ComposerProps) {
   const app = useApp();
   const [text, setText] = useState("");
+  useEffect(() => {
+    if (!seed) return;
+    setText(seed.text);
+    taRef.current?.focus();
+  }, [seed]);
   const [atts, setAtts] = useState<Attachment[]>([]);
   const [drag, setDrag] = useState(false);
   const [sending, setSending] = useState(false);
@@ -70,9 +140,6 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
   const info = model?.info;
   const currentModel = info?.model ?? app.ui.model ?? app.models[0]?.id ?? "";
   const modelInfo = app.models.find((m) => m.id === currentModel);
-  const effortLevels = modelInfo?.effort_levels ?? [];
-  const usage = model?.usage;
-  const ctx = usage && usage.context_window ? usage.context_tokens / usage.context_window : 0;
 
   // Autosize.
   useEffect(() => {
@@ -137,23 +204,32 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
     }
   };
 
-  const setModel = (id: string) => {
-    app.setUi({ model: id });
-    if (store) void app.client.session.update({ session_id: store.id, model: id }).catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }));
-  };
-  const setEffort = (effort: string) => {
-    app.setUi({ effort });
-    if (store) void app.client.session.update({ session_id: store.id, effort }).catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }));
-  };
-
-  const modelOptions = useMemo(() => groupModels(app.models), [app.models]);
   const tooBig = (a: Attachment) => !!modelInfo?.context_window && a.size / 4 > modelInfo.context_window;
+
+  const textarea = (
+    <textarea
+      ref={taRef}
+      className="composer__input"
+      rows={1}
+      value={text}
+      placeholder={drag ? t("composer.dropHere") : busy ? t("composer.placeholderBusy") : (placeholder ?? t("composer.placeholder"))}
+      aria-label={t("composer.placeholder")}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={onKey}
+      onPaste={(e) => {
+        if (e.clipboardData.files.length) {
+          e.preventDefault();
+          addFiles(e.clipboardData.files);
+        }
+      }}
+    />
+  );
 
   if (readOnly) return <div className="composer composer--readonly muted">{t("composer.readOnly")}</div>;
 
   return (
     <div
-      className={`composer ${drag ? "composer--drag" : ""}`}
+      className={`composer composer--${layout} ${drag ? "composer--drag" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDrag(true);
@@ -190,27 +266,12 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
           ))}
         </div>
       )}
-      <textarea
-        ref={taRef}
-        className="composer__input"
-        rows={1}
-        value={text}
-        placeholder={drag ? t("composer.dropHere") : busy ? t("composer.placeholderBusy") : t("composer.placeholder")}
-        aria-label={t("composer.placeholder")}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKey}
-        onPaste={(e) => {
-          if (e.clipboardData.files.length) {
-            e.preventDefault();
-            addFiles(e.clipboardData.files);
-          }
-        }}
-      />
+      {layout === "hero" && textarea}
       <div className="composer__bar">
         <Menu
           label={t("composer.plus")}
           placement="up"
-          trigger={(p) => <IconButton icon="plus" label={t("composer.plus")} {...p} />}
+          trigger={(p) => <IconButton icon="plus" size="sm" label={t("composer.plus")} {...p} />}
           items={[
             { id: "attach", label: t("composer.attach"), icon: "paperclip", onSelect: () => fileRef.current?.click() },
             { id: "resource", label: t("composer.mcpResource"), icon: "layers", onSelect: () => setMcpPick("resource") },
@@ -223,26 +284,20 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
           ]}
         />
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
-        <Select className="composer__model" aria-label={t("composer.model")} value={currentModel} options={modelOptions.length ? modelOptions : [{ value: "", label: "—" }]} onChange={setModel} />
-        {effortLevels.length > 0 && (
-          <Select className="composer__effort" aria-label={t("composer.effort")} value={info?.effort ?? app.ui.effort ?? effortLevels[0]} options={effortLevels.map((e) => ({ value: e, label: e }))} onChange={setEffort} />
-        )}
-        <span className="grow" />
-        {usage && (
-          <span
-            className="composer__ring"
-            title={t("composer.context", { used: formatTokens(usage.context_tokens), window: formatTokens(usage.context_window), cost: formatCost(usage.cost.usd) })}
-          >
-            <Ring value={ctx} warn={ctx > 0.8} label={`${Math.round(ctx * 100)}%`} />
-          </span>
-        )}
-        {busy && (
-          <Button variant="secondary" icon="stop" onClick={() => void store?.interrupt()} aria-label={t("composer.stop")}>
-            {t("composer.stop")}
-          </Button>
-        )}
-        {(!busy || text.trim()) && (
-          <IconButton icon="send" variant="primary" label={t("composer.send")} disabled={sending || (!text.trim() && !atts.some((a) => a.state === "ready"))} onClick={() => void submit("steer")} />
+        {layout === "hero" ? <span className="grow" /> : textarea}
+        {layout === "hero" && <ModelPicker store={store} />}
+        {!busy && !text.trim() && !atts.length ? null : busy && !text.trim() ? (
+          <IconButton icon="stop" size="sm" variant="secondary" className="composer__send" onClick={() => void store?.interrupt()} label={t("composer.stop")} />
+        ) : (
+          <IconButton
+            icon="arrowUp"
+            size="sm"
+            variant="primary"
+            className="composer__send"
+            label={t("composer.send")}
+            disabled={sending || (!text.trim() && !atts.some((a) => a.state === "ready"))}
+            onClick={() => void submit("steer")}
+          />
         )}
       </div>
       {connectors && store && <ConnectorToggles sessionId={store.id} onClose={() => setConnectors(false)} />}

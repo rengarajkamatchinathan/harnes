@@ -2,7 +2,7 @@
 // Microsoft (PKCE in the system browser, or device code), test, models, catalog status.
 import { useEffect, useState } from "react";
 import type { LoginStartResult, ProviderInfo } from "@genie/protocol";
-import { Badge, Button, Card, Input } from "@genie/ui";
+import { Badge, Button, Card, Icon, Input } from "@genie/ui";
 import { t } from "../../i18n";
 import { useApp, useAsync } from "../context";
 
@@ -14,7 +14,7 @@ export function ProvidersSection() {
   return (
     <div className="stack">
       {catalog.data && (
-        <div className="row muted">
+        <div className="row muted settings-note">
           {t("providers.catalog", { source: catalog.data.source, when: new Date(catalog.data.fetched_at).toLocaleString() })}
           <Button size="sm" icon="refresh" onClick={() => void app.client.catalog.refresh({}).then(() => catalog.reload(), (e) => app.toast({ title: app.describeError(e), tone: "danger" }))}>
             {t("providers.refresh")}
@@ -32,6 +32,7 @@ export function ProvidersSection() {
 export function ProviderCard({ p, compact }: { p: ProviderInfo; compact?: boolean }) {
   const app = useApp();
   const [label, setLabel] = useState("");
+  const [adding, setAdding] = useState(false);
   const [key, setKey] = useState("");
   const [test, setTest] = useState<string | null>(null);
   const [login, setLogin] = useState<LoginStartResult | null>(null);
@@ -78,6 +79,7 @@ export function ProviderCard({ p, compact }: { p: ProviderInfo; compact?: boolea
       await app.client.provider.credential.add({ provider: p.id, kind: "key", label: label || "API key", secret: key });
       setKey("");
       setLabel("");
+      setAdding(false);
       await refresh();
       await runTest();
     } catch (e) {
@@ -102,6 +104,11 @@ export function ProviderCard({ p, compact }: { p: ProviderInfo; compact?: boolea
         <span className="muted">{p.kind}</span>
         <Badge tone={TONE[p.status] ?? "neutral"}>{t(`providers.status.${p.status === "unknown" ? "error" : p.status}` as Parameters<typeof t>[0])}</Badge>
         <span className="grow" />
+        {!compact && !adding && p.credentials.length > 0 && (
+          <Button size="sm" variant="ghost" icon="plus" onClick={() => setAdding(true)}>
+            {t("providers.addKey")}
+          </Button>
+        )}
         <Button size="sm" onClick={() => void runTest()}>
           {t("providers.test")}
         </Button>
@@ -113,9 +120,10 @@ export function ProviderCard({ p, compact }: { p: ProviderInfo; compact?: boolea
       )}
       {p.endpoint && <div className="muted">{p.endpoint}</div>}
       {p.credentials.map((c) => (
-        <div key={c.credential_id} className="row">
+        <div key={c.credential_id} className="row provider-cred">
+          <Icon name="key" size={14} />
           <span className="grow">
-            {c.label} <span className="muted">· {c.kind}{c.hint ? ` · …${c.hint}` : ""}</span>
+            {c.label} <span className="muted">· {c.kind === "key" ? t("providers.apiKey") : c.kind}{c.hint ? ` · …${c.hint}` : ""}</span>
           </span>
           {c.active ? (
             <Badge tone="success">{t("providers.active")}</Badge>
@@ -129,6 +137,7 @@ export function ProviderCard({ p, compact }: { p: ProviderInfo; compact?: boolea
           </Button>
         </div>
       ))}
+      {(adding || compact || !p.credentials.length) && (
       <form
         className="row"
         onSubmit={(e) => {
@@ -141,7 +150,13 @@ export function ProviderCard({ p, compact }: { p: ProviderInfo; compact?: boolea
         <Button type="submit" disabled={!key}>
           {t("providers.addKey")}
         </Button>
+        {adding && (
+          <Button variant="ghost" onClick={() => (setAdding(false), setKey(""), setLabel(""))}>
+            {t("common.cancel")}
+          </Button>
+        )}
       </form>
+      )}
       {microsoft && (
         <div className="row">
           <Button onClick={() => void signIn("pkce")}>{t("providers.signIn")}</Button>

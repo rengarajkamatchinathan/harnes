@@ -1,7 +1,7 @@
 // Right panel (05 §1, D54): Chat → Artifact · Browser; Code → Changes · Files · Terminal ·
 // Browser. Resizable and hideable; width and tab live in state.json.
 import { useRef } from "react";
-import { IconButton, Tabs } from "@genie/ui";
+import { EmptyState, IconButton, type IconName } from "@genie/ui";
 import { t } from "../../i18n";
 import type { PanelTab } from "../../state/app";
 import { useApp } from "../context";
@@ -10,14 +10,21 @@ import { BrowserPanel } from "./BrowserPanel";
 import { ChangesPanel, FilesPanel } from "./CodePanels";
 import { TerminalPanel } from "./TerminalPanel";
 
+export const PANEL_ICON: Record<PanelTab, IconName> = { artifact: "artifacts", browser: "globe", changes: "branch", files: "folder", terminal: "terminal" };
+
 export function panelTabs(mode: string): PanelTab[] {
   return mode === "code" ? ["changes", "files", "terminal", "browser"] : ["artifact", "browser"];
 }
 
+/** The tab actually shown: the saved one if this mode has it, else the mode's first. */
+export function effectiveTab(mode: string, saved: PanelTab): PanelTab {
+  const tabs = panelTabs(mode);
+  return tabs.includes(saved) ? saved : tabs[0];
+}
+
 export function RightPanel() {
   const app = useApp();
-  const tabs = panelTabs(app.ui.mode);
-  const tab = tabs.includes(app.ui.panelTab) ? app.ui.panelTab : tabs[0];
+  const tab = effectiveTab(app.ui.mode, app.ui.panelTab);
   const sid = app.ui.activeSession;
   const drag = useRef<{ x: number; w: number } | null>(null);
 
@@ -43,14 +50,24 @@ export function RightPanel() {
         }}
         onPointerUp={() => (drag.current = null)}
       />
-      <div className="panel__head">
-        <Tabs label="Panel" value={tab} onChange={(id) => app.setUi({ panelTab: id as PanelTab })} tabs={tabs.map((id) => ({ id, label: t(`panel.${id}` as Parameters<typeof t>[0]) }))} />
-        <span className="grow" />
-        <IconButton icon="x" label={t("panel.hide")} onClick={() => app.setUi({ panelOpen: false })} />
+      <div className="panel__head" data-tauri-drag-region>
+        {/* The header's icon buttons switch tabs (D54); the panel just names what it shows. */}
+        <h2 className="panel__title">{t(`panel.${tab}` as Parameters<typeof t>[0])}</h2>
+        <span className="grow" data-tauri-drag-region />
+        <IconButton
+          icon="expand"
+          size="sm"
+          label={t("artifact.fullscreen")}
+          onClick={() => {
+            const max = Math.max(280, Math.min(1400, window.innerWidth - (app.ui.sidebarCollapsed ? 0 : app.ui.sidebarWidth) - 360));
+            app.setUi({ panelWidth: app.ui.panelWidth >= max - 10 ? 420 : max });
+          }}
+        />
+        <IconButton icon="x" size="sm" label={t("panel.hide")} onClick={() => app.setUi({ panelOpen: false })} />
       </div>
-      <div className="panel__body" role="tabpanel">
+      <div className="panel__body">
         {!sid ? (
-          <div className="empty muted">{tab === "artifact" ? t("artifact.none") : t("browser.idle")}</div>
+          <EmptyState icon={PANEL_ICON[tab]} title={t("panel.noSessionTitle")} hint={t("panel.noSession")} />
         ) : tab === "artifact" ? (
           <ArtifactPanel sessionId={sid} />
         ) : tab === "browser" ? (

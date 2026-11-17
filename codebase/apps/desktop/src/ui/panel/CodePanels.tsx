@@ -3,7 +3,7 @@
 // TerminalPanel.tsx.
 import { useMemo, useState } from "react";
 import type { CheckpointEntry, CommitThen, FileChange, FileNode } from "@genie/protocol";
-import { Badge, Button, Icon, Input, Menu, Segmented } from "@genie/ui";
+import { Badge, Button, EmptyState, Icon, Input, Menu, Segmented } from "@genie/ui";
 import { t } from "../../i18n";
 import { highlight } from "../../markdown/markdown";
 import { useApp, useAsync, useSession } from "../context";
@@ -71,7 +71,7 @@ export function ChangesPanel({ sessionId }: { sessionId: string }) {
     }
   };
 
-  if (status.error) return <div className="empty muted">{app.describeError(status.error)}</div>;
+  if (status.error) return <EmptyState icon="branch" title={t("changes.unavailable")} hint={app.describeError(status.error)} />;
   const changed: FileChange[] = status.data?.files ?? [];
   return (
     <div className="stack panel-pad">
@@ -144,7 +144,7 @@ export function FilesPanel({ sessionId }: { sessionId: string }) {
   const file = useAsync(() => (open ? app.client.files.read({ session_id: sessionId, path: open }) : Promise.resolve(null)), [sessionId, open]);
   const marks = new Map((status.data?.files ?? []).map((f) => [f.path, MARK[f.change] ?? ""]));
   const nodes: FileNode[] = (tree.data?.nodes ?? []).filter((n) => !filter || n.path.toLowerCase().includes(filter.toLowerCase()));
-  if (tree.error) return <div className="empty muted">{app.describeError(tree.error)}</div>;
+  if (tree.error) return <EmptyState icon="folder" title={t("files.unavailable")} hint={app.describeError(tree.error)} />;
   if (open)
     return (
       <div className="stack panel-pad">
@@ -160,7 +160,7 @@ export function FilesPanel({ sessionId }: { sessionId: string }) {
   return (
     <div className="stack panel-pad">
       <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("sidebar.search")} aria-label={t("sidebar.search")} />
-      {!nodes.length && <div className="muted">{tree.loading ? t("common.loading") : t("code.emptyFiles")}</div>}
+      {!nodes.length && (tree.loading ? <div className="muted">{t("common.loading")}</div> : <EmptyState icon="folder" title={filter ? t("sidebar.noResults") : t("files.empty")} />)}
       <ul className="tree">
         {nodes.slice(0, 2000).map((n) => (
           <li key={n.path} style={{ paddingLeft: (n.path.split("/").length - 1) * 12 }}>

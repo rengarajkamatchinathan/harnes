@@ -11,8 +11,8 @@ import type { MessageView, PartView, SessionModel, ToolView } from "../../state/
 import { siblingInfo } from "../../state/sessionModel";
 import type { SessionStore } from "../../state/session";
 import { useAppStatic } from "../context";
-import { MarkdownText, StreamingText } from "./Markdown";
-import { headTail, resultText, summarizeTool } from "./toolInfo";
+import { TextPart } from "./Markdown";
+import { headTail, resultText, summarizeTool, toolActivity } from "./toolInfo";
 
 export function Transcript({ store, compact, onRewind }: { store: SessionStore; compact?: boolean; onRewind?: (m: MessageView) => void }) {
   const model = store.model;
@@ -60,6 +60,7 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
           );
         })}
       </div>
+      <TurnIndicator store={store} />
     </div>
   );
 }
@@ -123,10 +124,12 @@ const MessageRow = memo(
             {msg.parts.map((p) => (
               <PartRow key={p.id} part={p} model={model} compact={compact} />
             ))}
-            {!msg.parts.length && <span className="caret" aria-hidden />}
           </div>
         )}
-        {!streaming && (
+        {/* While streaming the row keeps its height (empty) so it doesn't push content when it appears. */}
+        {streaming ? (
+          <div className="msg__actions" aria-hidden />
+        ) : (
           <div className="msg__actions">
             {sib && (
               <span className="branch" aria-label={`${sib.index + 1}/${sib.ids.length}`}>
@@ -163,12 +166,10 @@ function PartRow({ part, model, compact }: { part: PartView; model: SessionModel
   switch (part.kind) {
     case "text": {
       const cites = part.final?.type === "text" ? part.final.citations : undefined;
-      return part.streaming ? (
-        <StreamingText part={part} />
-      ) : (
+      return (
         <>
-          <MarkdownText text={part.text} citations={cites} />
-          {cites && cites.length > 0 && <Sources cites={cites} />}
+          <TextPart part={part} citations={cites} />
+          {!part.streaming && cites && cites.length > 0 && <Sources cites={cites} />}
         </>
       );
     }
@@ -364,4 +365,36 @@ export function UsageChip({ u }: { u: TurnUsage }) {
       {t("chat.usage", { tokens: fmtTokens(total), cost: u.usd >= 0.01 ? u.usd.toFixed(2) : u.usd.toFixed(4) })}
     </span>
   );
+}
+
+/**
+ * What Genie is doing while a turn runs, below the last message: an animated mark plus a
+ * shimmering label ("Thinking", "Running a command", "Working on it"). While reply text is
+ * streaming only the mark shows. Hidden when idle or waiting on an approval card.
+ */
+export function TurnIndicator({ store }: { store: SessionStore }) {
+  const m = store.model;
+  if (!store.busy || m.status === "awaiting_ask" || m.status === "paused") return null;
+  const label = turnLabel(m);
+  return (
+    <div className="turn" role="status" aria-label={label || t("chat.statusRunning")}>
+      <span className="turn__mark" aria-hidden>
+        <Icon name="sparkle" size={18} />
+      </span>
+      {label && <span className="turn__label">{label}</span>}
+    </div>
+  );
+}
+
+/** The indicator's label (pure, for tests): "" means "mark only" (reply text is streaming). */
+export function turnLabel(m: SessionModel): string {
+  if (m.status === "compacting") return t("chat.statusCompacting");
+  const running = [...m.tools.values()].filter((x) => !x.outcome);
+  if (running.length) return toolActivity(running[running.length - 1].name);
+  const last = m.messages[m.messages.length - 1];
+  const live = last?.role === "assistant" ? last.parts.find((p) => p.streaming) : undefined;
+  if (live?.kind === "reasoning") return t("chat.thinkingShort");
+  if (live?.kind === "text") return "";
+  if (live?.kind === "tool_call") return t("chat.preparingTool");
+  return t("chat.workingOnIt");
 }

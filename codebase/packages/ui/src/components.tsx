@@ -390,6 +390,7 @@ export function Field({
   htmlFor,
   children,
   extra,
+  inline,
 }: {
   label: ReactNode;
   description?: ReactNode;
@@ -399,28 +400,61 @@ export function Field({
   htmlFor?: string;
   children: ReactNode;
   extra?: ReactNode;
+  /** Label and description on the left, the control on the right (settings rows). */
+  inline?: boolean;
 }) {
+  const head = (
+    <div className="g-field__head">
+      <label className="g-field__label" htmlFor={htmlFor}>
+        {label}
+      </label>
+      {locked && (
+        <span className="g-field__lock">
+          <Icon name="lock" /> {locked}
+        </span>
+      )}
+      {saved && !error && <span className="g-field__saved" role="status">Saved</span>}
+      {extra}
+    </div>
+  );
+  const err = error && (
+    <div className="g-field__error" role="alert">
+      {error}
+    </div>
+  );
+  if (inline)
+    return (
+      <div className="g-field g-field--inline">
+        <div className="g-field__text">
+          {head}
+          {description && <div className="g-field__desc">{description}</div>}
+        </div>
+        <div className="g-field__control">{children}</div>
+        {err}
+      </div>
+    );
   return (
     <div className="g-field">
-      <div className="g-field__head">
-        <label className="g-field__label" htmlFor={htmlFor}>
-          {label}
-        </label>
-        {locked && (
-          <span className="g-field__lock">
-            <Icon name="lock" /> {locked}
-          </span>
-        )}
-        {saved && !error && <span className="g-field__saved" role="status">Saved</span>}
-        {extra}
-      </div>
+      {head}
       {description && <div className="g-field__desc">{description}</div>}
       {children}
-      {error && (
-        <div className="g-field__error" role="alert">
-          {error}
-        </div>
+      {err}
+    </div>
+  );
+}
+
+/** Centred placeholder for a panel or list with nothing in it yet: icon, title, hint, action. */
+export function EmptyState({ icon, title, hint, action }: { icon?: IconName; title: ReactNode; hint?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="g-empty">
+      {icon && (
+        <span className="g-empty__icon" aria-hidden>
+          <Icon name={icon} size={20} />
+        </span>
       )}
+      <div className="g-empty__title">{title}</div>
+      {hint && <div className="g-empty__hint">{hint}</div>}
+      {action && <div className="g-empty__action">{action}</div>}
     </div>
   );
 }

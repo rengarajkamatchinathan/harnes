@@ -69,8 +69,11 @@ export function FirstRun() {
         </div>
         {step === "welcome" && (
           <>
-            <h1>
-              <Icon name="sparkle" size={24} /> {t("firstrun.welcome")}
+            <h1 className="firstrun__title">
+              <span className="hero__mark" aria-hidden>
+                <Icon name="sparkle" size={30} />
+              </span>
+              {t("firstrun.welcome")}
             </h1>
             <p>{t("firstrun.welcomeBody")}</p>
           </>

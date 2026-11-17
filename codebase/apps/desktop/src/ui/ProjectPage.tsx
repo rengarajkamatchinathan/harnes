@@ -1,10 +1,11 @@
 // Project page (05 §2.4, D32): name, instructions, knowledge files, starred, chats, capacity.
 import { useEffect, useRef, useState } from "react";
 import type { IndexStatus, ProjectFileInfo } from "@genie/protocol";
-import { Badge, Button, Input, Progress, Switch, Textarea } from "@genie/ui";
+import { Badge, Icon, IconButton, Menu, Progress, Textarea } from "@genie/ui";
 import { t } from "../i18n";
 import { formatBytes, uploadBlob } from "../state/attachments";
 import { useApp } from "./context";
+import { TitlebarControls } from "./Sidebar";
 
 export function ProjectPage({ id }: { id: string }) {
   const app = useApp();
@@ -38,79 +39,121 @@ export function ProjectPage({ id }: { id: string }) {
 
   if (!p) return <div className="empty muted">{t("common.loading")}</div>;
   const save = () => void app.client.project.update({ project_id: id, name, instructions }).then(() => app.refreshLists(), fail);
-  const chats = [...app.sessions.values()].filter((s) => s.project_id === id);
+  const chats = [...app.sessions.values()].filter((s) => s.project_id === id && !s.archived).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
   return (
-    <div className="page">
-      <div className="page__inner stack">
-        <div className="row">
-          <Input value={name} onChange={(e) => setName(e.target.value)} onBlur={save} aria-label="Name" className="title-input" />
-          <Switch checked={!!p.starred} onChange={(v) => void app.client.project.update({ project_id: id, starred: v }).then(() => app.refreshLists(), fail)} label="Starred" />
-        </div>
-        <label className="stack-tight">
-          <span>Instructions</span>
-          <Textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} onBlur={save} />
-        </label>
-        <h3 className="section-title">Knowledge</h3>
-        {index && (
-          <div className="stack-tight">
-            <Progress value={index.capacity_pct / 100} warn={index.capacity_pct > 50} label="Capacity" />
-            <div className="row muted">
-              {index.files} files · {index.tokens} tokens · {Math.round(index.capacity_pct)}% of the window
-              {index.mode === "retrieval" && <Badge tone="info">Using retrieval</Badge>}
-              {index.indexing && <span className="g-spinner" aria-label="Indexing" />}
-            </div>
-          </div>
-        )}
-        {files && !files.length && <p className="muted">{t("project.noFiles")}</p>}
-        {(files ?? []).map((f) => (
-          <div key={f.file_id} className="row">
-            <span className="grow">{f.name}</span>
-            <span className="muted">
-              {[f.size != null ? formatBytes(f.size) : null, f.tokens != null ? `${f.tokens} tokens` : null].filter(Boolean).join(" · ")}
+    <div className="chat">
+      <header className={`chat__header ${app.ui.sidebarCollapsed ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
+        {app.ui.sidebarCollapsed && <TitlebarControls />}
+        <span className="chat__title chat__title--muted">{t("sidebar.projects")}</span>
+      </header>
+      <div className="page">
+        <div className="page__inner project">
+          <div className="project__head">
+            <span className="project__icon" aria-hidden>
+              <Icon name="folder" size={18} />
             </span>
-            <Button size="sm" variant="ghost" onClick={() => void app.client.project.file.remove({ project_id: id, file_id: f.file_id }).then(loadFiles, fail)}>
-              {t("common.delete")}
-            </Button>
-          </div>
-        ))}
-        <div>
-          <Button icon="paperclip" onClick={() => fileRef.current?.click()}>
-            Upload files
-          </Button>
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            hidden
-            onChange={async (e) => {
-              for (const f of [...(e.target.files ?? [])]) {
-                try {
-                  const blob_id = await uploadBlob(app.client, f);
-                  await app.client.project.file.add({ project_id: id, blob_id, name: f.name });
-                  await loadFiles();
-                } catch (err) {
-                  fail(err);
-                }
-              }
-            }}
-          />
-        </div>
-        <h3 className="section-title">Chats</h3>
-        {chats.map((s) => (
-          <div key={s.session_id} className="row">
-            <button className="list-button grow" onClick={() => app.selectSession(s.session_id)}>
-              {s.title || t("sidebar.untitled")}
+            <input className="project__name" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== p.name && save()} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} aria-label={t("project.name")} />
+            <button
+              className={`project__star ${p.starred ? "is-on" : ""}`}
+              aria-pressed={!!p.starred}
+              aria-label={p.starred ? t("project.unstar") : t("project.star")}
+              title={p.starred ? t("project.unstar") : t("project.star")}
+              onClick={() => void app.client.project.update({ project_id: id, starred: !p.starred }).then(() => app.refreshLists(), fail)}
+            >
+              {p.starred ? "★" : "☆"}
             </button>
-            <Button size="sm" variant="ghost" onClick={() => void app.moveToProject(s.session_id, null).catch(fail)}>
-              {t("project.moveOut")}
-            </Button>
           </div>
-        ))}
-        <div>
-          <Button variant="primary" icon="plus" onClick={() => app.setUi({ view: "main", activeSession: null, activeProject: id })}>
-            {t("sidebar.newChat")}
-          </Button>
+
+          <button className="project__new" onClick={() => app.setUi({ view: "main", activeSession: null, activeProject: id })}>
+            <Icon name="plus" />
+            <span>{t("project.newChat", { name: p.name })}</span>
+          </button>
+
+          <div className="project__grid">
+            <section className="project__main">
+              <h3 className="section-title">{t("project.chats")}</h3>
+              {chats.length === 0 ? (
+                <p className="muted settings-note">{t("project.noChats")}</p>
+              ) : (
+                <div className="list-box">
+                  {chats.map((s) => (
+                    <div key={s.session_id} className="list-box__row project__chat">
+                      <button className="project__chat-link" onClick={() => app.selectSession(s.session_id)}>
+                        <span className="sidebar__title">{s.title || t("sidebar.untitled")}</span>
+                        <span className="muted project__when">{new Date(s.updated_at).toLocaleDateString()}</span>
+                      </button>
+                      <Menu
+                        label={t("chat.options")}
+                        align="right"
+                        items={[{ id: "out", label: t("project.moveOut"), icon: "folder", onSelect: () => void app.moveToProject(s.session_id, null).catch(fail) }]}
+                        trigger={(tp) => <IconButton icon="more" size="sm" label={t("chat.options")} {...tp} />}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <aside className="project__side">
+              <div className="project__card">
+                <div className="project__card-head">
+                  <strong>{t("project.instructions")}</strong>
+                </div>
+                <Textarea
+                  className="project__instructions"
+                  value={instructions}
+                  placeholder={t("project.instructionsHint")}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  onBlur={() => instructions !== (p.instructions ?? "") && save()}
+                  aria-label={t("project.instructions")}
+                />
+              </div>
+
+              <div className="project__card">
+                <div className="project__card-head">
+                  <strong>{t("project.knowledge")}</strong>
+                  <IconButton icon="plus" size="sm" label={t("project.upload")} onClick={() => fileRef.current?.click()} />
+                </div>
+                {index && index.files > 0 && (
+                  <div className="stack-tight">
+                    <Progress value={index.capacity_pct / 100} warn={index.capacity_pct > 50} label={t("project.capacity")} />
+                    <div className="row muted project__meta">
+                      {t("project.capacityText", { pct: Math.round(index.capacity_pct) })}
+                      {index.mode === "retrieval" && <Badge tone="info">{t("project.retrieval")}</Badge>}
+                      {index.indexing && <span className="g-spinner" aria-label={t("project.indexing")} />}
+                    </div>
+                  </div>
+                )}
+                {files && !files.length && <p className="muted project__meta">{t("project.noFiles")}</p>}
+                {(files ?? []).map((f) => (
+                  <div key={f.file_id} className="row project__file">
+                    <Icon name="file" size={14} />
+                    <span className="grow sidebar__title">{f.name}</span>
+                    <span className="muted project__meta">{[f.size != null ? formatBytes(f.size) : null, f.tokens != null ? `${f.tokens} tokens` : null].filter(Boolean).join(" · ")}</span>
+                    <IconButton icon="trash" size="sm" label={t("common.delete")} onClick={() => void app.client.project.file.remove({ project_id: id, file_id: f.file_id }).then(loadFiles, fail)} />
+                  </div>
+                ))}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={async (e) => {
+                    for (const f of [...(e.target.files ?? [])]) {
+                      try {
+                        const blob_id = await uploadBlob(app.client, f);
+                        await app.client.project.file.add({ project_id: id, blob_id, name: f.name });
+                        await loadFiles();
+                      } catch (err) {
+                        fail(err);
+                      }
+                    }
+                  }}
+                />
+              </div>
+            </aside>
+          </div>
         </div>
       </div>
     </div>

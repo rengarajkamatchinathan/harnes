@@ -4,7 +4,7 @@
 // arrive by postMessage and offer "Fix with Genie".
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArtifactGetResult, ArtifactSummary } from "@genie/protocol";
-import { Banner, Button, IconButton, Segmented, Select } from "@genie/ui";
+import { Banner, Button, EmptyState, IconButton, Segmented, Select } from "@genie/ui";
 import { t } from "../../i18n";
 import { highlight } from "../../markdown/markdown";
 import { useApp, useSession } from "../context";
@@ -69,7 +69,7 @@ export function ArtifactPanel({ sessionId }: { sessionId: string }) {
       .catch((e) => setError({ message: app.describeError(e), stack: "" }));
   }, [app, current, version]);
 
-  if (!list.length) return <div className="empty muted">{t("artifact.none")}</div>;
+  if (!list.length) return <EmptyState icon="artifacts" title={t("artifact.noneTitle")} hint={t("artifact.none")} />;
   const vIdx = current && version != null ? current.versions.indexOf(version) : -1;
   const content = art?.content ?? "";
   const type = art?.type ?? current?.type ?? "code";

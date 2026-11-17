@@ -2,7 +2,7 @@
 // "Not available from this engine yet" instead of failing.
 import { useState } from "react";
 import type { MemoryItem } from "@genie/protocol";
-import { applyAppearance, Badge, Banner, Button, Card, Dialog, Field, Input, Segmented, Select, Switch, Textarea, type ChatFont, type Density, type ThemePref } from "@genie/ui";
+import { applyAppearance, Badge, Banner, Button, Card, Dialog, Field, IconButton, Input, Segmented, Select, Switch, Textarea, type ChatFont, type Density, type ThemePref } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
 import { errorKind, type CliInstall } from "../../platform";
 import { useApp, useAsync } from "../context";
@@ -24,17 +24,18 @@ export function AppearanceSection() {
     if (patch.theme) void app.client.config.set({ key: "theme", value: patch.theme, scope: "user" }).catch(() => {});
   };
   return (
-    <div className="stack">
-      <Field label={t("appearance.theme")}>
+    <div className="settings-group">
+      <Field inline label={t("appearance.theme")}>
         <Segmented<ThemePref> label={t("appearance.theme")} value={a.theme} onChange={(theme) => set({ theme })} options={[{ value: "system", label: t("appearance.system") }, { value: "light", label: t("appearance.light") }, { value: "dark", label: t("appearance.dark") }]} />
       </Field>
-      <Field label={t("appearance.chatFont")}>
+      <Field inline label={t("appearance.chatFont")}>
         <Select value={a.chatFont} onChange={(v) => set({ chatFont: v as ChatFont })} options={(["default", "system", "dyslexia"] as const).map((f) => ({ value: f, label: t(`appearance.font.${f}`) }))} />
       </Field>
-      <Field label={t("appearance.fontSize")} description={`${a.fontSize}px`}>
-        <input type="range" min={12} max={30} value={a.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} aria-label={t("appearance.fontSize")} />
+      <Field inline label={t("appearance.fontSize")}>
+        <input className="range" type="range" min={12} max={30} value={a.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} aria-label={t("appearance.fontSize")} />
+        <span className="range__value">{a.fontSize}px</span>
       </Field>
-      <Field label={t("appearance.density")}>
+      <Field inline label={t("appearance.density")}>
         <Segmented<Density> label={t("appearance.density")} value={a.density} onChange={(density) => set({ density })} options={[{ value: "comfortable", label: t("appearance.comfortable") }, { value: "compact", label: t("appearance.compact") }]} />
       </Field>
     </div>
@@ -46,28 +47,25 @@ export function GeneralExtras() {
   const [report, setReport] = useState<unknown>(null);
   const [err, setErr] = useState<unknown>(null);
   return (
-    <div className="stack">
-      <Field label="Import" description="Bring settings from Claude Code, Claude Desktop or OpenCode (D53).">
-        <div className="row">
-          <Button onClick={() => void app.client.import.scan({}).then((r) => setReport(r.report), setErr)}>Scan</Button>
-          {report != null && (
-            <Button variant="primary" onClick={() => void app.client.import.apply({}).then((r) => (setReport(r.report), app.toast({ title: "Imported", tone: "success" })), setErr)}>
-              Import
-            </Button>
-          )}
-        </div>
-        {report != null && <pre className="code">{JSON.stringify(report, null, 2)}</pre>}
-        <Unavailable error={err} />
+    <div className="settings-group">
+      <Field inline label={t("settings.import")} description={t("settings.importHint")}>
+        <Button onClick={() => void app.client.import.scan({}).then((r) => setReport(r.report), setErr)}>{t("settings.importScan")}</Button>
+        {report != null && (
+          <Button variant="primary" onClick={() => void app.client.import.apply({}).then((r) => (setReport(r.report), app.toast({ title: t("settings.imported"), tone: "success" })), setErr)}>
+            {t("settings.importApply")}
+          </Button>
+        )}
       </Field>
+      {report != null && <pre className="code">{JSON.stringify(report, null, 2)}</pre>}
+      <Unavailable error={err} />
       <InstallCli />
-      <Field label={t("settings.osNotifications")} description={t("settings.osNotificationsHint")}>
+      <Field inline label={t("settings.osNotifications")} description={t("settings.osNotificationsHint")}>
         <Switch checked={app.ui.osNotifications} onChange={(v) => app.setUi({ osNotifications: v })} aria-label={t("settings.osNotifications")} />
       </Field>
     </div>
   );
 }
 
-/** "Install `genie` command in PATH" (05 §4 General, D40). */
 export function InstallCli() {
   const app = useApp();
   const [done, setDone] = useState<CliInstall | null>(null);
@@ -83,17 +81,22 @@ export function InstallCli() {
     }
   };
   return (
-    <Field label={t("settings.installCli")} description={t("settings.installCliHint")}>
-      <div className="row">
-        <Button disabled={busy} onClick={() => void install()}>
-          {done ? t("settings.reinstall") : t("settings.install")}
-        </Button>
-      </div>
-      {done && (
-        <p className="muted">
-          {t("settings.installed", { path: done.path })} {!done.on_path && t("settings.addToPath", { dir: done.dir })}
-        </p>
-      )}
+    <Field
+      inline
+      label={t("settings.installCli")}
+      description={
+        done ? (
+          <>
+            {t("settings.installed", { path: done.path })} {!done.on_path && t("settings.addToPath", { dir: done.dir })}
+          </>
+        ) : (
+          t("settings.installCliHint")
+        )
+      }
+    >
+      <Button disabled={busy} onClick={() => void install()}>
+        {done ? t("settings.reinstall") : t("settings.install")}
+      </Button>
     </Field>
   );
 }
@@ -105,32 +108,31 @@ export function GenieSection() {
   const [editing, setEditing] = useState<MemoryItem | null>(null);
   const [text, setText] = useState("");
   const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
+  const items = mem.data?.items ?? [];
   return (
-    <div className="stack">
-      <h3 className="section-title">{t("memory.title")}</h3>
-      <div className="row">
-        <Switch checked label={t("memory.on")} onChange={(v) => void app.client.memory.set_state({ state: v ? "on" : "paused" }).catch(fail)} />
-        <span className="grow" />
-        <Button variant="danger" onClick={() => setConfirm(true)}>
-          {t("memory.reset")}
-        </Button>
+    <div className="settings-group">
+      <div className="settings-subhead">
+        <h3 className="section-title">{t("memory.saved")}</h3>
+        {items.length > 0 && (
+          <Button size="sm" variant="ghost" onClick={() => setConfirm(true)}>
+            {t("memory.reset")}
+          </Button>
+        )}
       </div>
       <Unavailable error={mem.error} />
-      {mem.data?.items.length === 0 && <p className="muted">{t("memory.empty")}</p>}
-      {mem.data?.items.map((m) => (
-        <Card key={m.memory_id}>
-          <div className="row">
-            <span className="grow">{m.text}</span>
-            <Badge>{m.scope}</Badge>
-            <Button size="sm" variant="ghost" onClick={() => (setEditing(m), setText(m.text))}>
-              {t("chat.edit")}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => void app.client.memory.delete({ memory_id: m.memory_id }).then(mem.reload, fail)}>
-              {t("common.delete")}
-            </Button>
-          </div>
-        </Card>
-      ))}
+      {mem.data && !items.length && <p className="muted settings-note">{t("memory.empty")}</p>}
+      {items.length > 0 && (
+        <div className="list-box">
+          {items.map((m) => (
+            <div key={m.memory_id} className="list-box__row">
+              <span className="grow">{m.text}</span>
+              <Badge>{m.scope}</Badge>
+              <IconButton icon="edit" size="sm" label={t("chat.edit")} onClick={() => (setEditing(m), setText(m.text))} />
+              <IconButton icon="trash" size="sm" label={t("common.delete")} onClick={() => void app.client.memory.delete({ memory_id: m.memory_id }).then(mem.reload, fail)} />
+            </div>
+          ))}
+        </div>
+      )}
       <Dialog open={!!editing} title={t("chat.edit")} onClose={() => setEditing(null)} footer={<Button variant="primary" onClick={() => void app.client.memory.update({ memory_id: editing!.memory_id, text }).then(() => (setEditing(null), mem.reload()), fail)}>{t("common.save")}</Button>}>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} />
       </Dialog>
@@ -159,35 +161,34 @@ export function CapabilitiesSection() {
   const browser = useAsync(() => app.client.browser.status({}), []);
   const sites = useAsync(() => app.client.browser.sites.list({}), []);
   const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
+  const found = browser.data?.installed ?? [];
   return (
-    <div className="stack">
+    <div className="settings-group">
       <h3 className="section-title">{t("capabilities.skills")}</h3>
       <Unavailable error={skills.error} />
+      {skills.data && !skills.data.skills.length && <p className="muted settings-note">{t("capabilities.noSkills")}</p>}
       {skills.data?.skills.map((s) => (
-        <div key={s.id} className="row">
-          <span className="grow">
-            <strong>{s.name}</strong> <span className="muted">{s.description} · {s.source}</span>
-          </span>
+        <Field key={s.id} inline label={s.name} description={[s.description, s.source].filter(Boolean).join(" · ")}>
           <Switch checked={s.enabled} aria-label={s.name} onChange={(v) => void app.client.skill.set_enabled({ id: s.id, enabled: v }).then(skills.reload, fail)} />
-        </div>
+        </Field>
       ))}
       <h3 className="section-title">{t("capabilities.browser")}</h3>
       <Unavailable error={browser.error} />
-      {browser.data && (browser.data.installed.length ? browser.data.installed.map((b) => <div key={b.path}>{t("capabilities.browserFound", { kind: b.kind, version: b.version })} <span className="muted">{b.path}</span></div>) : <p className="muted">{t("browser.none")}</p>)}
+      {browser.data && (
+        <Field inline label={t("capabilities.browserLabel")} description={found.length ? found.map((b) => t("capabilities.browserFound", { kind: b.kind, version: b.version })).join(", ") : t("browser.none")}>
+          <Button onClick={() => void app.client.browser.data.clear({ what: "all" }).then(() => app.toast({ title: t("capabilities.cleared"), tone: "success" }), fail)}>{t("capabilities.clearData")}</Button>
+        </Field>
+      )}
       {sites.data && sites.data.sites.length > 0 && (
         <>
-          <h4>{t("capabilities.sites")}</h4>
+          <h3 className="section-title">{t("capabilities.sites")}</h3>
           {sites.data.sites.map((s) => (
-            <div key={s.origin} className="row">
-              <code className="grow">{s.origin}</code>
-              <Select style={{ width: "auto" }} value={s.state} onChange={(v) => void app.client.browser.sites.set({ origin: s.origin, state: v as typeof s.state }).then(sites.reload, fail)} options={["blocked", "ask", "read", "act"].map((x) => ({ value: x, label: x }))} />
-            </div>
+            <Field key={s.origin} inline label={<code>{s.origin}</code>}>
+              <Select style={{ width: 140 }} value={s.state} onChange={(v) => void app.client.browser.sites.set({ origin: s.origin, state: v as typeof s.state }).then(sites.reload, fail)} options={["blocked", "ask", "read", "act"].map((x) => ({ value: x, label: x[0].toUpperCase() + x.slice(1) }))} />
+            </Field>
           ))}
         </>
       )}
-      <div>
-        <Button onClick={() => void app.client.browser.data.clear({ what: "all" }).then(() => app.toast({ title: t("capabilities.clearData"), tone: "success" }), fail)}>{t("capabilities.clearData")}</Button>
-      </div>
     </div>
   );
 }
@@ -209,6 +210,7 @@ export function ConnectorsSection() {
     <div className="stack">
       <h3 className="section-title">{t("connectors.title")}</h3>
       <Unavailable error={list.error} />
+      {list.data && !list.data.servers.length && <p className="muted settings-note">{t("connectors.none")}</p>}
       {list.data?.servers.map((s) => (
         <Card key={s.name}>
           <div className="row">
@@ -232,9 +234,9 @@ export function ConnectorsSection() {
           {s.error && <div className="error-text">{s.error}</div>}
         </Card>
       ))}
-      <Field label="Add custom server" description="A command (stdio) or an https:// URL.">
+      <Field label={t("connectors.add")} description={t("connectors.addHint")}>
         <div className="row">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="name" aria-label="Server name" style={{ maxWidth: 160 }} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("connectors.name")} aria-label={t("connectors.name")} style={{ maxWidth: 160 }} />
           <Input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="npx my-server  or  https://…" aria-label="Command or URL" />
           <Button disabled={!name || !cmd} onClick={add}>
             {t("common.save")}
@@ -257,31 +259,42 @@ export function UsageSection() {
   const [budget, setBudget] = useState("");
   const max = Math.max(1e-9, ...(rows.data?.rows ?? []).map((r) => r.cost.usd));
   return (
-    <div className="stack">
-      <Segmented label="Group by" value={group} onChange={setGroup} options={(["day", "provider", "model", "project"] as const).map((g) => ({ value: g, label: g }))} />
+    <div className="settings-group">
+      <div className="settings-subhead">
+        <h3 className="section-title">{t("usage.last30")}</h3>
+        <Segmented label={t("usage.groupBy")} value={group} onChange={setGroup} options={(["day", "provider", "model", "project"] as const).map((g) => ({ value: g, label: t(`usage.by.${g}`) }))} />
+      </div>
       <Unavailable error={rows.error} />
-      {rows.data?.rows.length === 0 && <p className="muted">{t("usage.none")}</p>}
-      <table className="table">
-        <tbody>
-          {rows.data?.rows.map((r) => (
-            <tr key={r.keys.join("/")}>
-              <td>{r.keys.join(" · ") || "—"}</td>
-              <td className="num">{formatTokens((r.usage.input_tokens ?? 0) + (r.usage.output_tokens ?? 0))}</td>
-              <td className="num">{formatCost(r.cost.usd)}</td>
-              <td style={{ width: "40%" }}>
-                <div className="bar" style={{ width: `${(r.cost.usd / max) * 100}%` }} />
-              </td>
+      {rows.data?.rows.length === 0 && <p className="muted settings-note">{t("usage.none")}</p>}
+      {!!rows.data?.rows.length && (
+        <table className="table table--usage">
+          <thead>
+            <tr>
+              <th>{t(`usage.by.${group}`)}</th>
+              <th className="num">{t("usage.tokens")}</th>
+              <th className="num">{t("usage.cost")}</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <Field label={t("usage.budget")} description="Notifications at 80% and 100%.">
-        <div className="row">
-          <Input type="number" value={budget} onChange={(e) => setBudget(e.target.value)} style={{ maxWidth: 160 }} />
-          <Button onClick={() => void app.client.usage.budget.set({ monthly_usd: budget ? Number(budget) : null }).then(() => app.toast({ title: t("settings.saved"), tone: "success" }), (e) => app.toast({ title: app.describeError(e), tone: "danger" }))}>
-            {t("common.save")}
-          </Button>
-        </div>
+          </thead>
+          <tbody>
+            {rows.data.rows.map((r) => (
+              <tr key={r.keys.join("/")}>
+                <td>{r.keys.join(" · ") || t("usage.unassigned")}</td>
+                <td className="num">{formatTokens((r.usage.input_tokens ?? 0) + (r.usage.output_tokens ?? 0))}</td>
+                <td className="num">{formatCost(r.cost.usd)}</td>
+                <td style={{ width: "40%" }}>
+                  <div className="bar" style={{ width: `${(r.cost.usd / max) * 100}%` }} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <Field inline label={t("usage.budget")} description={t("usage.budgetHint")}>
+        <Input type="number" min={0} value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={t("usage.noBudget")} aria-label={t("usage.budget")} style={{ width: 140 }} />
+        <Button onClick={() => void app.client.usage.budget.set({ monthly_usd: budget ? Number(budget) : null }).then(() => app.toast({ title: t("settings.saved"), tone: "success" }), (e) => app.toast({ title: app.describeError(e), tone: "danger" }))}>
+          {t("common.save")}
+        </Button>
       </Field>
     </div>
   );
@@ -289,21 +302,26 @@ export function UsageSection() {
 
 export function PrivacySection() {
   const app = useApp();
-  const [path, setPath] = useState("");
-  const choose = async () => {
-    const p = await app.platform.pickSavePath("genie-export.zip", [{ name: "Zip", extensions: ["zip"] }]).catch(() => null);
-    if (p) setPath(p);
+  const [busy, setBusy] = useState(false);
+  const exportAll = async () => {
+    const path = await app.platform.pickSavePath("genie-export.zip", [{ name: "Zip", extensions: ["zip"] }]).catch(() => null);
+    if (!path) return;
+    setBusy(true);
+    try {
+      await app.client.export.all({ path });
+      app.toast({ title: t("row.exported", { path }), tone: "success" });
+    } catch (e) {
+      app.toast({ title: app.describeError(e), tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
   };
   return (
-    <div className="stack">
-      <Field label={t("privacy.exportAll")} description="Writes an archive of every chat to a file you choose.">
-        <div className="row">
-          <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/genie-export.zip" aria-label={t("privacy.exportAll")} />
-          <Button onClick={() => void choose()}>{t("common.choose")}</Button>
-          <Button disabled={!path} onClick={() => void app.client.export.all({ path }).then(() => app.toast({ title: t("row.exported", { path }), tone: "success" }), (e) => app.toast({ title: app.describeError(e), tone: "danger" }))}>
-            {t("privacy.exportAll")}
-          </Button>
-        </div>
+    <div className="settings-group">
+      <Field inline label={t("privacy.exportAll")} description={t("privacy.exportHint")}>
+        <Button disabled={busy} onClick={() => void exportAll()}>
+          {t("privacy.export")}
+        </Button>
       </Field>
       <DeleteAllData />
     </div>
@@ -355,14 +373,14 @@ export function DeveloperSection() {
         </table>
       )}
       <h3 className="section-title">{t("developer.problems")}</h3>
-      {problems.data?.problems.length === 0 && <p className="muted">{t("developer.noProblems")}</p>}
+      {problems.data?.problems.length === 0 && <p className="muted settings-note">{t("developer.noProblems")}</p>}
       {problems.data?.problems.map((p, i) => (
         <Banner key={i} tone={p.severity === "error" ? "danger" : p.severity === "warning" ? "warning" : "info"}>
           {p.key && <code>{p.key}</code>} {p.message} {p.source && <span className="muted">({p.source})</span>}
         </Banner>
       ))}
       <h3 className="section-title">{t("developer.policy")}</h3>
-      <pre className="code">{JSON.stringify(policy.data?.values ?? {}, null, 2)}</pre>
+      {policy.data && Object.keys(policy.data.values ?? {}).length > 0 ? <pre className="code">{JSON.stringify(policy.data.values, null, 2)}</pre> : <p className="muted settings-note">{t("developer.noPolicy")}</p>}
     </div>
   );
 }
@@ -370,24 +388,35 @@ export function DeveloperSection() {
 export function AccountSection() {
   const app = useApp();
   const notices = useAsync(() => app.platform.notices(), []);
+  const [name, setName] = useState(app.ui.displayName);
   return (
-    <div className="stack">
-      <Card>
-        <strong>{t("account.about")}</strong>
-        <div>{t("account.version", { app: app.info?.app_version ?? "?", engine: app.status.engine_version ?? "?" })}</div>
-        <div className="muted">{t("account.licence")}</div>
-      </Card>
+    <div className="settings-group">
+      <h3 className="section-title">{t("account.profile")}</h3>
+      <Field inline label={t("account.callYou")} description={t("account.callYouHint")} htmlFor="display-name">
+        <Input id="display-name" value={name} placeholder={app.info?.user_name || t("sidebar.you")} onChange={(e) => setName(e.target.value)} onBlur={() => app.setUi({ displayName: name.trim() })} />
+      </Field>
+      <h3 className="section-title">{t("account.about")}</h3>
+      <Field inline label={t("account.appVersion")}>
+        <span className="muted">{app.info?.app_version ?? "—"}</span>
+      </Field>
+      <Field inline label={t("account.engineVersion")}>
+        <span className="muted">{app.status.engine_version ?? "—"}</span>
+      </Field>
+      <Field inline label={t("account.licenceLabel")}>
+        <span className="muted">{t("account.licence")}</span>
+      </Field>
       <h3 className="section-title">{t("account.notices")}</h3>
       {notices.loading ? (
-        <p className="muted">{t("common.loading")}</p>
+        <p className="muted settings-note">{t("common.loading")}</p>
       ) : notices.data ? (
         <details className="notices">
           <summary>{t("account.showNotices")}</summary>
           <pre className="code notices__text">{notices.data}</pre>
         </details>
       ) : (
-        <p className="muted">{t("account.noNotices")}</p>
+        <p className="muted settings-note">{t("account.noNotices")}</p>
       )}
     </div>
   );
 }
+

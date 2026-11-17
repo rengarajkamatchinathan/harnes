@@ -6,9 +6,9 @@ import { Button, Dialog, Input, Select, Switch } from "@genie/ui";
 import { t } from "../../i18n";
 import { useApp } from "../context";
 
-export function NewCodeSession({ onClose }: { onClose: () => void }) {
+export function NewCodeSession({ onClose, initialPath }: { onClose: () => void; initialPath?: string }) {
   const app = useApp();
-  const [path, setPath] = useState(app.ui.recentWorkspaces[0] ?? "");
+  const [path, setPath] = useState(initialPath ?? app.ui.recentWorkspaces[0] ?? "");
   const [worktree, setWorktree] = useState(false);
   const [agent, setAgent] = useState("");
   const [step, setStep] = useState<"form" | "trust" | "definitions">("form");

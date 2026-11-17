@@ -26,15 +26,15 @@ export function PermissionsSection() {
 
   const list: PermissionRule[] = rules.data?.rules ?? [];
   return (
-    <div className="stack">
+    <div className="settings-group">
       <h3 className="section-title">{t("permissions.rules")}</h3>
       {app.ui.recentWorkspaces.length > 0 && (
-        <Field label={t("permissions.folder")}>
-          <Select value={cwd} onChange={setCwd} aria-label={t("permissions.folder")} options={[{ value: "", label: "—" }, ...app.ui.recentWorkspaces.map((w) => ({ value: w, label: w }))]} />
+        <Field inline label={t("permissions.folder")}>
+          <Select value={cwd} onChange={setCwd} aria-label={t("permissions.folder")} options={[{ value: "", label: t("permissions.allFolders") }, ...app.ui.recentWorkspaces.map((w) => ({ value: w, label: w }))]} />
         </Field>
       )}
       {rules.error ? <p className="muted">{app.describeError(rules.error)}</p> : null}
-      {rules.data && !list.length && <p className="muted">{t("permissions.none")}</p>}
+      {rules.data && !list.length && <p className="muted settings-note">{t("permissions.none")}</p>}
       {list.length > 0 && (
         <table className="table">
           <tbody>
@@ -68,10 +68,10 @@ export function PermissionsSection() {
       )}
       <h3 className="section-title">{t("permissions.trusted")}</h3>
       {trust.error ? <p className="muted">{app.describeError(trust.error)}</p> : null}
-      {trust.data && !trust.data.items.length && <p className="muted">{t("permissions.noTrusted")}</p>}
+      {trust.data && !trust.data.items.length && <p className="muted settings-note">{t("permissions.noTrusted")}</p>}
       {(trust.data?.items ?? []).map((f) => (
-        <div key={f.path} className="row">
-          <Badge tone={f.decision === "trust" ? "success" : "danger"}>{f.decision}</Badge>
+        <div key={f.path} className="row settings-row">
+          <Badge tone={f.decision === "trust" ? "success" : "danger"}>{f.decision === "trust" ? t("permissions.trustedBadge") : t("permissions.blockedBadge")}</Badge>
           <code className="grow">{f.path}</code>
           {!!f.approvals && <span className="muted">{t("permissions.approvals", { n: f.approvals })}</span>}
           <span className="muted">{new Date(f.decided_at).toLocaleDateString()}</span>
@@ -110,12 +110,10 @@ export function DeleteAllData() {
     }
   };
   return (
-    <Field label={t("privacy.deleteAll")} description={t("privacy.deleteAllHint")}>
-      <div>
-        <Button variant="danger" onClick={begin}>
-          {t("privacy.deleteAll")}
-        </Button>
-      </div>
+    <Field inline label={t("privacy.deleteAll")} description={t("privacy.deleteAllHint")}>
+      <Button variant="danger" onClick={begin}>
+        {t("privacy.deleteAllShort")}
+      </Button>
       <Dialog
         open={!!plan}
         title={t("privacy.deleteAll")}

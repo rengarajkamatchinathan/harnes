@@ -53,6 +53,11 @@ export interface UiState {
   osNotifications: boolean;
   /** The D35 notice was shown before code execution was first turned on. */
   codeExecNoticeSeen: boolean;
+  /** "What should Genie call you?" — greeting and sidebar footer. */
+  displayName: string;
+  sidebarCollapsed: boolean;
+  /** Sidebar sections the user folded (e.g. "pinned", "recents", a workspace path). */
+  foldedSections: string[];
 }
 
 const DEFAULT_UI: UiState = {
@@ -75,7 +80,20 @@ const DEFAULT_UI: UiState = {
   terminals: {},
   osNotifications: true,
   codeExecNoticeSeen: false,
+  displayName: "",
+  sidebarCollapsed: false,
+  foldedSections: [],
 };
+
+/** Where the user is, for the title-bar back/forward buttons. */
+interface Loc {
+  mode: SessionKind;
+  view: View;
+  activeSession: string | null;
+  activeProject: string | null;
+}
+const locOf = (u: UiState): Loc => ({ mode: u.mode, view: u.view, activeSession: u.activeSession, activeProject: u.activeProject });
+const sameLoc = (a: Loc, b: Loc) => a.mode === b.mode && a.view === b.view && a.activeSession === b.activeSession && a.activeProject === b.activeProject;
 
 export interface Toast {
   id: number;
@@ -132,8 +150,44 @@ export class App extends Emitter {
 
   // ---------- UI state ----------
 
+  private backStack: Loc[] = [];
+  private fwdStack: Loc[] = [];
+  private navigating = false;
+
+  get canGoBack() {
+    return this.backStack.length > 0;
+  }
+  get canGoForward() {
+    return this.fwdStack.length > 0;
+  }
+  goBack() {
+    this.travel(this.backStack, this.fwdStack);
+  }
+  goForward() {
+    this.travel(this.fwdStack, this.backStack);
+  }
+  private travel(from: Loc[], to: Loc[]) {
+    const loc = from.pop();
+    if (!loc) return;
+    to.push(locOf(this.ui));
+    this.navigating = true;
+    try {
+      this.setUi({ ...loc, activeSession: loc.activeSession && this.sessions.has(loc.activeSession) ? loc.activeSession : null });
+    } finally {
+      this.navigating = false;
+    }
+  }
+
   setUi(patch: Partial<UiState>) {
+    const before = locOf(this.ui);
     this.ui = { ...this.ui, ...patch };
+    const after = locOf(this.ui);
+    // Settings is a modal over the current place, so it is not a history step.
+    if (!this.navigating && !sameLoc(before, after) && before.view !== "settings" && after.view !== "settings") {
+      this.backStack.push(before);
+      if (this.backStack.length > 50) this.backStack.shift();
+      this.fwdStack = [];
+    }
     this.changedNow();
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
@@ -448,5 +502,10 @@ export class App extends Emitter {
 
   get selfId(): string {
     return this.info?.client_instance_id ?? "";
+  }
+
+  /** Name for the greeting and profile row: the one set in Settings, else the OS account's. */
+  get userName(): string {
+    return this.ui.displayName.trim() || this.info?.user_name?.trim() || "";
   }
 }

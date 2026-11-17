@@ -167,3 +167,22 @@ describe("panels", () => {
     expect(plural(2, { one: "# file", other: "# files" })).toBe("2 files");
   });
 });
+
+describe("turn indicator", () => {
+  const base = { status: "running", tools: new Map(), messages: [] } as unknown as import("../src/state/sessionModel").SessionModel;
+  it("labels tool activity in the present tense", async () => {
+    const { toolActivity } = await import("../src/ui/chat/toolInfo");
+    expect(toolActivity("bash")).toBe("Running a command");
+    expect(toolActivity("mcp__github__list")).toBe("Using github");
+    expect(toolActivity("load_skill")).toBe("Using a skill");
+  });
+  it("shows a running tool, thinking, mark-only while writing, else working", async () => {
+    const { turnLabel } = await import("../src/ui/chat/Transcript");
+    expect(turnLabel(base)).toBe("Working on it");
+    expect(turnLabel({ ...base, tools: new Map([["c", { name: "web_search", outcome: null }]]) } as never)).toBe("Searching the web");
+    const msg = (kind: string) => ({ role: "assistant", parts: [{ kind, streaming: true }] });
+    expect(turnLabel({ ...base, messages: [msg("reasoning")] } as never)).toBe("Thinking");
+    expect(turnLabel({ ...base, messages: [msg("text")] } as never)).toBe("");
+    expect(turnLabel({ ...base, status: "compacting" } as never)).toContain("Summarising");
+  });
+});
