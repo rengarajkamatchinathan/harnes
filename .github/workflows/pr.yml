@@ -1,0 +1,86 @@
+# Every PR (spec/09-distribution-and-ops.md §5.1). Thin by design: each job calls
+# `cargo xtask ci <step>` so the same gates run locally (`cargo xtask ci`) and the CI
+# platform can change without touching the logic (ticket 41).
+name: pr
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+defaults:
+  run:
+    working-directory: codebase
+
+jobs:
+  checks:
+    name: fmt, xtask check, unsafe, headers, secrets, feeds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codebase
+      # check = crate graph rules + no stray tokio::spawn + protocol schema drift and
+      # compatibility vs the released baseline (02 §10-11).
+      - run: cargo xtask ci fmt check unsafe headers secrets feeds
+
+  deny:
+    name: cargo-deny (licences, advisories, bans, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo xtask ci deny
+
+  test:
+    name: clippy + test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codebase
+      # Unit + contract tests, provider conformance layers 1-2 (cassettes, goldens),
+      # catalog patch tests: all part of the workspace test run.
+      - run: cargo xtask ci clippy test
+
+  frontend:
+    name: frontend (typecheck, lint, tests, pnpm audit)
+    runs-on: ubuntu-latest
+    # Runs once the pnpm workspace (apps/desktop, packages/ui) exists.
+    if: ${{ hashFiles('codebase/pnpm-workspace.yaml') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: codebase/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo xtask ci frontend

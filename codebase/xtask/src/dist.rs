@@ -101,7 +101,17 @@ pub fn run(root: &Path, sub: &str, args: Vec<String>) -> Result<String, Vec<Stri
             std::fs::write(&p, notices(root, &g)).map_err(|e| one(e.to_string()))?;
             Ok(format!("wrote {}", p.display()))
         }
-        "sign" => sign_os(&o),
+        "sign" => {
+            let os = o.pos(0, "macos|windows|linux").map_err(one)?;
+            let files: Vec<&str> = o.positional.iter().skip(1).map(String::as_str).collect();
+            sign_files(os, &files)
+        }
+        "checksums" => {
+            // Recompute over a directory that holds every target's artifacts (release job).
+            let sums = checksums(&out_dir).map_err(one)?;
+            std::fs::write(out_dir.join("SHA256SUMS"), &sums).map_err(|e| one(e.to_string()))?;
+            Ok(format!("{} files in {}/SHA256SUMS", sums.lines().count(), out_dir.display()))
+        }
         _ => dist(root, &o, &out_dir),
     }
 }
@@ -149,17 +159,36 @@ fn dist(root: &Path, o: &Opts, out_dir: &Path) -> Result<String, Vec<String>> {
     let sbom_path = out_dir.join(format!("genie-{VERSION}.cdx.json"));
     write(&sbom_path, &sbom(&g, built)).map_err(one)?;
 
-    // archive
-    let archive = if windows {
-        let a = format!("{base}.zip");
-        cmd(out_dir, "tar", &["-a", "-c", "-f", &a, &base])?;
-        a
+    // OS code signing of the binary before it is archived (macOS: codesign + notarise;
+    // Windows: Authenticode). Skipped with a note when the identities aren't configured.
+    let os = os_of(&triple);
+    if os != "linux" {
+        let staged = stage.join(exe).to_string_lossy().into_owned();
+        eprintln!("{}", sign_files(os, &[staged.as_str()])?);
+    }
+
+    // archive (COPYFILE_DISABLE keeps macOS `._*` metadata files out of the tarball)
+    let archive = if windows { format!("{base}.zip") } else { format!("{base}.tar.gz") };
+    let tar_args: Vec<&str> = if windows {
+        vec!["-a", "-c", "-f", &archive, &base]
     } else {
-        let a = format!("{base}.tar.gz");
-        cmd(out_dir, "tar", &["-czf", &a, &base])?;
-        a
+        vec!["-czf", &archive, &base]
     };
+    let status = Command::new("tar")
+        .args(&tar_args)
+        .env("COPYFILE_DISABLE", "1")
+        .current_dir(out_dir)
+        .status()
+        .map_err(|e| one(format!("tar: {e}")))?;
+    if !status.success() {
+        return Err(one(format!("tar exited with {status}")));
+    }
     let _ = std::fs::remove_dir_all(&stage);
+    if os == "linux" {
+        // Detached GPG signature next to the archive (09 §1); repos are signed at publish.
+        let a = out_dir.join(&archive).to_string_lossy().into_owned();
+        eprintln!("{}", sign_files(os, &[a.as_str()])?);
+    }
 
     // 4. feed-key signatures (artifact signatures in the update manifest)
     let key = std::env::var(UPDATES_KEY_ENV).ok().filter(|k| !k.trim().is_empty());
@@ -389,16 +418,24 @@ fn desktop(
 // ---------------------------------------------------------------------------------------
 // OS code signing (09 §1). Identities come from CI secrets by name; missing → skipped.
 
-fn sign_os(o: &Opts) -> Result<String, Vec<String>> {
-    let os = o.pos(0, "macos|windows|linux").map_err(|e| vec![e])?;
-    let files: Vec<&str> = o.positional.iter().skip(1).map(String::as_str).collect();
+fn os_of(triple: &str) -> &'static str {
+    if triple.contains("windows") {
+        "windows"
+    } else if triple.contains("apple") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+pub fn sign_files(os: &str, files: &[&str]) -> Result<String, Vec<String>> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     match os {
         "macos" => {
             let Some(identity) = env("APPLE_SIGNING_IDENTITY") else {
                 return Ok("macOS signing skipped: APPLE_SIGNING_IDENTITY not set".into());
             };
-            for f in &files {
+            for f in files {
                 cmd(
                     Path::new("."),
                     "codesign",
@@ -408,7 +445,7 @@ fn sign_os(o: &Opts) -> Result<String, Vec<String>> {
             // Notarise: one submission for the CLI archive / app bundle (09 §1).
             match (env("APPLE_API_KEY_PATH"), env("APPLE_API_KEY_ID"), env("APPLE_API_ISSUER")) {
                 (Some(k), Some(id), Some(iss)) => {
-                    for f in &files {
+                    for f in files {
                         let zip = format!("{f}.notarize.zip");
                         cmd(Path::new("."), "ditto", &["-c", "-k", "--keepParent", f, &zip])?;
                         cmd(
@@ -433,7 +470,7 @@ fn sign_os(o: &Opts) -> Result<String, Vec<String>> {
             else {
                 return Ok("Windows signing skipped: TRUSTED_SIGNING_DLIB / _METADATA not set".into());
             };
-            for f in &files {
+            for f in files {
                 cmd(
                     Path::new("."),
                     "signtool",
@@ -446,7 +483,7 @@ fn sign_os(o: &Opts) -> Result<String, Vec<String>> {
             let Some(keyid) = env("GPG_KEY_ID") else {
                 return Ok("Linux signing skipped: GPG_KEY_ID not set".into());
             };
-            for f in &files {
+            for f in files {
                 cmd(
                     Path::new("."),
                     "gpg",

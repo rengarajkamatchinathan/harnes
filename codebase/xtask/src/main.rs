@@ -7,6 +7,7 @@ mod ci;
 mod deps;
 mod dist;
 mod feed;
+mod feedbuild;
 mod opts;
 mod schema;
 mod spawn;
@@ -21,10 +22,11 @@ const USAGE: &str = "expected one of:
   check-deps | check-spawn | check-unsafe | check-headers | secret-scan
   schema [--check|--release]
   ci [--list | <step>...]    what PR CI runs (09 §5.1)
+  nightly <suite>            main/nightly suites (09 §5.2)
   dist [--target T] [--channel C] [--out DIR] [--base-url URL] [--no-build] [--desktop]
-  sbom | notices [--out DIR]
+  sbom | notices | checksums [--out DIR]
   sign <macos|windows|linux> <files...>
-  feed <keygen|pubkey|stamp|sign|sign-file|verify|rollout|gate|bucket> ...";
+  feed <build|keygen|pubkey|stamp|sign|sign-file|verify|rollout|gate|bucket> ...";
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -51,8 +53,9 @@ fn main() -> ExitCode {
         "check-headers" => vec![checks::check_headers(&root)],
         "secret-scan" => vec![checks::secret_scan(&root)],
         "ci" => vec![ci::run(&root, &rest)],
-        "dist" | "sbom" | "notices" | "sign" => vec![dist::run(&root, &cmd, rest)],
-        "feed" => vec![feed::run(rest)],
+        "nightly" => vec![ci::nightly(&root, &rest)],
+        "dist" | "sbom" | "notices" | "checksums" | "sign" => vec![dist::run(&root, &cmd, rest)],
+        "feed" => vec![feed::run(&root, rest)],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;

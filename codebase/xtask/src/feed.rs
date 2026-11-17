@@ -10,6 +10,8 @@
 //! timestamps are UTC `YYYY-MM-DDTHH:MM:SSZ`.
 //!
 //! Commands (`cargo xtask feed <cmd>`):
+//! - `build [--src feeds] --out <dir> [--previous-dir <published>]`: stamp + sign + verify
+//!   every feed for publishing (see `feedbuild`).
 //! - `keygen --out <file>`: new Ed25519 seed (hex, mode 0600); prints the public key.
 //! - `stamp <feed.json> [--ttl-days N] [--bump]`: set `issued_at`/`expires_at` (and `version+1`).
 //! - `sign <feed.json> (--key-env VAR | --key-file F)`: validate, then write `<feed.json>.sig`.
@@ -159,7 +161,7 @@ pub fn verify_bytes(keys: &[VerifyingKey], body: &[u8], sig_b64: &str) -> Result
     }
 }
 
-fn load_signing_key(o: &Opts) -> Result<SigningKey, String> {
+pub fn load_signing_key(o: &Opts) -> Result<SigningKey, String> {
     if let Some(var) = o.get("--key-env") {
         let v = std::env::var(var).map_err(|_| format!("environment variable {var} is not set"))?;
         parse_secret(&v)
@@ -479,13 +481,13 @@ fn sig_path(feed: &Path, o: &Opts) -> PathBuf {
     })
 }
 
-fn read_json(path: &Path) -> Result<(Vec<u8>, Value), String> {
+pub fn read_json(path: &Path) -> Result<(Vec<u8>, Value), String> {
     let body = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let doc = serde_json::from_slice(&body).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok((body, doc))
 }
 
-fn write_json(path: &Path, doc: &Value) -> Result<(), String> {
+pub fn write_json(path: &Path, doc: &Value) -> Result<(), String> {
     let mut s = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
     s.push('\n');
     std::fs::write(path, s).map_err(|e| format!("{}: {e}", path.display()))
@@ -516,12 +518,13 @@ pub fn validate(kind: Kind, doc: &Value) -> Vec<String> {
     }
 }
 
-pub fn run(args: Vec<String>) -> Result<String, Vec<String>> {
+pub fn run(root: &Path, args: Vec<String>) -> Result<String, Vec<String>> {
     let one = |e: String| vec![e];
     let mut it = args.into_iter();
     let cmd = it.next().unwrap_or_default();
     let o = Opts::parse(it).map_err(one)?;
     match cmd.as_str() {
+        "build" => crate::feedbuild::run(root, &o),
         "keygen" => {
             let out = PathBuf::from(o.require("--out").map_err(one)?);
             if out.exists() && !o.has("--force") {
@@ -635,7 +638,7 @@ pub fn run(args: Vec<String>) -> Result<String, Vec<String>> {
             }
         }
         other => Err(one(format!(
-            "unknown `feed {other}`; expected keygen | pubkey | stamp | sign | sign-file | verify | rollout | gate | bucket"
+            "unknown `feed {other}`; expected build | keygen | pubkey | stamp | sign | sign-file | verify | rollout | gate | bucket"
         ))),
     }
 }

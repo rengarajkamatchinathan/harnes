@@ -1,8 +1,8 @@
 //! `cargo xtask ci [step…]`: what PR CI runs (09 §5.1), runnable locally. The workflows in
 //! `.github/workflows/` call these steps one by one so the CI platform stays swappable.
 //!
-//! Steps: fmt, clippy, test, check (deps + spawn + schema), unsafe, headers, secrets, deny,
-//! frontend. With no step, all run in that order and every failure is reported at the end.
+//! Steps: fmt, clippy, test, check (deps + spawn + schema), unsafe, headers, secrets, feeds,
+//! deny, frontend. With no step, all run in that order and every failure is reported at the end.
 //! Tools that aren't installed (cargo-deny, pnpm) are skipped locally and are errors when
 //! `CI` is set (CI must not silently skip a gate).
 
@@ -19,6 +19,7 @@ pub const STEPS: &[(&str, &str)] = &[
     ("unsafe", "unsafe only where 08 §9 allows, each with a SAFETY note"),
     ("headers", "OpenCode-derived files carry the MIT notice"),
     ("secrets", "no credentials in tracked files, fixtures or cassettes"),
+    ("feeds", "feed sources build, sign (throwaway keys) and verify"),
     ("deny", "cargo deny check (licences, advisories, bans, sources)"),
     ("frontend", "pnpm typecheck/lint/test + pnpm audit (when the pnpm workspace exists)"),
 ];
@@ -89,6 +90,7 @@ fn run_step(root: &Path, step: &str) -> Result<String, Vec<String>> {
         "unsafe" => checks::check_unsafe(root),
         "headers" => checks::check_headers(root),
         "secrets" => checks::secret_scan(root),
+        "feeds" => crate::feedbuild::dry_run(root),
         "deny" => {
             if !tool_exists(&cargo(), &["deny", "--version"]) {
                 return missing("cargo-deny", "cargo install cargo-deny --locked");
@@ -144,5 +146,33 @@ pub fn cmd(root: &Path, prog: &str, args: &[&str]) -> Result<String, Vec<String>
         Ok(shown)
     } else {
         Err(vec![format!("`{shown}` exited with {status}")])
+    }
+}
+
+/// `cargo xtask nightly <suite>` (09 §5.2). Suites that need code which doesn't exist yet
+/// fail loudly instead of passing empty; the workflow only schedules them once their
+/// prerequisite exists (`apps/desktop`, `fuzz/`, the live-smoke repository variable).
+pub fn nightly(root: &Path, args: &[String]) -> Result<String, Vec<String>> {
+    let suite = args.first().map(String::as_str).unwrap_or("");
+    let c = cargo();
+    match suite {
+        // Cross-OS daemon tests: socket/pipe security, ensure race, version skew, crash → Resume.
+        "daemon" => cmd(
+            root,
+            &c,
+            &["test", "--locked", "-p", "genie-daemon", "-p", "genie-client", "-p", "genie-core"],
+        ),
+        // Shell and process tests per OS (kill-tree, pipe mode, shell tool).
+        "process" => {
+            cmd(root, &c, &["test", "--locked", "-p", "genie-process"])?;
+            cmd(root, &c, &["test", "--locked", "-p", "genie-tools", "--test", "shell"])
+        }
+        "hostile-artifact" | "perf-gate" | "e2e-desktop" | "browser-redteam" | "fuzz"
+        | "live-providers" => Err(vec![format!(
+            "nightly suite `{suite}` is not implemented yet (09 §5.2; see README Known gaps)"
+        )]),
+        _ => Err(vec![
+            "expected nightly <daemon|process|hostile-artifact|perf-gate|e2e-desktop|browser-redteam|fuzz|live-providers>".into(),
+        ]),
     }
 }
