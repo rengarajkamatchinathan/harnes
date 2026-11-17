@@ -131,6 +131,7 @@ async fn subagent_runs_end_to_end_and_its_ask_surfaces_in_the_parent() {
             text("child done"),
         ],
     );
+    let store = test_store(&h);
     h.s.prompt_parts(
         vec![InputPart::text("Delegate the work.")],
         genie_protocol::session::Delivery::Queue,
@@ -221,6 +222,23 @@ async fn subagent_runs_end_to_end_and_its_ask_surfaces_in_the_parent() {
     );
     assert!(body_text(&child_bodies[0]["messages"]).contains("Please do the work."));
     assert!(!h.hub.has_running(h.s.id()));
+    assert_eq!(h.hub.parent_of(&child).as_deref(), Some(h.s.id()));
+    assert_eq!(h.hub.parent_of(h.s.id()), None);
+    // The report went through the durable outbox and was marked delivered.
+    let pending = store
+        .read(|c| genie_store::events::inbox_pending_from(c, "subagent:"))
+        .unwrap();
+    assert!(pending.is_empty(), "{pending:?}");
+    let rows: i64 = store
+        .read(|c| {
+            Ok(c.query_row(
+                "SELECT count(*) FROM inbox WHERE state = 'admitted' AND source = ?1",
+                [format!("subagent:{child}")],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(rows, 1);
 
     // The child session records its parent.
     let mut csub = h.engine.bus().subscribe(&child, 0).unwrap();
@@ -280,6 +298,46 @@ async fn interrupt_with_stop_subagents_stops_the_children_and_drops_their_report
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(h.s.pending_inbox().is_empty());
     assert_eq!(h.models.bodies(PARENT).len(), 2);
+}
+
+fn test_store(h: &H) -> Arc<genie_store::Store> {
+    let store = Arc::new(
+        genie_store::Store::open_with_keystore(
+            &genie_store::StoreOptions::new(h._dir.path().join("data"), "genie.db"),
+            &genie_store::MemoryKeyStore::new(),
+        )
+        .unwrap(),
+    );
+    h.hub.set_store(store.clone());
+    store
+}
+
+#[tokio::test]
+async fn persisted_reports_are_delivered_after_a_restart() {
+    let mut h = harness(vec![text("Thanks for the report.")], vec![]);
+    let store = test_store(&h);
+    // A report saved before a crash, never delivered.
+    store
+        .write(|tx| {
+            genie_store::sessions::ensure(tx, h.s.id())?;
+            genie_store::events::inbox_add(
+                tx,
+                h.s.id(),
+                genie_protocol::session::Delivery::Steer,
+                &json!([{"type": "text", "text": "<subagent name=\"worker\">RECOVERED</subagent>"}]),
+                Some("subagent:ses_gone"),
+                None,
+            )
+        })
+        .unwrap();
+    assert_eq!(h.hub.recover_reports(), 1);
+    let ev = until(&mut h.sub, settled).await;
+    assert!(ev.iter().any(|e| matches!(e,
+        SessionEvent::MessageAdmitted(m) if m.source == MessageSource::Synthetic
+            && genie_core::session::parts_text(&m.parts).contains("RECOVERED"))));
+    assert!(body_text(&h.models.bodies(PARENT)[0]).contains("RECOVERED"));
+    // Delivered once only.
+    assert_eq!(h.hub.recover_reports(), 0);
 }
 
 #[tokio::test]

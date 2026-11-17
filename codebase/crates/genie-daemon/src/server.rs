@@ -1422,10 +1422,18 @@ async fn forward(
     let max_bytes = state.cfg.sub_queue_max_bytes;
     let max_msgs = state.cfg.sub_queue_max_msgs;
     let mut last_seq = after;
+    // A subagent's session: its events carry the parent (02 §3.3 `subagent_of`).
+    let subagent_of = state
+        .runtime()
+        .and_then(|rt| rt.subagents.as_ref())
+        .and_then(|h| h.parent_of(&session));
     while let Some(item) = sub.next().await {
         match item {
             SubItem::Event(env) => {
-                let wire = env.to_wire();
+                let mut wire = env.to_wire();
+                if wire.subagent_of.is_none() {
+                    wire.subagent_of.clone_from(&subagent_of);
+                }
                 // Live asks: forward to the driver as a request (02 §7 step 1).
                 match &wire.event {
                     SessionEvent::PermissionAsked(a)

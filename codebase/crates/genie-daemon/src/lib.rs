@@ -450,6 +450,10 @@ fn build_engine(
     let engine = eb.turn_runner(Arc::new(runner)).build(root);
     jobs.bind(engine.clone());
     if let Some(sa) = &subagents {
+        // Durable report outbox (06 §11): reports survive a crash before delivery.
+        if let Some(s) = &store {
+            sa.set_store(s.clone());
+        }
         sa.bind(
             engine.clone(),
             Some(registry.clone() as Arc<dyn genie_core::runtime::subagents::ChildRegistrar>),
@@ -497,16 +501,29 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
         Ok(_) => {}
         Err(d) => tracing::error!(incident_id = %d.incident_id, "crash recovery failed"),
     }
+    if let Some(sa) = services.runtime.as_ref().and_then(|r| r.subagents.as_ref()) {
+        let n = sa.recover_reports();
+        if n > 0 {
+            tracing::info!(reports = n, "delivered subagent reports from before a restart");
+        }
+    }
 
     let state = Arc::new(DaemonState::with_services(
         cfg.clone(),
         engine.clone(),
         token,
         root.clone(),
-        registry,
+        registry.clone(),
         conversation,
         Some(services.clone()),
     ));
+    // Child sessions on the workspace feed (`session.listed`, 06 §11).
+    let weak = Arc::downgrade(&state);
+    registry.set_listener(Arc::new(move |change, summary| {
+        if let Some(st) = weak.upgrade() {
+            st.listed(change, summary);
+        }
+    }));
     state.start_background();
     if let Some(h) = &services.browser_host {
         let weak = Arc::downgrade(&state);

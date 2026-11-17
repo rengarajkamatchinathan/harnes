@@ -14,6 +14,7 @@ use genie_protocol::common::Mode;
 use genie_protocol::message::{SessionInfo, SessionSummary};
 use genie_protocol::rfc3339_ms;
 use genie_protocol::session::LiveStatus;
+use genie_protocol::workspace::ListedChange;
 
 /// Engine-side facts that are not on `SessionInfo`.
 #[derive(Debug, Clone, Default)]
@@ -26,13 +27,29 @@ pub struct Extra {
     pub headless: bool,
 }
 
+/// Called when a session appears or goes away outside `session.create/delete` (child
+/// sessions of subagents).
+pub type ListedFn = dyn Fn(ListedChange, SessionSummary) + Send + Sync;
+
 #[derive(Default)]
 pub struct Registry {
     map: Mutex<HashMap<String, SessionInfo>>,
     extra: Mutex<HashMap<String, Extra>>,
+    listener: std::sync::OnceLock<std::sync::Arc<ListedFn>>,
 }
 
 impl Registry {
+    /// Where child-session changes go (the workspace feed). Set once.
+    pub fn set_listener(&self, f: std::sync::Arc<ListedFn>) {
+        let _ = self.listener.set(f);
+    }
+
+    pub(crate) fn notify(&self, change: ListedChange, summary: SessionSummary) {
+        if let Some(f) = self.listener.get() {
+            f(change, summary);
+        }
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, SessionInfo>> {
         self.map.lock().unwrap_or_else(|e| e.into_inner())
     }
