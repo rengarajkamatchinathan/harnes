@@ -130,6 +130,10 @@ methods! {
     SessionSearch = "session.search", Request, false, session::SearchParams => session::SearchResult;
     /// The tools a session's model sees (CLI `system/init`).
     ToolsList = "tools.list", Request, false, session::SessionIdParams => session::ToolsListResult;
+    /// Import one session JSON (04 §9); ids that already exist are replaced.
+    SessionImport = "session.import", Request, false, session::SessionImportParams => session::SessionImportResult;
+    /// Selectable agent definitions for a folder (06 §11): built-in, user, trusted project.
+    AgentsList = "agents.list", Request, false, config::CwdParams => session::AgentListResult;
 
     // ---- asks (§6.3, §7)
     PermissionPending = "permission.pending", Request, false, session::PendingParams => session::PendingResult;
@@ -237,7 +241,7 @@ methods! {
     ImportScan = "import.scan", Request, false, code::ImportParams => code::ImportResult;
     ImportPreview = "import.preview", Request, false, code::ImportParams => code::ImportResult;
     ImportApply = "import.apply", Request, false, code::ImportParams => code::ImportResult;
-    ExportAll = "export.all", Request, false, code::ExportAllParams => Empty;
+    ExportAll = "export.all", Request, false, code::ExportAllParams => code::ExportAllResult;
 
     // ---- daemon → client notifications
     /// A session event (02 §4).

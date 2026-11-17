@@ -22,6 +22,7 @@ pub mod secrets;
 mod server;
 mod services;
 mod terminal;
+mod transfer;
 mod token;
 
 use std::fs::File;

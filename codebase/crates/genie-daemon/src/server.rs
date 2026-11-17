@@ -309,7 +309,7 @@ impl DaemonState {
         }
     }
 
-    fn listed(&self, change: ListedChange, session: genie_protocol::message::SessionSummary) {
+    pub(crate) fn listed(&self, change: ListedChange, session: genie_protocol::message::SessionSummary) {
         self.workspace_send(m::SessionListed::NAME, &SessionListed { change, session });
     }
 

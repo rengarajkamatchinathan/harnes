@@ -281,6 +281,60 @@ pub struct SearchResult {
     pub hits: Vec<SearchHit>,
 }
 
+/// `session.import`: the session JSON from a file path or a blob (`blob.put.*`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionImportParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionImportResult {
+    pub session_id: String,
+    /// Some ids already existed and were replaced by new ones.
+    pub remapped: bool,
+    pub messages: u64,
+}
+
+// ---------------------------------------------------------------- agents (06 §11)
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSourceKind {
+    Builtin,
+    User,
+    Project,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentInfo {
+    pub name: String,
+    pub description: String,
+    pub source: AgentSourceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// A definition file that failed to parse.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentProblemInfo {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentListResult {
+    pub agents: Vec<AgentInfo>,
+    #[serde(default)]
+    pub problems: Vec<AgentProblemInfo>,
+}
+
 // ---------------------------------------------------------------- asks (§6.3)
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

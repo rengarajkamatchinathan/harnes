@@ -149,7 +149,10 @@ pub struct FilesReadResult {
     pub size: u64,
 }
 
-/// Importer (D53, 07 §5); the report shapes are owned by spec 07.
+/// Importer (D53, 07 §5); the report shapes are owned by spec 07. `options`:
+/// `{cwd?, source?: "claude-code"|"claude-desktop"|"opencode", level?: "user"|"project",
+/// selected?: [item id], confirm_append?: bool}`. `scan`/`preview` return
+/// `{items: [...]}`, `apply` returns the saved report `{date, items, path}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ImportParams {
     #[serde(default)]
@@ -166,4 +169,15 @@ pub struct ExportAllParams {
     pub path: String,
     #[serde(default)]
     pub include_blobs: bool,
+}
+
+/// `export.all` (SA-17): what went into the zip.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExportAllResult {
+    pub path: String,
+    pub sessions: u64,
+    pub projects: u64,
+    pub memories: u64,
+    pub blobs: u64,
+    pub artifacts: u64,
 }

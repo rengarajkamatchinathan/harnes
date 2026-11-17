@@ -286,6 +286,11 @@ impl FeedFetcher for HttpFeed {
 }
 
 impl ProviderHub {
+    /// The secrets backend (the importer stores secrets through it, 07 §5).
+    pub(crate) fn secrets(&self) -> &Arc<Secrets> {
+        &self.secrets
+    }
+
     pub fn new(secrets: Arc<Secrets>, data_dir: PathBuf) -> Self {
         let creds = Arc::new(BackendStore::new(secrets.backend()));
         let cache = CatalogCache::new(data_dir.join("cache"));

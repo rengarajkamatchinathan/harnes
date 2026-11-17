@@ -153,6 +153,10 @@ impl Services {
         if let Some(res) = crate::projects::dispatch(self, r) {
             return Handled::Now(res);
         }
+        // export.all, session.import, import.*, agents.list (04 §9, 07 §5, 06 §11).
+        if let Some(res) = crate::transfer::dispatch(self, state, r) {
+            return Handled::Now(res);
+        }
         let name = r.method.as_str();
         let hub = || self.hub.clone().ok_or_else(|| not_implemented(name));
         let mcp = || self.mcp.clone().ok_or_else(|| not_implemented(name));
