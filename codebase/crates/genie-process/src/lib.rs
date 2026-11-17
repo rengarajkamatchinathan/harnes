@@ -11,8 +11,13 @@
 //! One tree per spawn means killing a shell command never touches the browser or another
 //! command (Chrome gets its own tree too).
 //!
-//! Pipe mode only for now. PTY mode (D55) is behind the `pty` feature and lands with the
-//! Terminal tab. Code adapted from `opencode-pty` will carry its MIT notice (C3).
+//! [`pipe`] is pipe mode (06 §13.4): piped stdio, exact/scrubbed environment, output head +
+//! tail + spill file, deadlines, kill-tree on cancel and a [`pipe::SpawnHook`] for the
+//! sandbox. PTY mode (D55) is behind the `pty` feature and lands with the Terminal tab.
+//! Code adapted from `opencode-pty` will carry its MIT notice (C3); pipe mode here is
+//! written against its documented semantics (KB ch.16), not copied.
+
+pub mod pipe;
 
 use std::io;
 use std::process::ExitStatus;

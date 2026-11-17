@@ -3,7 +3,9 @@
 Implementation of [spec/01-architecture.md](../spec/01-architecture.md): the Cargo workspace,
 crate graph and dependency rules, the shared daemon with its lifecycle, the client `ensure`
 path, the session actor, the cancellation tree, the error taxonomy and log files; and of
-[spec/04-storage.md](../spec/04-storage.md) in `genie-store` (see its coverage table and gaps below).
+[spec/04-storage.md](../spec/04-storage.md) in `genie-store` (see its coverage table and gaps below),
+and of [spec/06-agent-runtime.md](../spec/06-agent-runtime.md) §7 (MCP client, `genie-mcp`) and
+§13.4 (pipe mode, `genie-process`).
 
 ## Layout
 
@@ -16,7 +18,8 @@ crates/
   genie-daemon     socket/pipe listener + peer check, token, spawn lock, handshake,
                    skew handling, idle exit, clean shutdown, standalone lease
   genie-client     endpoint layout, NDJSON framing, Connection, ensure (spawn / wait / retry)
-  genie-process    kill-trees: Job Object (Windows) / process group (Unix), subreaper
+  genie-process    kill-trees: Job Object (Windows) / process group (Unix), subreaper; pipe mode
+                   (piped stdio, env policy, head/tail/spill capture, deadlines, spawn hook) (06 §13.4)
   genie-audit      tracing → rotating log files (10 × 10 MiB)
   genie-testkit    in-memory transport
   genie-secrets    SecretString re-export; credential model + store port (03 §10.1)
@@ -25,7 +28,9 @@ crates/
                    error classification + retry policy, routes/presets, cassettes (spec 03)
   genie-catalog    model catalog: bundled snapshot, signed cache + ETag refresh, discovery
                    parsers, overrides/policy, effort map, pricing (spec 03 §8)
-  genie-{config,permissions,tools,mcp,skills,sandbox,browser,markdown}
+  genie-mcp        MCP client: stdio + Streamable HTTP, lifecycle/status machine, tools/resources/
+                   prompts, progress, cancellation, elicitation/sampling/OAuth ports (06 §7)
+  genie-{config,permissions,tools,skills,sandbox,browser,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary: `genie daemon`, `genie status [--standalone]`, `genie doctor`
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
@@ -213,3 +218,80 @@ ask with no client → paused + notification + answered by another client, promp
   model-family detection is a heuristic on the wire id, Bedrock (v2).
 - Catalog body `quirks` with a body merge patch re-serialise the request through `Value`, so
   they must not be used on routes that need byte-exact history replay.
+
+### Spec 06 §7 (MCP client, `genie-mcp`)
+
+| 06 §7 / D30 | What | Where |
+|---|---|---|
+| Config | Claude-compatible `mcpServers` entry (`{command,args,env,cwd?}` / `{type:"http",url,headers?}`), scope merge (user < project < local < managed, later wins per name), definition hash (D43 approval, change detection), keychain references via `SecretResolver` port | `config` |
+| Transports | stdio over `genie-process` pipe mode (own kill-tree, minimal inherited env + `env`, stderr → log ring, exit status as close reason, 16 MiB lines); Streamable HTTP (POST + JSON or SSE, `Mcp-Session-Id`, `MCP-Protocol-Version`, GET stream, 404 → session expired, DELETE on close) behind the `HttpClient` port with a `reqwest`/rustls implementation | `transport::{stdio,http,sse}` |
+| Handshake | `initialize` with MCP **2025-06-18** (accepts 2025-03-26, 2024-11-05), client capabilities `elicitation` + `sampling`, mismatch error naming the supported versions, `notifications/initialized`, server instructions | `client` |
+| Requests | id allocation, per-request timeout, caller cancellation → `notifications/cancelled`, `_meta.progressToken` + `notifications/progress` routed to the caller, pagination (`nextCursor`), `ping` both ways, unknown server requests → `-32601` | `client` |
+| Runtime | status `pending → connected / failed / needs_auth / disabled` (`McpStatus`, `McpServerInfo`); startup 30 s, list 30 s, tool 10 min, other 60 s (configurable); transient connect retries inside the startup deadline; crash/EOF → `failed` → reconnect with exponential backoff (1 s → 60 s, gives up after 6 until `restart()`); `restart`, `set_enabled`, `stop`; event broadcast | `server` |
+| `list_changed` | tools: debounced (300 ms) reload + `ToolsChanged`; resources/prompts: `ResourcesChanged`/`PromptsChanged`; `resources/updated` → `ResourceUpdated` | `server` |
+| Shared servers | one supervised server per name in the daemon, shared by sessions; reconcile on config change (start/stop/restart by definition hash); `wait_ready(2 s)` grace before the first model call | `manager` |
+| Naming | `mcp__<server>__<tool>`, `[A-Za-z0-9_-]`, ≤ 64 chars (hash suffix when cut), deterministic, cross-server collisions get per-pair hash suffixes; `resolve()` maps back to (server, tool) | `naming`, `manager` |
+| Schemas | root forced to an object schema, `$schema`/`$id` dropped, `required` filtered to declared properties, > 64 KiB or > 32 levels → permissive object (warnings in the log ring); descriptions capped at 2048 chars; annotations kept as info only (D25) | `schema`, `server::McpTool` |
+| Results | structured content first (duplicate serialized text dropped), JSON-looking text parsed, image/audio/blob decoded for the caller's blob store, embedded resources, resource links, `isError` | `result` |
+| Taint (08 §2.2, SA-29) | every tool result, resource read and prompt carries `TaintSource {server, trusted}`; untrusted unless the server is on the trusted allowlist (`ServerOptions.trusted`) | `result::TaintSource` |
+| Resources / prompts | `resources/list`, `resources/templates/list`, `resources/read`, `resources/subscribe`; `prompts/list`, `prompts/get` | `server` |
+| Elicitation | `ClientHandler::elicit` port; parsed request, sensitive-field flags, `Ask` builder (kind `elicitation`), `AskAnswer` → `accept/decline/cancel`; server `notifications/cancelled` cancels the handler and suppresses the reply | `handler`, `client` |
+| Sampling | `ClientHandler::sample` port; policy ban and per-server token budget enforced before the handler (refusal = JSON-RPC `-1`), usage charged after; `Ask` builder with preview, model, estimated cost, budget left | `handler`, `client` |
+| OAuth | `AuthProvider` port: bearer token, one refresh on 401 (only if the stored token is unchanged), otherwise `needs_auth`; `authorize()` returns the URL (`mcp.auth`); tokens keyed by hash(name, url) | `auth`, `transport::http` |
+| Logs | per-server ring (1000 lines, 4 KiB each): stderr, `notifications/message`, lifecycle, schema warnings (`mcp.logs`) | `logs` |
+
+Tests (`crates/genie-mcp/tests/mcp.rs`): an in-process fake server over `tokio::io::duplex`, the same
+fake as a real child process (`genie-mcp-fake-server`, run through `genie-process`), and the same fake
+behind a fake `HttpClient` (SSE and JSON response modes; no network). Covered: handshake, paginated
+tools, naming and schema sanitising, structured results, taint, progress, cancellation and timeout
+(server sees `notifications/cancelled`), resources (text, blob, templates, subscribe → updated),
+prompts, `list_changed` reload, elicitation, sampling (budget, policy ban), crash → failed → reconnect
+(duplex and real process with exit status), transient retries, giving up until `restart()`, version
+mismatch, disable/enable, manager collisions/resolve/reconcile, config errors, spawn failure, HTTP
+session expiry → reconnect, 401 → `needs_auth` → restart, 401 → refresh.
+
+### Spec 06 §13.4 (`genie-process` pipe mode)
+
+| 06 §13 / D45 | What | Where |
+|---|---|---|
+| Pipe mode | `spawn_pipe(PipeSpec)` in its own kill-tree (Job Object / process group); stdin `null` or piped; stdout + stderr piped | `genie-process::pipe` |
+| Environment | `Env {base: Empty \| Inherit \| Allowlist, remove, set}`: exact env (opencode-pty semantics), inherit minus daemon internals (`GENIE_*`), or the MCP SDK's minimal allowlist; Windows names case-insensitive | `pipe::Env` |
+| Output | combined stdout+stderr → bounded head + tail, byte/line/stderr counts, optional spill file with a cap; `OutputSummary::text()` with an omission note naming the file | `pipe::{OutputCollector, TailBuffer}` |
+| Timeouts / background | `collect(deadline)` returns `TimedOut` with the child still running (the shell tool backgrounds it, 13.1) and can be resumed; `run()` kills on timeout | `PipeChild::collect`, `run` |
+| Cancel | cancel kills the whole tree and reaps it; descendants that keep the pipes open don't hang `collect` (300 ms drain after the direct child exits) | `PipeChild::collect` |
+| Error split | `SpawnError` / `RunError::Spawn` = couldn't start, safe to retry; `RunError::Io` = may have run | `pipe` |
+| Spawn hook | `SpawnHook::wrap(&mut PipeSpec)` for the v2 sandbox (D44) | `pipe::SpawnHook` |
+
+### Spec 06 §7 and §13.4 gaps and deviations
+
+- **Protocol revision is an assumption.** 06 §7 names none; Genie requests 2025-06-18 (first with
+  elicitation) and accepts 2025-03-26 / 2024-11-05. 2025-11-25 additions (tasks, URL-mode elicitation,
+  icons) and `roots` are not implemented (the `roots` capability isn't declared).
+- **Legacy SSE transport** (`type: "sse"`) parses as a config error; the "use it only if a server
+  reports it" fallback is not built. Streamable HTTP does not resume SSE streams (`Last-Event-ID`) and
+  opens the GET stream once without reconnecting.
+- **OAuth is a port only**: client id order (static → CIMD → DCR), loopback redirect, token storage and
+  refresh-ahead belong to the `AuthProvider` implementation (with spec 08's keychain).
+- **Not in this crate:** reading settings files, `.mcp.json` trust and definition-hash approval (D43),
+  the connector directory (signed feed, pinned checksums, "what will run" manifest), policy
+  (directory-only/allowlist/disable local), per-chat "+" toggles, `tool_search` deferred loading,
+  the 10 % context threshold, central truncation, blob storage of binary parts, `@server:resource` and
+  `/server:prompt` UX, asks for first-use permission, elicitation/sampling wiring to asks and the
+  chat model, usage accounting. The engine/tools/config crates own these; this crate provides the ports
+  and data they need (`Ask` builders, `TaintSource`, `McpEvent`, `definition_hash`).
+- **Managed scope on the wire:** `McpServerInfo.scope` is a `ConfigScope`, which has no `managed`;
+  managed servers report `unknown` (protocol unchanged on purpose).
+- **Schema sanitising** is a Genie assumption (the spec only says names are sanitised); per-provider
+  lowering stays in `genie-providers`.
+- **Sampling budget** default is 100,000 tokens per server per daemon run (not persisted); estimated
+  cost is computed by the caller.
+- **Windows:** stdio commands like `npx` resolve only if `Command` finds them (`npx.cmd` needs
+  `cmd /c` or the full name); the Job Object assignment race from 01 still applies to pipe mode.
+- **genie-process:** stdout and stderr are two pipes interleaved at chunk granularity (opencode-pty
+  uses one); pipe mode is written against opencode-pty's documented semantics, not copied, so no MIT
+  notice is needed yet; PTY mode, constant-time token compare and the Linux blocked-writer fix belong to
+  the PTY port (D55). Environment scrubbing beyond `GENIE_*` (e.g. provider keys) is not done because
+  user commands may legitimately need them.
+- The `genie-mcp-fake-server` test binary is built with the workspace (it is tiny and only used by
+  tests).
+
