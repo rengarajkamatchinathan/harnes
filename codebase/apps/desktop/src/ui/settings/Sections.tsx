@@ -6,6 +6,7 @@ import { applyAppearance, Badge, Banner, Button, Card, Dialog, Field, Input, Seg
 import { formatCost, formatTokens, t } from "../../i18n";
 import { errorKind, type CliInstall } from "../../platform";
 import { useApp, useAsync } from "../context";
+import { DeleteAllData } from "./ManageSections";
 
 function Unavailable({ error }: { error: unknown }) {
   const app = useApp();
@@ -247,14 +248,6 @@ export function ConnectorsSection() {
   );
 }
 
-export function PermissionsSection() {
-  return (
-    <div className="stack">
-      <p className="muted">Rules above are edited per scope; saved “always” approvals appear in the allow list. Trusted folders are managed from Code mode (a list/revoke method is not served yet).</p>
-    </div>
-  );
-}
-
 export function UsageSection() {
   const app = useApp();
   const to = new Date();
@@ -312,11 +305,7 @@ export function PrivacySection() {
           </Button>
         </div>
       </Field>
-      <Field label={t("privacy.deleteAll")} description={t("settings.notServed")}>
-        <Button variant="danger" disabled>
-          {t("privacy.deleteAll")}
-        </Button>
-      </Field>
+      <DeleteAllData />
     </div>
   );
 }

@@ -51,6 +51,8 @@ export interface UiState {
   terminals: Record<string, { id: string; title: string }[]>;
   /** OS notifications for paused asks when the window is in the background. */
   osNotifications: boolean;
+  /** The D35 notice was shown before code execution was first turned on. */
+  codeExecNoticeSeen: boolean;
 }
 
 const DEFAULT_UI: UiState = {
@@ -72,6 +74,7 @@ const DEFAULT_UI: UiState = {
   recentWorkspaces: [],
   terminals: {},
   osNotifications: true,
+  codeExecNoticeSeen: false,
 };
 
 export interface Toast {
@@ -370,6 +373,30 @@ export class App extends Emitter {
     }
     this.selectSession(r.session_id);
     return r.session_id;
+  }
+
+  /** Move a Chat into a project, or out of it with `null` (`session.update.project_id`, `""` = out). */
+  async moveToProject(id: string, projectId: string | null) {
+    await this.client.session.update({ session_id: id, project_id: projectId ?? "" });
+    const s = this.sessions.get(id);
+    if (s) {
+      this.sessions = new Map(this.sessions).set(id, { ...s, project_id: projectId });
+      this.changed();
+    }
+  }
+
+  /** After "Delete all data": forget everything local and reload from a fresh snapshot. */
+  async reloadAfterDeleteAll() {
+    for (const id of [...this.open.keys()]) this.closeSession(id);
+    for (const id of [...this.sessions.keys()]) this.terminals.forgetSession(id);
+    this.sessions = new Map();
+    this.setUi({ activeSession: null, activeProject: null, view: "main", terminals: {} });
+    try {
+      await this.client.workspace.subscribe({});
+    } catch (e) {
+      this.platform.log("warn", `workspace.subscribe: ${errorMessage(e)}`);
+    }
+    await this.refreshLists();
   }
 
   async deleteSession(id: string) {

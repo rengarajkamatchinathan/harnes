@@ -48,6 +48,8 @@ export interface MessageView {
   parts: PartView[];
   /** What the user sent (attachments, skills) for admitted user messages. */
   input?: InputPart[];
+  /** Assistant messages from `session.get`: tokens + cost of the step that produced it. */
+  usage?: TurnUsage;
   rev: number;
 }
 
@@ -151,6 +153,18 @@ function messageView(m: Message): MessageView {
     model: m.model ?? null,
     createdAt: m.created_at,
     parts: m.parts.filter((p) => p.type !== "unknown").map(partView),
+    ...(m.usage || m.cost
+      ? {
+          usage: {
+            input: m.usage?.input_tokens ?? 0,
+            output: m.usage?.output_tokens ?? 0,
+            reasoning: m.usage?.reasoning_tokens ?? 0,
+            cacheRead: m.usage?.cache_read_tokens ?? 0,
+            usd: m.cost?.usd ?? 0,
+            steps: 1,
+          },
+        }
+      : {}),
     rev: 0,
   };
 }

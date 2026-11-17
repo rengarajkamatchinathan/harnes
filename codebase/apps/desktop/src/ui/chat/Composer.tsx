@@ -40,6 +40,18 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
   const [connectors, setConnectors] = useState(false);
   const [skillPick, setSkillPick] = useState(false);
   const [mcpPick, setMcpPick] = useState<"resource" | "prompt" | null>(null);
+  const [codeNotice, setCodeNotice] = useState(false);
+  // Per-chat provider tools (06 §8, D35): web search on, code execution off by default.
+  const webSearch = store?.model.info?.web_search ?? true;
+  const codeExec = store?.model.info?.code_execution ?? false;
+  const toggle = async (key: "web_search" | "code_execution", value: boolean) => {
+    if (!store) return;
+    try {
+      await store.setToggle(key, value);
+    } catch (e) {
+      app.toast({ title: app.describeError(e), tone: "danger" });
+    }
+  };
 
   /** An MCP resource attaches like a file: the daemon reads it into a blob. */
   const attachResource = async (r: McpResource) => {
@@ -205,8 +217,8 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
             { id: "skills", label: t("composer.skills"), icon: "sparkle", onSelect: () => setSkillPick(true) },
             { id: "prompt", label: t("composer.mcpPrompt"), icon: "layers", onSelect: () => setMcpPick("prompt") },
             { id: "connectors", label: t("composer.connectors"), icon: "layers", disabled: !store, onSelect: () => setConnectors(true) },
-            { id: "web", label: t("composer.webSearch"), icon: "globe", disabled: true, title: t("settings.notServed"), onSelect: () => {} },
-            { id: "code", label: t("composer.codeExecution"), icon: "code", disabled: true, title: t("settings.notServed"), onSelect: () => {} },
+            { id: "web", label: webSearch ? t("composer.webSearchOn") : t("composer.webSearchOff"), icon: "globe", disabled: !store, onSelect: () => void toggle("web_search", !webSearch) },
+            { id: "code", label: codeExec ? t("composer.codeExecOn") : t("composer.codeExecOff"), icon: "code", disabled: !store, onSelect: () => (codeExec ? void toggle("code_execution", false) : app.ui.codeExecNoticeSeen ? void toggle("code_execution", true) : setCodeNotice(true)) },
             { id: "browser", label: t("composer.browser"), icon: "globe", onSelect: () => app.setUi({ panelOpen: true, panelTab: "browser" }) },
           ]}
         />
@@ -234,6 +246,30 @@ export function Composer({ store, onCreate, readOnly }: ComposerProps) {
         )}
       </div>
       {connectors && store && <ConnectorToggles sessionId={store.id} onClose={() => setConnectors(false)} />}
+      {codeNotice && (
+        <Dialog
+          open
+          title={t("composer.codeExecNoticeTitle")}
+          onClose={() => setCodeNotice(false)}
+          footer={
+            <>
+              <Button onClick={() => setCodeNotice(false)}>{t("common.cancel")}</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setCodeNotice(false);
+                  app.setUi({ codeExecNoticeSeen: true });
+                  void toggle("code_execution", true);
+                }}
+              >
+                {t("composer.codeExecEnable")}
+              </Button>
+            </>
+          }
+        >
+          <p>{t("composer.codeExecNotice")}</p>
+        </Dialog>
+      )}
       {mcpPick === "resource" && <McpResourcePicker onPick={attachResource} onClose={() => setMcpPick(null)} />}
       {mcpPick === "prompt" && (
         <McpPromptPicker

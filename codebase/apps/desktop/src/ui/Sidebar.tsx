@@ -248,8 +248,17 @@ function SessionRow({ s, app, code }: { s: SessionSummary; app: App; code?: bool
         {t("row.deleteConfirm", { title: s.title || t("sidebar.untitled") })}
       </Dialog>
       <Dialog open={moving} title={t("row.moveToProject")} onClose={() => setMoving(false)} footer={<Button onClick={() => setMoving(false)}>{t("common.close")}</Button>}>
-        <p className="muted">{t("settings.notServed")}</p>
-        <Select disabled options={app.projects.map((p) => ({ value: p.project_id, label: p.name }))} aria-label={t("row.moveToProject")} />
+        <Select
+          value={s.project_id ?? ""}
+          options={[{ value: "", label: t("row.noProject") }, ...app.projects.map((p) => ({ value: p.project_id, label: p.name }))]}
+          aria-label={t("row.moveToProject")}
+          onChange={(v) =>
+            void app.moveToProject(s.session_id, v || null).then(
+              () => (setMoving(false), app.toast({ title: v ? t("row.moved", { project: app.projects.find((p) => p.project_id === v)?.name ?? v }) : t("row.movedOut"), tone: "success" })),
+              (e) => app.toast({ title: app.describeError(e), tone: "danger" }),
+            )
+          }
+        />
       </Dialog>
     </div>
   );

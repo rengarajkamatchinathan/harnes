@@ -149,7 +149,7 @@ const MessageRow = memo(
             ) : (
               <IconButton icon="refresh" size="sm" label={t("chat.regenerate")} onClick={() => void store.regenerate(msg.id).catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }))} />
             )}
-            {!isUser && msg.turnId && model.turnUsage.get(msg.turnId) && <UsageChip u={model.turnUsage.get(msg.turnId)!} />}
+            {!isUser && (msg.usage ?? (msg.turnId ? model.turnUsage.get(msg.turnId) : undefined)) && <UsageChip u={(msg.usage ?? model.turnUsage.get(msg.turnId!))!} />}
             {onRewind && isUser && <IconButton icon="refresh" size="sm" label={t("code.rewind")} onClick={() => onRewind(msg)} />}
           </div>
         )}

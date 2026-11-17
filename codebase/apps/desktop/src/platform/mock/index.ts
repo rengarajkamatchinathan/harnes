@@ -95,6 +95,13 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
   ];
   const blobs = new Map<string, string>();
   const terms = new Map<string, MockTerm>();
+  const trusted = new Map<string, { path: string; decision: "trust" | "deny"; decided_at: string; approvals: number }>([["/tmp/mock-repo", { path: "/tmp/mock-repo", decision: "trust", decided_at: now(), approvals: 1 }]]);
+  const rules: { rule: string; class: "allow" | "ask" | "deny"; scope: "user" | "managed"; source: string; locked: boolean }[] = [
+    { rule: "Bash(ls:*)", class: "allow", scope: "user", source: "settings.json", locked: false },
+    { rule: "WebFetch(domain:evil.example)", class: "deny", scope: "managed", source: "policy", locked: true },
+  ];
+  let deleteToken: string | null = null;
+  const projectFiles: { project_id: string; file_id: string; name: string; blob_id: string; size: number; tokens: number; added_at: string }[] = [];
   const ringCap = opts.terminalRing ?? 64 * 1024;
   const uploads = new Map<string, string[]>();
 
@@ -141,7 +148,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     publish(s, { type: "turn.started", turn_id, message_id: userMsgId }, true, turn_id);
     setStatus(s, "running");
     const msgId = uid("msg");
-    const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model };
+    const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model, usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } };
     s.messages.push(assistant);
     const finish = (status: "completed" | "cancelled") => {
       s.running = undefined;
@@ -259,7 +266,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "session.create": (p) => {
       const id = uid("ses");
       const s: MockSession = {
-        info: { session_id: id, kind: p.kind ?? "chat", model: p.model, effort: p.effort ?? null, mode: p.mode ?? "default", head_seq: 0, status: "idle", created_at: now(), updated_at: now(), incognito: !!p.incognito, project_id: p.project_id ?? null, workspace_id: p.workspace_path ?? null, title: null },
+        info: { session_id: id, kind: p.kind ?? "chat", model: p.model, effort: p.effort ?? null, mode: p.mode ?? "default", head_seq: 0, status: "idle", created_at: now(), updated_at: now(), incognito: !!p.incognito, project_id: p.project_id ?? null, workspace_id: p.workspace_path ?? null, title: null, web_search: p.web_search ?? true, code_execution: p.code_execution ?? false },
         events: [],
         messages: [],
         subscribed: false,
@@ -306,6 +313,11 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "session.update": (p) => {
       const s = session(p.session_id);
       const { session_id: _ignored, ...changes } = p;
+      if ("project_id" in changes) {
+        if (s.info.kind !== "chat") throw err("invalid_params", "only Chat sessions belong to projects", -32602);
+        if (changes.project_id && !projects.some((x) => x.project_id === changes.project_id)) throw err("not_found", "no such project", -32004);
+        changes.project_id = changes.project_id || null;
+      }
       Object.assign(s.info, changes);
       publish(s, { type: "session.updated", ...changes });
       if (workspaceOn) notify("session.listed", { change: "updated", session: summary(s) });
@@ -422,8 +434,48 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "artifact.list": () => ({ artifacts: [] }),
     "browser.status": () => ({ installed: [], running: false, profile_path: "" }),
     "import.scan": () => ({ report: { items: [] } }),
-    "trust.get": (p) => ({ path: p.path, state: "unknown" }),
-    "trust.set": () => ({}),
+    "trust.get": (p) => ({ path: p.path, state: trusted.has(p.path) ? "trusted" : "unknown" }),
+    "trust.set": (p) => {
+      if (p.decision === "revoke") trusted.delete(p.path);
+      else trusted.set(p.path, { path: p.path, decision: p.decision === "deny" ? "deny" : "trust", decided_at: now(), approvals: 0 });
+      return {};
+    },
+    "trust.list": () => ({ items: [...trusted.values()] }),
+    "permissions.rules.list": () => ({ rules }),
+    "permissions.rules.remove": (p) => {
+      const i = rules.findIndex((r) => r.rule === p.rule && r.class === p.class && r.scope === p.scope);
+      if (i < 0) throw err("not_found", "no such rule", -32004);
+      if (rules[i].locked) throw err("locked", "managed by policy", -32011);
+      rules.splice(i, 1);
+      return {};
+    },
+    "data.delete_all.begin": () => {
+      deleteToken = uid("tok");
+      return { token: deleteToken, expires_in_s: 120, sessions: sessions.size, projects: projects.length, memories: memory.length, artifacts: 0, blob_bytes: 2048, clears_audit: true };
+    },
+    "data.delete_all.confirm": (p) => {
+      if (!deleteToken || p.token !== deleteToken) throw err("invalid_params", "token expired", -32602);
+      deleteToken = null;
+      const n = sessions.size;
+      for (const s of [...sessions.values()]) {
+        sessions.delete(s.info.session_id);
+        for (const t of [...terms.values()]) if (t.sessionId === s.info.session_id) termExit(t, null);
+      }
+      projects.splice(0);
+      memory.splice(0);
+      return { sessions_deleted: n, audit_cleared: true };
+    },
+    "project.file.list": (p) => ({ files: projectFiles.filter((f) => f.project_id === p.project_id).map(({ project_id: _p, ...f }) => f) }),
+    "project.file.add": (p) => {
+      const file_id = uid("pf");
+      projectFiles.push({ project_id: p.project_id, file_id, name: p.name, blob_id: p.blob_id, size: 100, tokens: 25, added_at: now() });
+      return { file_id };
+    },
+    "project.file.remove": (p) => {
+      const i = projectFiles.findIndex((f) => f.file_id === p.file_id);
+      if (i >= 0) projectFiles.splice(i, 1);
+      return {};
+    },
     "terminal.open": (p) => {
       const s = session(p.session_id);
       if (s.info.kind !== "code") throw err("invalid_state", "terminals belong to Code sessions", -32010);
