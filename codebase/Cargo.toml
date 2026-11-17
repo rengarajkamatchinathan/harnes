@@ -25,6 +25,7 @@ genie-secrets = { path = "crates/genie-secrets" }
 genie-providers = { path = "crates/genie-providers" }
 genie-catalog = { path = "crates/genie-catalog" }
 genie-tools = { path = "crates/genie-tools" }
+genie-browser = { path = "crates/genie-browser" }
 # external
 anyhow = "1"
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
@@ -64,6 +65,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ulid = "1"
 unicode-width = "0.2"
+url = "2"
 zeroize = { version = "1", features = ["derive"] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
