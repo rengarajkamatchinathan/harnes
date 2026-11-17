@@ -647,6 +647,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_rules_are_listed_and_forgotten_by_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = Arc::new(
+            ConfigHub::new(dir.path().join("u"), dir.path().join("u/trust.json"), None).unwrap(),
+        );
+        let a = PermissionAuthorizer::new(
+            hub,
+            Arc::new(crate::runtime::FixedSettings(SessionSettings::default())),
+        );
+        let rule = |s: &str| Rule::parse(s).unwrap();
+        {
+            let mut g = a.sessions.lock().unwrap();
+            let s1 = g.entry("s1".into()).or_default();
+            s1.remembered.push((Origin::Session, rule("Bash(ls)")));
+            s1.remembered.push((Origin::User, rule("Bash(npm test:*)")));
+            g.entry("s2".into())
+                .or_default()
+                .remembered
+                .push((Origin::User, rule("Bash(npm test:*)")));
+        }
+        assert_eq!(a.session_rules("s1"), ["Bash(ls)"]);
+        assert!(a.session_rules("s2").is_empty());
+        // A session-scope removal leaves a saved (user) copy alone, and vice versa.
+        assert!(!a.forget_rule(Some("s1"), "Bash(npm test:*)", true));
+        assert!(!a.forget_rule(None, "Bash(ls)", false));
+        assert!(a.forget_rule(Some("s1"), "Bash(ls)", true));
+        assert!(a.session_rules("s1").is_empty());
+        // Removing a saved rule drops every session's in-memory copy.
+        assert!(a.forget_rule(None, "Bash(npm test:*)", false));
+        assert!(a.remembered("s1").is_empty() && a.remembered("s2").is_empty());
+    }
+
+    #[test]
     fn hosts() {
         assert_eq!(host_of("https://user@Docs.Rs:443/a?b"), "docs.rs");
         assert_eq!(host_of("example.com"), "example.com");
