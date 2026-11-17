@@ -217,6 +217,14 @@ impl Journal for StoreJournal {
             .collect()
     }
 
+    fn log_floor(&self, session: &str) -> Result<u64, Defect> {
+        Ok(self
+            .store
+            .read(|c| genie_store::events::head(c, session))
+            .map_err(store_defect)?
+            .map_or(0, |(_, floor)| floor))
+    }
+
     fn last_seq(&self, session: &str) -> Result<u64, Defect> {
         Ok(self
             .store
@@ -291,6 +299,31 @@ mod tests {
             item_id: i.to_string(),
             items: vec![],
         }
+    }
+
+    #[test]
+    fn store_journal_reports_the_log_floor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let j = StoreJournal::new(store.clone());
+        let bus = Bus::new(Arc::new(StoreJournal::new(store.clone())));
+        for i in 0..5 {
+            bus.publish("ses_floor", ev(&i.to_string())).unwrap();
+        }
+        assert_eq!(j.log_floor("ses_floor").unwrap(), 0);
+        store
+            .write(|tx| genie_store::events::prune(tx, "ses_floor", 3))
+            .unwrap();
+        assert_eq!(j.log_floor("ses_floor").unwrap(), 3);
+        assert_eq!(bus.log_floor("ses_floor").unwrap(), 3);
+        // Retained events start right after the floor.
+        let seqs: Vec<u64> = j
+            .events_after("ses_floor", 0)
+            .unwrap()
+            .iter()
+            .filter_map(|e| e.seq)
+            .collect();
+        assert_eq!(seqs, [4, 5]);
     }
 
     #[tokio::test]
