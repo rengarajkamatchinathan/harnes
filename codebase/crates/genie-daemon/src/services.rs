@@ -255,6 +255,11 @@ impl Services {
                 mcp()?
                     .add(p.scope, &p.name, p.config, cwd.as_deref())
                     .map_err(RpcError::invalid_params)?;
+                if let Some(t) = &self.telemetry {
+                    t.usage(genie_audit::UsageEvent::new(
+                        genie_audit::UsageName::McpServerAdded,
+                    ));
+                }
                 to_result(&Empty {})
             }),
             n if n == m::McpRemove::NAME => params::<m::McpRemove>(r).and_then(|p| {
@@ -538,6 +543,7 @@ impl Services {
     fn mcp_async(self: &Arc<Self>, h: Arc<McpHub>, conn: &Arc<Conn>, r: &Request) -> Handled {
         let r = r.clone();
         let c = conn.clone();
+        let me = self.clone();
         conn.scope()
             .child("mcp-call")
             .spawn_cancellable(async move {
@@ -558,6 +564,12 @@ impl Services {
                     };
                     if name == m::McpAuthStart::NAME {
                         let auth_url = s.authorize().await.map_err(st)?;
+                        me.audit(
+                            AuditEvent::McpAuth,
+                            Attrs::new()
+                                .with("server", p.name.clone())
+                                .with("step", "authorize"),
+                        );
                         return to_result(&AuthUrlResult { auth_url });
                     }
                     let items = if name == m::McpPrompts::NAME {
