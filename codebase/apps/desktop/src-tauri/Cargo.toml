@@ -1,0 +1,55 @@
+[package]
+name = "genie-desktop"
+description = "Genie desktop shell (spec 05, 01 §1.3): Tauri 2 host, genie-client relay, artifact scheme."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[lib]
+name = "genie_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "genie-desktop"
+path = "src/main.rs"
+
+[features]
+default = []
+# Linux needs the WebKitGTK 4.1 development packages to build the webview. They are not
+# required for the relay, so plain `cargo build --workspace` works on a bare Linux box;
+# the real app is built with `--features linux-webview` (see apps/desktop/README.md).
+linux-webview = ["dep:tauri", "dep:tauri-build"]
+
+[dependencies]
+genie-client.workspace = true
+genie-protocol.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ulid.workspace = true
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tauri = { version = "2", features = [] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri = { version = "2", features = [], optional = true }
+
+[target.'cfg(not(target_os = "linux"))'.build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
+tauri-build = { version = "2", features = [], optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
