@@ -659,8 +659,8 @@ impl Run {
             } = native_search(&NativeSearchInput {
                 protocol,
                 model_supports: self.model.route.model.web_search_native,
-                global_toggle: true,
-                chat_toggle: true,
+                global_toggle: self.rt.capability("webSearch", true),
+                chat_toggle: !self.settings.web_search_off,
                 policy,
                 max_uses: genie_tools::web::search::DEFAULT_MAX_USES,
             }) && !req.tools.iter().any(|t| t.name == "web_search")
@@ -671,6 +671,14 @@ impl Run {
                     max_uses,
                 });
             }
+        }
+        // Provider-hosted code execution (D35): the chat toggle, the global toggle /
+        // policy and a model that supports it.
+        if !final_step
+            && self.model.route.model.code_execution_native
+            && self.rt.code_execution_on(&self.settings)
+        {
+            req.server_tools.code_execution = true;
         }
         req.baseline_long_ttl = baseline.has_project_knowledge();
         req.prompt_cache_key = Some(self.sid.clone());
@@ -1191,6 +1199,7 @@ impl Run {
         }
 
         let client_calls = !results.is_empty();
+        let done_empty = done.is_empty();
         if !done.is_empty() {
             let mut m = Message::new(
                 msg_id.clone(),
@@ -1219,7 +1228,8 @@ impl Run {
         } else {
             wire::step_finish(finish)
         };
-        self.account(&usage, "chat", step_finish)?;
+        let usage_msg = (!done_empty).then(|| msg_id.clone());
+        self.account(&usage, "chat", step_finish, usage_msg)?;
         if failure.is_none() {
             let path_len = self.rt.conversation.path(&self.sid)?.len();
             let measured = usage
@@ -1246,6 +1256,7 @@ impl Run {
         u: &Usage,
         kind: &'static str,
         finish: StepFinish,
+        message_id: Option<String>,
     ) -> Result<(), TurnError> {
         let usd = cost(self.model.pricing.as_ref(), u);
         if kind == "chat" {
@@ -1265,6 +1276,7 @@ impl Run {
                     project_id: self.settings.project_id.clone(),
                     usage: *u,
                     cost_usd: usd,
+                    message_id,
                 },
             )?;
         }
@@ -1468,7 +1480,7 @@ impl Run {
             tokens_after,
             native: false,
         }))?;
-        self.account(&used, "compaction", StepFinish::Stop)?;
+        self.account(&used, "compaction", StepFinish::Stop, None)?;
         self.save_meta()?;
         Ok(())
     }
@@ -1540,6 +1552,7 @@ impl Run {
                 project_id: self.settings.project_id.clone(),
                 usage,
                 cost_usd: usd,
+                message_id: None,
             },
         ) {
             tracing::error!(incident_id = %e.incident_id, "title usage not recorded");

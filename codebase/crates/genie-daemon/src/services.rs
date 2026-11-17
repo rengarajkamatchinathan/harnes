@@ -63,6 +63,11 @@ pub struct Services {
     )>,
     /// The secrets backend (doctor: backend kind, lock state).
     pub secrets: Option<Arc<crate::secrets::Secrets>>,
+    /// The permission evaluator (session-scoped "always" rules for
+    /// `permissions.rules.list/remove`).
+    pub authz: Option<Arc<genie_core::runtime::permissions::PermissionAuthorizer>>,
+    /// The pending `data.delete_all.confirm` confirmation token and when it expires.
+    pub delete_token: Mutex<Option<(String, std::time::Instant)>>,
 }
 
 pub(crate) enum Handled {
@@ -93,7 +98,7 @@ pub(crate) fn not_implemented(method: &str) -> RpcError {
     .with_data(json!({ "reason": "not_implemented" }))
 }
 
-fn config_err(e: ConfigError) -> RpcError {
+pub(crate) fn config_err(e: ConfigError) -> RpcError {
     match e {
         ConfigError::Locked { .. } => RpcError::new(ErrorKind::Locked, e.to_string()),
         ConfigError::Untrusted => RpcError::new(ErrorKind::UntrustedWorkspace, e.to_string()),
@@ -157,6 +162,10 @@ impl Services {
                 Some(b) => self.browser_async(b.clone(), state, conn, r),
                 None => Handled::NotMine,
             };
+        }
+        // trust.list, permissions.rules.*, data.delete_all.* (Settings → Privacy).
+        if let Some(res) = crate::manage::dispatch(self, state, r) {
+            return Handled::Now(res);
         }
         let memory_before = crate::projects::memory_scope(self, r);
         if let Some(res) = crate::projects::dispatch(self, r) {

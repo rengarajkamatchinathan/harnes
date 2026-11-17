@@ -382,6 +382,8 @@ export interface Cost {
 
 export interface CreateParams {
   agent?: string | null;
+  /** Per-chat provider code execution toggle (D35; default off). */
+  code_execution?: boolean | null;
   effort?: string | null;
   incognito?: boolean;
   kind: SessionKind;
@@ -389,6 +391,8 @@ export interface CreateParams {
   model: string;
   project_id?: string | null;
   settings?: SessionSettingsOverlay | null;
+  /** Per-chat provider web search toggle (06 §8; default on). */
+  web_search?: boolean | null;
   workspace_path?: string | null;
   worktree?: WorktreeChoice | null;
   /** Name for a new worktree (`--worktree <name>`). */
@@ -460,6 +464,30 @@ export interface DataClearParams {
 export type Decision = "once" | "always" | "reject" | "submit" | "cancel" | "unknown";
 
 export type DefinitionKind = "mcp" | "hook" | "setup" | "unknown";
+
+/** What "Delete all data" will remove (04 §8), and the token that confirms it. */
+export interface DeleteAllBeginResult {
+  artifacts: number;
+  blob_bytes: number;
+  /** Whether the local audit log is removed too (kept under a managed audit policy). */
+  clears_audit: boolean;
+  expires_in_s: number;
+  memories: number;
+  projects: number;
+  sessions: number;
+  /** Pass to `data.delete_all.confirm` within `expires_in_s` seconds; single use. */
+  token: string;
+}
+
+export interface DeleteAllParams {
+  /** From `data.delete_all.begin`. */
+  token: string;
+}
+
+export interface DeleteAllResult {
+  audit_cleared: boolean;
+  sessions_deleted: number;
+}
 
 /** How a prompt is delivered to a session (01 §5.2). */
 export type Delivery = "steer" | "queue";
@@ -893,6 +921,8 @@ export interface MemoryUpdateParams {
 }
 
 export interface Message {
+  /** Assistant messages: estimated cost of that step (D27). */
+  cost?: Cost | null;
   /** RFC 3339. */
   created_at: string;
   id: string;
@@ -901,6 +931,8 @@ export interface Message {
   parts: Part[];
   role: Role;
   turn_id?: string | null;
+  /** Assistant messages: the tokens of the step that produced this message. */
+  usage?: Usage | null;
 }
 
 export interface MessageAdmitted {
@@ -1007,6 +1039,45 @@ export interface PermissionResolved {
   saved_rule?: string | null;
 }
 
+export interface PermissionRule {
+  class: PermissionRuleClass;
+  /** Cannot be removed with `permissions.rules.remove` (managed policy, CLI layer). */
+  locked: boolean;
+  /** Rule text, e.g. `Bash(npm test:*)`. */
+  rule: string;
+  scope: PermissionRuleScope;
+  /** The settings file the rule is in, or `policy` / `session`. */
+  source?: string | null;
+}
+
+export type PermissionRuleClass = "allow" | "ask" | "deny" | "unknown";
+
+export interface PermissionRuleRemoveParams {
+  class: PermissionRuleClass;
+  cwd?: string | null;
+  rule: string;
+  /** `user`, `project`, `local` or `session`. */
+  scope: PermissionRuleScope;
+  /** Required for `session` scope. */
+  session_id?: string | null;
+}
+
+/** Where a permission rule lives (06 §5.4, D23). */
+export type PermissionRuleScope = "unknown" | "user" | "project" | "local" | "managed" | "session" | "cli";
+
+export interface PermissionRulesListParams {
+  /** Folder whose project/local layers to read (Code workspaces). */
+  cwd?: string | null;
+  /** Only this scope; omit for every scope. */
+  scope?: PermissionRuleScope | null;
+  /** Session whose session-scoped and CLI rules to include. */
+  session_id?: string | null;
+}
+
+export interface PermissionRulesListResult {
+  rules: PermissionRule[];
+}
+
 /** `policy.changed`. */
 export interface PolicyChanged {
   keys: string[];
@@ -1029,6 +1100,24 @@ export interface ProjectFileAddParams {
   blob_id: string;
   name: string;
   project_id: string;
+}
+
+/** One file in a project's knowledge (`project.file.list`). */
+export interface ProjectFileInfo {
+  /** RFC 3339. */
+  added_at: string;
+  blob_id?: string | null;
+  file_id: string;
+  mime?: string | null;
+  name: string;
+  /** Bytes of the stored file. */
+  size?: number | null;
+  /** Estimated tokens of the extracted text. */
+  tokens?: number | null;
+}
+
+export interface ProjectFileListResult {
+  files: ProjectFileInfo[];
 }
 
 export interface ProjectFileRemoveParams {
@@ -1265,6 +1354,8 @@ export interface SessionInfo {
   active_leaf_id?: string | null;
   agent?: string | null;
   archived?: boolean;
+  /** Per-chat provider code execution toggle (D35). */
+  code_execution?: boolean;
   /** RFC 3339. */
   created_at: string;
   driver?: ClientRef | null;
@@ -1282,6 +1373,8 @@ export interface SessionInfo {
   title?: string | null;
   /** RFC 3339. */
   updated_at: string;
+  /** Per-chat provider web search toggle (06 §8). */
+  web_search?: boolean;
   workspace_id?: string | null;
 }
 
@@ -1338,11 +1431,15 @@ export interface SessionSynced {
 export interface SessionUpdated {
   active_leaf_id?: string | null;
   archived?: boolean | null;
+  code_execution?: boolean | null;
   effort?: string | null;
   mode?: Mode | null;
   model?: string | null;
   pinned?: boolean | null;
+  /** `""`: moved out of its project. */
+  project_id?: string | null;
   title?: string | null;
+  web_search?: boolean | null;
 }
 
 export type Severity = "error" | "warning" | "info" | "unknown";
@@ -1554,12 +1651,33 @@ export interface TrustGetResult {
   state: TrustState;
 }
 
+export interface TrustListResult {
+  items: TrustedFolder[];
+}
+
 export interface TrustSetParams {
   decision: TrustDecision;
   path: string;
 }
 
 export type TrustState = "trusted" | "once" | "denied" | "unknown";
+
+/**
+ * One stored folder decision (`trust.json`, 08 §4). Revoke with
+ * `trust.set {path, decision: "revoke"}`.
+ */
+export interface TrustedFolder {
+  /** Approved project definitions (MCP servers, hooks) under this decision. */
+  approvals?: number;
+  /** RFC 3339. */
+  decided_at: string;
+  /** `trust` or `deny`. */
+  decision: TrustDecision;
+  /** Repository identity the decision is bound to, if any. */
+  identity?: string | null;
+  /** Canonical folder path. */
+  path: string;
+}
 
 export interface TurnInterrupted {
   reason: InterruptReason;
@@ -1588,12 +1706,18 @@ export interface UnlockParams {
 export interface UpdateParams {
   active_leaf_id?: string | null;
   archived?: boolean | null;
+  /** Per-chat provider code execution toggle (D35). */
+  code_execution?: boolean | null;
   effort?: string | null;
   mode?: Mode | null;
   model?: string | null;
   pinned?: boolean | null;
+  /** Move a Chat session into a project; `""` moves it out of its project. */
+  project_id?: string | null;
   session_id: string;
   title?: string | null;
+  /** Per-chat provider web search toggle (06 §8). */
+  web_search?: boolean | null;
 }
 
 export interface UploadIdParams {

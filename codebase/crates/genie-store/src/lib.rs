@@ -33,6 +33,6 @@ pub mod util;
 
 pub use error::{Result, StoreError};
 pub use keys::{KeyStore, MemoryKeyStore};
-pub use ops::{BLOB_GRACE_MS, BlobRow, MaintenanceReport};
+pub use ops::{BLOB_GRACE_MS, BlobRow, DataCounts, MaintenanceReport};
 pub use rusqlite::{Connection, Transaction};
 pub use store::{READERS, Store, StoreOptions};

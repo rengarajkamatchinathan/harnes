@@ -161,6 +161,15 @@ fn resolver(
     responses: Vec<RecordedResponse>,
     window: Option<u64>,
 ) -> (Arc<Resolver>, Arc<CassetteTransport>) {
+    resolver_with(responses, window, false)
+}
+
+/// `native`: the model supports provider web search and code execution.
+fn resolver_with(
+    responses: Vec<RecordedResponse>,
+    window: Option<u64>,
+    native: bool,
+) -> (Arc<Resolver>, Arc<CassetteTransport>) {
     let t = Arc::new(CassetteTransport::new(responses));
     let exec = Arc::new(Executor::new(
         t.clone(),
@@ -174,6 +183,8 @@ fn resolver(
     let mut spec = ModelSpec::new("anthropic", "claude-test", ProtocolKind::AnthropicMessages);
     spec.context_window = window.or(Some(200_000));
     spec.max_output = Some(4_096);
+    spec.web_search_native = native;
+    spec.code_execution_native = native;
     let route = PresetProvider(ProviderConfig {
         id: ProviderId::new("anthropic"),
         preset: Preset::Anthropic,
@@ -1124,6 +1135,13 @@ async fn store_backed_turn_persists_messages_memory_and_usage() {
         [Role::User, Role::Assistant, Role::Tool, Role::Assistant]
     );
     assert!(conv.meta(s.id()).unwrap().baseline.is_some());
+    // Per-message usage survives the restart (`session.get` hover card).
+    assert!(path[0].usage.is_none());
+    for m in [&path[1], &path[3]] {
+        let u = m.usage.expect("assistant step usage persisted");
+        assert!(u.input_total > 0 && u.output_total > 0);
+        assert!(m.cost_usd.unwrap() > 0.0);
+    }
     let found = store
         .read(|c| genie_store::memory::search(c, &["global"], "tea", 5))
         .unwrap();
@@ -1971,4 +1989,83 @@ async fn small_mcp_tool_sets_are_sent_in_full() {
     let names = tool_names(&h.bodies()[0]);
     assert!(names.contains(&"mcp__tiny__ping".to_string()));
     assert!(!names.contains(&"tool_search".to_string()));
+}
+
+// ------------------------------------------------------------------ desktop needs
+
+#[tokio::test]
+async fn assistant_message_carries_its_step_usage_and_cost() {
+    let mut h = harness(vec![text(&["Hello"])], |_| {}, vec![], None);
+    h.s.prompt("hi", Delivery::Steer).unwrap();
+    h.settle().await;
+    let path = h.conv.path(h.s.id()).unwrap();
+    let user = genie_core::runtime::wire::message(&path[0]);
+    assert!(user.usage.is_none() && user.cost.is_none());
+    let reply = genie_core::runtime::wire::message(&path[1]);
+    let u = reply.usage.expect("assistant usage");
+    assert_eq!((u.input_tokens, u.output_tokens), (100, 20));
+    let usd = reply.cost.expect("assistant cost").usd;
+    assert!((usd - (100.0 * 3.0 + 20.0 * 15.0) / 1e6).abs() < 1e-12);
+}
+
+/// Per-chat toggles: web search on/off, code execution off/on (06 §8, D35).
+struct Toggles {
+    web_search_off: bool,
+    code_execution: bool,
+}
+
+impl SettingsSource for Toggles {
+    fn settings(&self, _id: &str) -> Option<SessionSettings> {
+        Some(SessionSettings {
+            model: "anthropic/claude-test".into(),
+            web_search_off: self.web_search_off,
+            code_execution: self.code_execution,
+            ..SessionSettings::default()
+        })
+    }
+}
+
+async fn server_tool_names(web_search_off: bool, code_execution: bool) -> Vec<String> {
+    let (resolver, t) = resolver_with(vec![text(&["ok"])], None, true);
+    let root = TaskScope::root();
+    let runner = RuntimeBuilder::new(
+        Arc::new(Toggles {
+            web_search_off,
+            code_execution,
+        }),
+        resolver,
+    )
+    .config(RuntimeConfig {
+        titles: false,
+        ..RuntimeConfig::default()
+    })
+    .web_search(Some(genie_tools::web::SearchPolicy::default()))
+    .build();
+    let engine = EngineBuilder::new()
+        .turn_runner(Arc::new(runner))
+        .build(&root);
+    let s = engine.create_session();
+    let mut sub = engine.bus().subscribe(s.id(), 0).unwrap();
+    s.prompt("hi", Delivery::Steer).unwrap();
+    wait_settled(&mut sub).await;
+    let body: Value = serde_json::from_str(&t.recorded()[0].body).unwrap();
+    body["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| t.get("type").is_some_and(|ty| ty != "custom"))
+        .filter_map(|t| t["name"].as_str().map(String::from))
+        .collect()
+}
+
+#[tokio::test]
+async fn chat_toggles_decide_the_provider_server_tools() {
+    // Defaults: search on, code execution off.
+    assert_eq!(server_tool_names(false, false).await, ["web_search"]);
+    assert_eq!(
+        server_tool_names(false, true).await,
+        ["web_search", "code_execution"]
+    );
+    assert!(server_tool_names(true, false).await.is_empty());
+    assert_eq!(server_tool_names(true, true).await, ["code_execution"]);
 }

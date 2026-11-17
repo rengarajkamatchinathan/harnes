@@ -147,6 +147,9 @@ pub struct AgentRuntime {
     pub hooks: Option<Arc<hooks::HooksHub>>,
     /// `tool_search` deferral of large MCP tool sets (06 §7).
     pub tool_search: Arc<tool_search::ToolSearch>,
+    /// Settings + policy: the global capability toggles (`webSearch.enabled`,
+    /// `codeExecution.enabled`, Settings → Capabilities).
+    pub config: Option<Arc<crate::config::ConfigHub>>,
 }
 
 impl AgentRuntime {
@@ -227,7 +230,34 @@ impl AgentRuntime {
         if let Some(def) = self.agents.as_ref().and_then(|a| a.for_session(settings)) {
             def.filter_registry(&mut r);
         }
+        if !self.web_search_on(settings) {
+            r.retain(|n| n != "web_search");
+        }
         r
+    }
+
+    /// A capability toggle from settings + policy (`<key>.enabled`); absent = `default`.
+    pub fn capability(&self, key: &str, default: bool) -> bool {
+        let Some(hub) = &self.config else {
+            return default;
+        };
+        if hub.policy().bool(&format!("{key}.enabled")) == Some(false) {
+            return false;
+        }
+        hub.value(None, &format!("{key}.enabled"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(default)
+    }
+
+    /// Web search for this session: the chat toggle and Settings → Capabilities.
+    pub fn web_search_on(&self, settings: &SessionSettings) -> bool {
+        !settings.web_search_off && self.capability("webSearch", true)
+    }
+
+    /// Provider code execution for this session (D35): the chat toggle (off by default)
+    /// and Settings → Capabilities / policy `codeExecution.enabled`.
+    pub fn code_execution_on(&self, settings: &SessionSettings) -> bool {
+        settings.code_execution && self.capability("codeExecution", true)
     }
 
     /// The taint a successful result of `tool` adds to the turn (SA-29): the provider's
@@ -309,6 +339,7 @@ impl RuntimeBuilder {
                 subagents: None,
                 hooks: None,
                 tool_search: tool_search::ToolSearch::new(tool_search::DEFAULT_FRACTION),
+                config: None,
             },
             subagents: None,
             config_hub: None,
@@ -507,6 +538,7 @@ impl RuntimeBuilder {
 
     /// Settings for `subagents.maxDepth` (and its policy cap).
     pub fn config_hub(mut self, hub: Arc<crate::config::ConfigHub>) -> Self {
+        self.rt.config = Some(hub.clone());
         self.config_hub = Some(hub);
         self
     }

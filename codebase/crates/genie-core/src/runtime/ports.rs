@@ -41,6 +41,11 @@ pub struct SessionSettings {
     pub overlay: Option<SessionOverlay>,
     /// Created by a headless client (`genie -p`): browser tools stay off unless enabled.
     pub headless: bool,
+    /// The chat's web search toggle is off (06 §8): no native declaration, no local
+    /// `web_search` tool.
+    pub web_search_off: bool,
+    /// The chat's provider code execution toggle is on (D35; off by default).
+    pub code_execution: bool,
 }
 
 /// The session-only CLI layer (D23 layer 2), already read from `--settings <file>` and

@@ -150,6 +150,8 @@ pub fn message(m: &StoredMessage) -> wm::Message {
         created_at: genie_protocol::rfc3339_ms(m.created_ms),
         model: m.model.clone(),
         turn_id: m.turn_id.clone(),
+        usage: m.usage.as_ref().map(usage),
+        cost: m.cost_usd.map(|usd| genie_protocol::common::Cost { usd }),
         id,
     }
 }

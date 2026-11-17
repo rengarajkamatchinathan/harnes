@@ -124,6 +124,34 @@ impl PermissionAuthorizer {
             .unwrap_or_default()
     }
 
+    /// Rules remembered for `session` only (`permissions.rules.list`, session scope).
+    pub fn session_rules(&self, session: &str) -> Vec<String> {
+        self.remembered(session)
+            .into_iter()
+            .filter(|(o, _)| *o == Origin::Session)
+            .map(|(_, r)| r.to_string())
+            .collect()
+    }
+
+    /// Forget a remembered "always" rule. `session_scope`: the session-only copy in
+    /// `session`; otherwise the in-memory copies of a rule that was just removed from a
+    /// settings file (every session, or only `session`). Returns whether one was removed.
+    pub fn forget_rule(&self, session: Option<&str>, rule: &str, session_scope: bool) -> bool {
+        let mut g = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let mut removed = false;
+        for (id, st) in g.iter_mut() {
+            if session.is_some_and(|s| s != id) {
+                continue;
+            }
+            let before = st.remembered.len();
+            st.remembered.retain(|(o, r)| {
+                r.to_string() != rule || ((*o == Origin::Session) != session_scope)
+            });
+            removed |= st.remembered.len() != before;
+        }
+        removed
+    }
+
     /// The project root whose settings apply (Code sessions).
     fn root(s: &SessionSettings) -> Option<PathBuf> {
         if s.kind != SessionKind::Code {
@@ -617,6 +645,39 @@ impl ToolAuthorizer for PermissionAuthorizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_rules_are_listed_and_forgotten_by_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = Arc::new(
+            ConfigHub::new(dir.path().join("u"), dir.path().join("u/trust.json"), None).unwrap(),
+        );
+        let a = PermissionAuthorizer::new(
+            hub,
+            Arc::new(crate::runtime::FixedSettings(SessionSettings::default())),
+        );
+        let rule = |s: &str| Rule::parse(s).unwrap();
+        {
+            let mut g = a.sessions.lock().unwrap();
+            let s1 = g.entry("s1".into()).or_default();
+            s1.remembered.push((Origin::Session, rule("Bash(ls)")));
+            s1.remembered.push((Origin::User, rule("Bash(npm test:*)")));
+            g.entry("s2".into())
+                .or_default()
+                .remembered
+                .push((Origin::User, rule("Bash(npm test:*)")));
+        }
+        assert_eq!(a.session_rules("s1"), ["Bash(ls)"]);
+        assert!(a.session_rules("s2").is_empty());
+        // A session-scope removal leaves a saved (user) copy alone, and vice versa.
+        assert!(!a.forget_rule(Some("s1"), "Bash(npm test:*)", true));
+        assert!(!a.forget_rule(None, "Bash(ls)", false));
+        assert!(a.forget_rule(Some("s1"), "Bash(ls)", true));
+        assert!(a.session_rules("s1").is_empty());
+        // Removing a saved rule drops every session's in-memory copy.
+        assert!(a.forget_rule(None, "Bash(npm test:*)", false));
+        assert!(a.remembered("s1").is_empty() && a.remembered("s2").is_empty());
+    }
 
     #[test]
     fn hosts() {
