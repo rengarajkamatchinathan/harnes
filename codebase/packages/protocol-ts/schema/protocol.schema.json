@@ -12,6 +12,83 @@
       ],
       "type": "string"
     },
+    "AgentInfo": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/AgentSourceKind"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "source"
+      ],
+      "type": "object"
+    },
+    "AgentListResult": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentInfo"
+          },
+          "type": "array"
+        },
+        "problems": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AgentProblemInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents"
+      ],
+      "type": "object"
+    },
+    "AgentProblemInfo": {
+      "description": "A definition file that failed to parse.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "message"
+      ],
+      "type": "object"
+    },
+    "AgentSourceKind": {
+      "enum": [
+        "builtin",
+        "user",
+        "project",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "Annotations": {
       "properties": {
         "destructive_hint": {
@@ -1784,6 +1861,48 @@
       ],
       "type": "object"
     },
+    "ExportAllResult": {
+      "description": "`export.all` (SA-17): what went into the zip.",
+      "properties": {
+        "artifacts": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "blobs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memories": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "projects": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessions": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sessions",
+        "projects",
+        "memories",
+        "blobs",
+        "artifacts"
+      ],
+      "type": "object"
+    },
     "ExportFormat": {
       "enum": [
         "json",
@@ -2116,7 +2235,7 @@
       "type": "object"
     },
     "ImportParams": {
-      "description": "Importer (D53, 07 §5); the report shapes are owned by spec 07.",
+      "description": "Importer (D53, 07 §5); the report shapes are owned by spec 07. `options`:\n`{cwd?, source?: \"claude-code\"|\"claude-desktop\"|\"opencode\", level?: \"user\"|\"project\",\nselected?: [item id], confirm_append?: bool}`. `scan`/`preview` return\n`{items: [...]}`, `apply` returns the saved report `{date, items, path}`.",
       "properties": {
         "options": {
           "default": null
@@ -5124,6 +5243,46 @@
       },
       "required": [
         "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionImportParams": {
+      "description": "`session.import`: the session JSON from a file path or a blob (`blob.put.*`).",
+      "properties": {
+        "blob_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SessionImportResult": {
+      "properties": {
+        "messages": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "remapped": {
+          "description": "Some ids already existed and were replaced by new ones.",
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "remapped",
+        "messages"
       ],
       "type": "object"
     },
