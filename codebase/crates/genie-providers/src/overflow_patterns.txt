@@ -1,0 +1,43 @@
+# Context-overflow corpus (03 §7, KB ch.07). One case-insensitive regex per line.
+# Matched against the error message/body after protocol codes and status; never on 429.
+# Every pattern needs a case in error.rs tests (t34 checklist).
+prompt is too long
+input is too long for (the )?requested model
+exceeds? the context window
+exceeds? (the )?(model'?s? )?(maximum )?context (window|length|size)
+maximum context length is \d+ tokens
+context[_ ]length[_ ]exceeded
+context_window_exceeded
+model_context_window_exceeded
+reduce the length of the (messages|prompt|input)
+input token count.*exceeds the maximum
+the input token count .* exceeds
+maximum (prompt|input) length is \d+
+prompt length .* (exceeds|greater than)
+greater than the context length
+exceeds the available context size
+available context size
+context window exceeds limit
+exceeded model token limit
+token limit exceeded
+too many (input )?tokens
+input length .* exceeds
+requested \d+ tokens.*(context|maximum)
+your messages resulted in \d+ tokens
+this model'?s maximum context length
+max(imum)?_?(input|prompt)_?tokens.*exceed
+string too long\. expected a string with maximum length
+exceeds the maximum number of tokens
+request exceeds the maximum allowed number of tokens
+tokens? exceed(s|ed)? (the )?(model'?s? )?limit
+prompt tokens? (exceed|limit)
+input_too_long
+prompt_too_long
+the prompt is too large
+context size has been exceeded
+larger than the max(imum)? context size
+exceeds? (the )?max(imum)? sequence length
+exceeds the model'?s context
+messages exceed the context
+input exceeds the context
+total tokens? .*exceed

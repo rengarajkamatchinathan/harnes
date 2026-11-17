@@ -19,9 +19,13 @@ crates/
   genie-process    kill-trees: Job Object (Windows) / process group (Unix), subreaper
   genie-audit      tracing → rotating log files (10 × 10 MiB)
   genie-testkit    in-memory transport
-  genie-secrets    SecretString re-export
+  genie-secrets    SecretString re-export; credential model + store port (03 §10.1)
   genie-store      SQLCipher DB, migrations, GNB1 blobs, FTS, event log, retrieval index (spec 04)
-  genie-{providers,catalog,config,permissions,tools,mcp,skills,sandbox,browser,markdown}
+  genie-providers  canonical model, SSE parser, compile step, 4 protocol adapters, Executor,
+                   error classification + retry policy, routes/presets, cassettes (spec 03)
+  genie-catalog    model catalog: bundled snapshot, signed cache + ETag refresh, discovery
+                   parsers, overrides/policy, effort map, pricing (spec 03 §8)
+  genie-{config,permissions,tools,mcp,skills,sandbox,browser,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary: `genie daemon`, `genie status [--standalone]`, `genie doctor`
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
@@ -113,6 +117,20 @@ ask with no client → paused + notification + answered by another client, promp
 | 11 | WAL, busy_timeout 5000, synchronous NORMAL, foreign_keys; one writer + 4 readers; `Store::write` = one IMMEDIATE transaction | `genie-store::store` |
 | 01 §3 | `Journal` on the store | `genie-core::journal::StoreJournal` |
 
+### Spec 03 (providers and models)
+
+| 03 § | What | Where |
+|---|---|---|
+| 2 | canonical `Message`/`Part`/`Opaque`/`Origin`, `ReplayScope`, `AccountTag` (SA-13) | `genie-providers::model` |
+| 3 | `Protocol` trait + object-safe `ErasedProtocol`, `StreamEvent`, `Auth`, `Provider`, `LlmClient`; one `Executor` (auth, header 5 min / chunk-gap 15 min timeouts, retries, cancellation); own SSE parser | `protocol`, `event`, `auth`, `route`, `executor`, `sse` |
+| 4 | compile: compaction cut, byte-exact reuse of stored `WireRecord`s, replay filter, tool-history repair, tool-id rewrite, Gemini schema sanitiser, cache breakpoints (tail breakpoint never persisted), effort/sampling filtering, attachment checks, diagnostics | `genie-providers::compile` |
+| 5 | adapters: Anthropic Messages (API / Foundry / Vertex `streamRawPredict`), OpenAI Responses (OpenAI / Azure v1), OpenAI Chat (+ Ollama, OpenRouter, vLLM dialects via `Compat`), Gemini (API / Vertex); presets | `protocol::{anthropic,openai_responses,openai_chat,gemini}`, `route` |
+| 6 | breakpoints (tools, system 1, system 2, tail; ≤ 4; 1 h ordering), `prompt_cache_key`, cache usage lines | `compile`, adapters |
+| 7 | `ProviderError`/`ErrorKind`, classification order, 40-pattern overflow corpus, `x-should-retry`, `retry-after(-ms)`, retry policy (backoff, offline budget, timeouts, one-shot), forced token refresh on 401, `RetryScheduled` event | `error`, `overflow_patterns.txt`, `retry`, `executor` |
+| 8 | catalog schema, tolerant decode, bundled snapshot, Ed25519-verified cache + ETag refresh, discovery parsers (OpenAI, Gemini, Ollama, Azure manual deployments), overrides (merge patch), policy, effort map, small model, embeddings default (SA-14), cost | `genie-catalog` |
+| 10.1 | credential model, precedence (stored beats env), store port + in-memory store | `genie-secrets::credentials` |
+| 11 | layer 1 cassettes (`tests/cassettes`, `CassetteTransport`, `RecordingTransport`, header scrubbing, secret check) and layer 2 goldens (`tests/golden`, `GENIE_UPDATE_GOLDEN=1`); layer 3 patch tests | `genie-providers/tests` |
+
 ## Known gaps and deviations
 
 - **`genie-daemon` depends on `genie-client`** for the shared transport (endpoint naming, framing,
@@ -173,3 +191,25 @@ ask with no client → paused + notification + answered by another client, promp
   the in-memory `Store` for incognito (§8); the daily scheduler that calls `run_maintenance`.
 - **Build:** `rusqlite` uses `bundled-sqlcipher-vendored-openssl` (macOS has no OpenSSL headers);
   it needs Perl and a C compiler. Not yet tried on Windows with `scripts/cargo-win-gnu.sh`.
+
+### Spec 03 gaps
+
+- **Auth flows are ports only.** `TokenSource` + `TokenAuth` (cache, single-flight refresh, forced
+  refresh on 401) exist; Entra PKCE/device code (`oauth2`), Google ADC (`google-cloud-auth`) and
+  the cross-process refresh file lock are not implemented. Keychain / `secrets.enc` backends are spec 08.
+- **No live HTTP in tests.** `ReqwestTransport` (rustls) is untested against real endpoints; the
+  live-smoke layer (11 layer 4), nightly re-recording and the drift report are not built.
+  Cassettes are hand-written from the vendors' documented event shapes, not recordings.
+- **Catalog → `ModelSpec` conversion and the 6 h refresh loop** belong in `genie-core` (rule 3:
+  catalog and providers don't depend on each other); not wired yet. `genie-catalog` mirrors a few
+  provider enums (`Protocol`, `EffortWire`, `Quirk`) for the same reason.
+- **The feed signing key is not pinned** (`signature::PINNED_KEYS_HEX` is empty until D40's key
+  exists), so cached catalogs never verify in production yet and the bundled snapshot is used.
+- **The bundled snapshot is provisional**: model ids, limits and prices must be re-checked
+  against vendor docs before release (03 §8.4: provider docs only, no models.dev).
+- Not implemented: `EmbeddingClient` (§9), Azure `prefer_responses` fallback to Chat on
+  "Model not supported" (the flag and `UnsupportedOnDeployment` exist), `ReplayRejected`
+  recompile (engine side), PDF text extraction (daemon side), `<system-update>` lowering (06),
+  model-family detection is a heuristic on the wire id, Bedrock (v2).
+- Catalog body `quirks` with a body merge patch re-serialise the request through `Value`, so
+  they must not be used on routes that need byte-exact history replay.

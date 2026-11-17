@@ -1,0 +1,76 @@
+{
+  "max_tokens": 1000,
+  "messages": [
+    {
+      "content": "You are Genie.",
+      "role": "system"
+    },
+    {
+      "content": "Project: demo",
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "text": "Summarise a.txt",
+          "type": "text"
+        },
+        {
+          "image_url": {
+            "url": "data:image/png;base64,iVBORw0KGgo="
+          },
+          "type": "image_url"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": "I should read it.\n\nReading.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"path\":\"a.txt\"}",
+            "name": "read_file"
+          },
+          "id": "call:1",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "hello world",
+      "role": "tool",
+      "tool_call_id": "call:1"
+    }
+  ],
+  "model": "qwen3:8b",
+  "reasoning_effort": "high",
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "function": {
+        "description": "Read a file",
+        "name": "read_file",
+        "parameters": {
+          "$schema": "x",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}
