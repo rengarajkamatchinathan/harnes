@@ -62,6 +62,8 @@ apps/desktop       desktop app (spec 05): `src-tauri` (crate `genie-desktop`, Ta
 policy-templates   Windows ADMX/ADML (GPO/Intune) and a macOS .mobileconfig sample (08 §5.1)
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
 packages/ui        design tokens (OKLCH, light/dark) + core React components (05 §6, D19)
+packages/artifact-runtime  React artifact runtime for the sandbox (05 §8, D28): esbuild-wasm +
+                   the bundled library set, built to dist/ and served on genie-artifact:
 xtask              `cargo xtask check` = check-deps (01 §2.1 rules 1–3) + check-spawn (rule 4)
                    + schema drift/compat; `cargo xtask schema [--release]` regenerates;
                    `ci`, `nightly`, `dist`, `sbom`, `notices`, `checksums`, `sign`, `feed …` (spec 09)
@@ -91,8 +93,9 @@ Desktop (pnpm workspace in this folder: `apps/desktop`, `packages/*`):
 
 ```sh
 pnpm install
-pnpm -r typecheck                          # tsc --noEmit for apps/desktop and packages/ui
-pnpm -r test                               # vitest
+pnpm --filter @genie/artifact-runtime build   # React artifact runtime → packages/artifact-runtime/dist
+pnpm -r typecheck                          # tsc --noEmit for apps/desktop and packages/*
+pnpm -r test                               # vitest (the artifact sandbox test needs Chrome/Edge + the runtime build)
 cd apps/desktop && pnpm dev                # UI in a browser against the in-memory mock engine
 cd apps/desktop && pnpm tauri dev          # the real app (GENIE_DAEMON_PATH=<genie binary> if not on PATH)
 ```
@@ -604,6 +607,16 @@ advisory ignores with reasons (see gaps).
 | 05 §4 | Settings: section nav, search over all settings, deep links; schema-generated controls from `config.schema` (`$ref` / `Option` resolved; boolean, enum, number, string, list, JSON) with live `config.set`, inline Saved / errors, restart banner, admin lock "Managed by <org>", scope picker in Code mode; Appearance (theme, chat font, size, density); Your Genie (memory list, edit, delete, pause, reset); Providers (credentials with source, API key, Sign in with Microsoft PKCE / device code with polling, test, models, catalog refresh); Capabilities (skills, browser detection, site permissions, clear data); Connectors (status, sign-in, logs, enable, add custom stdio/URL); Usage (grouped table, budget); Privacy (export all); Developer (daemon status, restart, doctor, copy diagnostics, problems, effective policy); Account | `src/ui/settings/*` |
 | 05 §5 | first run: welcome → privacy consent (policy-locked values disabled) → connect a provider (skippable) → import (only when found) → memory notice; unlock screen when the engine reports a locked store | `src/ui/FirstRun.tsx`, `Root.tsx::Unlock` |
 | 05 §6, D19, C1 | tokens: 12-step OKLCH grey (cool seed) and accent (SA-20 teal) scales; semantic colour, type, space, radius and motion tokens; light/dark following the system with an override; density; reduced motion; WCAG AA contrast checked in tests; bundled Inter + JetBrains Mono; i18n keys + `plural()` | `packages/ui`, `src/i18n.ts` |
+| 05 §10, D55 | Terminal tab: several xterm.js terminals per Code session (WebGL renderer, DOM fallback; fit addon; screen-reader mode), opened in the session folder (`terminal.open`), input/resize, `terminal.output` applied by absolute offset (replay-covered bytes skipped, a gap re-attaches); a new view (tab switch, window reload) re-attaches from 0, a reconnect re-attaches the live view from its offset; `{truncated, checkpoint}` → reset + checkpoint; `terminal.exited` → exit code shown, scrollback kept locally; ids kept in `state.json` for reload; max 8 per session (SA-25); `capabilities.terminal = true` | `src/state/terminals.ts`, `src/ui/panel/TerminalPanel.tsx`, `host::client_info` |
+| 05 §8, D28, t39 | React artifacts: the scheme serves a page (bridge + `source.js` with the code as a JSON string + `/_genie/runtime/runtime.js`, no inline script); the runtime loads esbuild-wasm (gzip + base64, since `connect-src 'none'` forbids fetch), compiles TSX → CJS in the sandbox, loads only the libraries the code imports (React/ReactDOM, Tailwind v4 browser build, lucide-react, Recharts, d3, lodash, papaparse, mathjs, three.js, Mermaid, KaTeX + CSS/fonts — the list the base prompt advertises, checked by a test), unknown imports → clear error; compile/import/render errors are shown in the frame and posted as `runtime_error` (Fix with Genie). Runtime files come from the embedded frontend (`dist/artifact-runtime`, copied by the desktop Vite build), `GENIE_ARTIFACT_RUNTIME`, resources, or the workspace in debug builds | `packages/artifact-runtime`, `src-tauri/src/artifact.rs::{react_page, runtime_rel}`, `shell::runtime_file` |
+| 05 §8 hostile artifact | headless Chrome/Edge (WebView2's engine) loads the shell's CSP + bridge in `sandbox="allow-scripts"`: a React artifact renders with bundled libraries and Tailwind; unknown import and render crash come back as `runtime_error`; 30 escape attempts (IPC, fetch, XHR, WebSocket, EventSource, beacon, top navigation, parent DOM, storage, cookies, IndexedDB, popups, form post, nested frame, inline/`document.write`/data:/blob: scripts, workers, cross-origin script/image/CSS/import, meta-CSP loosening) all fail and the server sees none of them | `packages/artifact-runtime/test/sandbox.test.ts` |
+| 05 §2.3, §3.1, §4 | native folder picker (new Code session) and save dialog (export all) via the Tauri dialog plugin; OS notifications (Tauri notification plugin) for paused asks and workspace `notification`s when the window is in the background (Settings → General toggle) | `platform/tauri`, `App::osNotify` |
+| 05 §4, D40 | Install `genie` in PATH: symlink in `~/.local/bin` (Unix) / `genie.cmd` shim in `%LOCALAPPDATA%\Genie\bin` (Windows) to the bundled CLI, never overwriting a foreign file, with a PATH hint; Account → third-party licences from `THIRD-PARTY-NOTICES.md` (`cargo xtask notices`/`dist`) or `release/notices/extra.md` | `host::{install_cli, notices_text}`, `shell::{host_install_cli, host_notices}` |
+| 05 §2.3, D30 | "+" → Attach MCP resource (`mcp.resources` → `mcp.resource.read` → blob attachment) and MCP prompt (`mcp.prompts` → argument form → `/server:prompt key="value"` in the composer) | `src/ui/chat/McpPickers.tsx` |
+| 05 §2.2, D24 | per-message tokens + cost on hover: `Message.usage/cost` from `session.get`, live turns from `step.ended` | `sessionModel.ts::{messageView, turnUsage}`, `Transcript.tsx::UsageChip` |
+| 05 §2.1, §2.4, D32 | Move to project / out of it (`session.update.project_id`, `""` = out) from the sidebar row and the project page; project knowledge listed with `project.file.list` (size, tokens) | `Sidebar.tsx`, `ProjectPage.tsx`, `App::moveToProject` |
+| 05 §2.3, D35 | "+" menu web search / code execution toggles per chat (`session.update`, lease-gated); the first enable of code execution shows the D35 notice | `Composer.tsx`, `SessionStore::setToggle` |
+| 05 §4 | Permissions: saved rules and "always" approvals per scope (`permissions.rules.list`, optional project folder for project/local layers) with remove, locked rules shown "Managed by your organisation"; trusted folders (`trust.list`) with revoke. Privacy: delete all data (`data.delete_all.begin` counts → type DELETE → `confirm`), then the app forgets local state and reloads from a fresh snapshot | `src/ui/settings/ManageSections.tsx`, `App::reloadAfterDeleteAll` |
 | 05 §11 | `role="log"` transcript with the streaming tail hidden from AT (settled blocks are announced), ask cards as `alertdialog`, dialogs trap focus, keyboard tabs and menus, visible focus rings | `packages/ui/src/components.tsx`, `src/ui/chat/*` |
 
 Paths in the table are under `apps/desktop/` unless they start with `packages/`.
@@ -612,8 +625,16 @@ Tests: `genie-desktop` unit tests (batching, artifact paths/CSP/inline scripts, 
 checks) and `tests/relay.rs` (in-memory daemon: batching, dedupe, ask relay + answer + cancel,
 reconnect resume from the cursor, overflow resubscribe, below-floor reload, re-attach); vitest in
 `apps/desktop/test` (platform boundary, session model, Markdown safety, settings schema, composer
-keys, panels, first run, end to end over the mock engine incl. a relayed ask) and
-`packages/ui/test` (tokens, AA contrast, components).
+keys, panels, first run, end to end over the mock engine incl. a relayed ask; `terminals.test.ts`:
+open/input/output, reconnect re-attach without duplicates, replay on a new view, truncated →
+reset + checkpoint, exit, close, 8-limit, Chat refused, lost terminal after reload;
+`extras.test.tsx`: MCP pickers, OS notifications only in the background, Install in PATH,
+notices, usage chip; `manage.test.tsx`: project move, trust list/revoke, rules list/remove/locked,
+delete all two-step + reload, project files, toggles, per-message usage), `packages/ui/test`
+(tokens, AA contrast, components) and `packages/artifact-runtime/test` (compile/imports/evaluate
+with esbuild-wasm, prompt library list in sync, built library files in a VM, Chromium sandbox +
+hostile artifact). Rust: artifact page/`source.js`/runtime path tests, `install_cli`, notices,
+terminal output never merged by the batcher.
 
 ### Engine side of the desktop's needs (02 §6, 04 §8, 06 §5.4, §8, D32, D35, 08 §4)
 
@@ -689,33 +710,47 @@ then remaps ids, blobs, sanitized input, `session.list`, `import.scan/preview/ap
   RUSTSEC-2024-0370; `unic-char-range`/`unic-common`/`unic-char-property`/`unic-ucd-version`/
   `unic-ucd-ident` RUSTSEC-2025-0075/0080/0081/0098/0100) — none are vulnerabilities. Resolving
   it needs crate-scoped `deny.toml` exceptions/ignores, which a human must approve.
-- **Terminal tab is a stub** ("Coming soon"): the daemon now serves `terminal.*` (see "Terminal
-  tab…"), but the desktop tab (xterm.js + attach/replay) is not wired yet and the client still
-  declares `capabilities.terminal = false` (05 §10).
-- **React artifacts** need `packages/artifact-runtime` (esbuild-wasm + bundled libraries), which
-  is not built: the scheme serves a placeholder and the Code view works. SVG is shown through
-  `<img>` (scripts never run) rather than sanitised. The hostile-artifact CI test (05 §8) is not
-  written.
+- **React artifacts:** Tailwind is the v4 browser build (generates utility classes in the frame)
+  rather than a prebuilt CSS file; the esbuild wasm is shipped gzip + base64 (~5 MB) because the
+  CSP forbids fetch, and each preview initialises it again (no cache in an opaque origin).
+  Imports are resolved from `require("…")` literals; dynamic `require(x)` only sees libraries
+  already loaded. SVG is still shown through `<img>` (scripts never run) rather than sanitised.
+- **Hostile-artifact test** runs on Chromium only (headless Chrome/Edge against a local server
+  with the shell's CSP, `genie-artifact:` mapped to the server origin); WKWebView and WebKitGTK
+  runs, and the real custom scheme, need the app (`tauri dev`) and are still open (D28, 09 §5).
+  It is skipped when no Chromium browser is installed.
+- **Terminal tab:** a terminal whose view isn't mounted still streams `terminal.output` to the app
+  (dropped); re-showing it replays the daemon's ring (2 MiB, or a checkpoint). Exited terminals
+  keep up to 512 KiB of local scrollback. Shell choice (`shell`) is not offered in the UI.
+- **MCP prompts:** the form builds `/server:prompt key="value"`, but the engine doesn't expand
+  MCP prompts yet (no `prompts/get` path in `resolve_input`); the text reaches the model as typed.
 - **Not run in a real window here:** only `cargo check/test/clippy`, `tsc`, `vitest` and
   `vite build`; no `tauri dev/build`, so the D8 performance gate and the three-engine runs are
   still open. Tauri resolved to 2.11.x from the local registry cache.
 - **Design system:** plain React + CSS variables, not shadcn/ui + Radix + Tailwind (05 §6) yet;
   focus trapping, roving tabs and menus are hand-written. The dyslexia-friendly font is not bundled.
-- **OS notifications** (`notification` on the workspace feed) show as in-app toasts; the Tauri
-  notification plugin and the updater (D40) are not wired.
-- **Native pickers:** no dialog plugin; attachments use the HTML file input and Code folders are
-  typed (with recent workspaces). Export-all asks for a path.
+- **Updater (D40)** is not wired. OS notifications go out only while the window is in the
+  background; "finished" notifications rely on the daemon's `notification` events.
+- **Pickers:** attachments keep the HTML file input (the webview opens the OS dialog); folders and
+  export paths use the Tauri dialog plugin.
+- **Install in PATH** uses the user bin folder (no admin prompt for `/usr/local/bin`); on Windows
+  the user adds the folder to PATH (the UI says which).
+- **Licence page** shows crate notices from `cargo xtask notices`; npm package licences (MIT /
+  ISC / Apache-2.0, see below) are not yet folded into that file.
 - **Branch switching** calls `session.update {active_leaf_id: sibling}` then
   `session.get {leaf_id: sibling}`; showing the sibling's latest descendant relies on the daemon.
-- **Missing UI:** per-message token/cost hover, model badges, "attach MCP resource",
-  `/server:prompt` argument forms, and web-search / code-execution toggles (the menu items are
-  disabled). The engine side now exists (see "Engine side of the desktop's needs"); the desktop
-  still has to call it.
-- **Settings placeholders:** Install-in-PATH, delete all data, licence, trusted-folder list/revoke
-  and the saved "always" approvals list; per-model Advanced overrides go through the raw `models`
-  JSON setting; usage "charts" are a table with bars. Methods for delete-all, trust list and
-  saved rules now exist; wiring them (and `session.update.project_id`, `project.file.list`,
-  `Message.usage/cost`) into the desktop is pending.
+- **Missing UI:** model badges; per-model Advanced overrides go through the raw `models` JSON
+  setting; usage "charts" are a table with bars; the licence status itself is a placeholder (t41).
+- **Per-message usage** for history comes from `Message.usage/cost`; the live turn shows the sum
+  of its steps until the next `session.get`.
+- **New dependencies (desktop):** npm — `@xterm/xterm` 6, `@xterm/addon-fit`, `@xterm/addon-webgl`
+  (MIT), `@tauri-apps/plugin-dialog` 2.7, `@tauri-apps/plugin-notification` 2.4 (MIT OR
+  Apache-2.0); artifact runtime — `esbuild-wasm`/`esbuild` 0.28 (MIT), `react`/`react-dom` (MIT),
+  `@tailwindcss/browser` 4 (MIT), `lucide-react` (ISC), `recharts` (MIT), `d3` (ISC), `lodash`
+  (MIT), `papaparse` (MIT), `mathjs` (Apache-2.0), `three` (MIT), `mermaid` (MIT), `katex` (MIT).
+  Crates — `tauri-plugin-dialog` 2.7 (+ `rfd`), `tauri-plugin-notification` 2.4 (+ `notify-rust`,
+  `mac-notification-sys`, `tauri-winrt-notification`): MIT/Apache-2.0; `cargo deny` reports no
+  new errors (only more duplicate-version warnings for `windows-*`).
 
 ### Desktop-needs engine methods: deviations
 

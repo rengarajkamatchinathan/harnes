@@ -29,6 +29,8 @@ describe("app over the mock platform", () => {
     await s.send([{ type: "text", text: "hi" }]);
     await until(() => s.model.status === "idle" && s.model.messages.some((m) => m.role === "assistant" && m.parts.some((p) => !p.streaming && p.text.includes("world"))));
     expect(s.model.usage?.context_window).toBe(200000);
+    const reply = s.model.messages.find((m) => m.role === "assistant")!;
+    expect(s.model.turnUsage.get(reply.turnId!)).toMatchObject({ input: 1200, output: 300, steps: 1 });
     await until(() => app.sessions.get(id)?.title === "hi");
     expect(app.ui.activeSession).toBe(id);
   });

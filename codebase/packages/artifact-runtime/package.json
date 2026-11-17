@@ -1,0 +1,40 @@
+{
+  "name": "@genie/artifact-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "React artifact runtime for the genie-artifact: sandbox (spec 05 §8, D28, ticket 39): esbuild-wasm compiles the artifact in the sandbox; imports resolve only to the bundled library set.",
+  "type": "module",
+  "main": "src/compile.ts",
+  "types": "src/compile.ts",
+  "exports": {
+    ".": "./src/compile.ts"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tailwindcss/browser": "4.3.5",
+    "d3": "7.9.2",
+    "esbuild-wasm": "0.28.2",
+    "katex": "^0.19.1",
+    "lodash": "4.18.1",
+    "lucide-react": "1.74.0",
+    "mathjs": "15.2.0",
+    "mermaid": "^12.3.0",
+    "papaparse": "5.7.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "3.10.1",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "0.28.2",
+    "typescript": "~5.9.0",
+    "vitest": "^4.0.0"
+  }
+}

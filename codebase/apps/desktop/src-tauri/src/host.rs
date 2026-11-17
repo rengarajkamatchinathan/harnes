@@ -74,8 +74,8 @@ pub fn client_info(instance_id: &str) -> ClientInfo {
             ],
             notifications: true,
             screencast: Some(true),
-            // terminal.* is not served by the daemon yet (05 §10).
-            terminal: Some(false),
+            // Terminal tab: terminal.open/attach/input/resize/close (05 §10, D55).
+            terminal: Some(true),
         },
     }
 }
@@ -212,6 +212,109 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
         .unwrap_or(first)
 }
 
+/// Result of "Install `genie` command in PATH" (05 §4 General, D40).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CliInstall {
+    /// The link (Unix) or shim (Windows) that was written.
+    pub path: String,
+    /// The `genie` binary it runs.
+    pub target: String,
+    /// Whether the folder is already on `PATH` (otherwise the UI says how to add it).
+    pub on_path: bool,
+    pub dir: String,
+}
+
+/// Where the command goes: `~/.local/bin` on macOS/Linux (no admin rights needed),
+/// `%LOCALAPPDATA%\Genie\bin` on Windows.
+pub fn cli_bin_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Genie").join("bin"))
+    } else {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("bin"))
+    }
+}
+
+fn dir_on_path(dir: &Path, path_var: Option<&std::ffi::OsStr>) -> bool {
+    path_var.is_some_and(|p| std::env::split_paths(p).any(|d| d == dir))
+}
+
+/// Link (Unix) or shim (Windows) `genie` in `dir` to `target`. An existing link or shim we
+/// wrote is replaced; any other file named `genie` is left alone (error).
+pub fn install_cli(target: &Path, dir: &Path) -> std::io::Result<CliInstall> {
+    if !target.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("the genie binary was not found at {}", target.display()),
+        ));
+    }
+    std::fs::create_dir_all(dir)?;
+    #[cfg(windows)]
+    let path = {
+        let path = dir.join("genie.cmd");
+        if let Ok(old) = std::fs::read_to_string(&path)
+            && !old.starts_with("@REM genie shim")
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("{} exists and wasn't written by Genie", path.display()),
+            ));
+        }
+        let body = format!(
+            "@REM genie shim (written by the Genie app)\r\n@\"{}\" %*\r\n",
+            target.display()
+        );
+        std::fs::write(&path, body)?;
+        path
+    };
+    #[cfg(not(windows))]
+    let path = {
+        let path = dir.join("genie");
+        match std::fs::symlink_metadata(&path) {
+            Ok(m) if m.file_type().is_symlink() => std::fs::remove_file(&path)?,
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("{} exists and isn't a link", path.display()),
+                ));
+            }
+            Err(_) => {}
+        }
+        std::os::unix::fs::symlink(target, &path)?;
+        path
+    };
+    Ok(CliInstall {
+        path: path.display().to_string(),
+        target: target.display().to_string(),
+        on_path: dir_on_path(dir, std::env::var_os("PATH").as_deref()),
+        dir: dir.display().to_string(),
+    })
+}
+
+/// The third-party notices shipped with the app (05 §4 Account & licence): the
+/// `THIRD-PARTY-NOTICES.md` that `cargo xtask notices` / `dist` write, looked up next to the executable, in the resources, or
+/// (debug builds) in the workspace.
+pub fn notices_text(resource_dir: Option<&Path>) -> Option<String> {
+    let mut candidates: Vec<PathBuf> = vec![];
+    if let Some(p) = std::env::var_os("GENIE_NOTICES") {
+        candidates.push(PathBuf::from(p));
+    }
+    if let Some(r) = resource_dir {
+        candidates.push(r.join("THIRD-PARTY-NOTICES.md"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        candidates.push(exe.with_file_name("THIRD-PARTY-NOTICES.md"));
+    }
+    if cfg!(debug_assertions) {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        // `cargo xtask notices` (default `--out dist`), else the hand-written extras.
+        candidates.push(manifest.join("../../../dist/THIRD-PARTY-NOTICES.md"));
+        candidates.push(manifest.join("../../../release/notices/extra.md"));
+    }
+    candidates
+        .iter()
+        .find_map(|p| std::fs::read_to_string(p).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +355,50 @@ mod tests {
         let info = client_info("desktop_x");
         assert_eq!(info.kind, ClientKind::Desktop);
         assert!(info.capabilities.asks.contains(&AskKind::BrowserConfirm));
-        assert_eq!(info.capabilities.terminal, Some(false));
+        assert_eq!(info.capabilities.terminal, Some(true));
+    }
+
+    #[test]
+    fn install_cli_links_and_replaces_its_own_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir
+            .path()
+            .join("app")
+            .join(if cfg!(windows) { "genie.exe" } else { "genie" });
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        let target_dir = dir.path().join("bin");
+        let a = install_cli(&bin, &target_dir).unwrap();
+        assert!(std::path::Path::new(&a.path).exists());
+        // Again: our own link/shim is replaced.
+        install_cli(&bin, &target_dir).unwrap();
+        assert!(install_cli(&dir.path().join("missing"), &target_dir).is_err());
+        #[cfg(unix)]
+        {
+            assert_eq!(std::fs::read_link(&a.path).unwrap(), bin);
+            // A foreign file is never overwritten.
+            let other = dir.path().join("other");
+            std::fs::create_dir_all(&other).unwrap();
+            std::fs::write(other.join("genie"), "mine").unwrap();
+            assert!(install_cli(&bin, &other).is_err());
+            assert_eq!(
+                std::fs::read_to_string(other.join("genie")).unwrap(),
+                "mine"
+            );
+        }
+        let joined = std::env::join_paths([dir.path().join("x"), target_dir.clone()]).unwrap();
+        assert!(dir_on_path(&target_dir, Some(&joined)));
+        assert!(!dir_on_path(&dir.path().join("y"), Some(&joined)));
+    }
+
+    #[test]
+    fn notices_from_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("n.md");
+        std::fs::write(&f, "# Notices").unwrap();
+        // SAFETY: tests in this module don't read GENIE_NOTICES concurrently.
+        unsafe { std::env::set_var("GENIE_NOTICES", &f) };
+        assert_eq!(notices_text(None).as_deref(), Some("# Notices"));
+        unsafe { std::env::remove_var("GENIE_NOTICES") };
     }
 }

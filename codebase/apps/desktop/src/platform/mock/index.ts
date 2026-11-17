@@ -20,7 +20,25 @@ export interface MockOptions {
   firstRun?: boolean;
   /** Reply text; default is a Markdown sample. */
   reply?: (prompt: string) => string;
+  /** What the native pickers return (default: a folder / a save path). */
+  pickFolder?: string | null;
+  /** Replay ring size of mock terminals (bytes); default 64 KiB. */
+  terminalRing?: number;
 }
+
+/** A mock terminal: a line-echoing "shell" with a replay ring and absolute offsets. */
+interface MockTerm {
+  id: string;
+  sessionId: string;
+  /** Bytes as a binary string; `ring[0]` is at absolute offset `ringStart`. */
+  ring: string;
+  ringStart: number;
+  line: string;
+  attached: boolean;
+}
+
+const PROMPT = "mock$ ";
+const toBin = (text: string) => String.fromCharCode(...new TextEncoder().encode(text));
 
 const SAMPLE = `Here is a quick overview.
 
@@ -59,7 +77,8 @@ let counter = 0;
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${(++counter).toString(36)}`;
 const now = () => new Date().toISOString();
 
-export function createMockPlatform(opts: MockOptions = {}): Platform & { sessions: Map<string, MockSession>; emit: (m: HostMessage) => void } {
+export function createMockPlatform(opts: MockOptions = {}): Platform & { sessions: Map<string, MockSession>; emit: (m: HostMessage) => void; notifications: { title: string; body?: string }[] } {
+  const notifications: { title: string; body?: string }[] = [];
   const tick = opts.tickMs ?? 18;
   const sessions = new Map<string, MockSession>();
   let listener: ((m: HostMessage) => void) | null = null;
@@ -75,6 +94,15 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     { id: "anthropic", kind: "anthropic", status: "needs_auth", credentials: [] },
   ];
   const blobs = new Map<string, string>();
+  const terms = new Map<string, MockTerm>();
+  const trusted = new Map<string, { path: string; decision: "trust" | "deny"; decided_at: string; approvals: number }>([["/tmp/mock-repo", { path: "/tmp/mock-repo", decision: "trust", decided_at: now(), approvals: 1 }]]);
+  const rules: { rule: string; class: "allow" | "ask" | "deny"; scope: "user" | "managed"; source: string; locked: boolean }[] = [
+    { rule: "Bash(ls:*)", class: "allow", scope: "user", source: "settings.json", locked: false },
+    { rule: "WebFetch(domain:evil.example)", class: "deny", scope: "managed", source: "policy", locked: true },
+  ];
+  let deleteToken: string | null = null;
+  const projectFiles: { project_id: string; file_id: string; name: string; blob_id: string; size: number; tokens: number; added_at: string }[] = [];
+  const ringCap = opts.terminalRing ?? 64 * 1024;
   const uploads = new Map<string, string[]>();
 
   const emit = (m: HostMessage) => listener?.(m);
@@ -120,10 +148,11 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     publish(s, { type: "turn.started", turn_id, message_id: userMsgId }, true, turn_id);
     setStatus(s, "running");
     const msgId = uid("msg");
-    const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model };
+    const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model, usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } };
     s.messages.push(assistant);
     const finish = (status: "completed" | "cancelled") => {
       s.running = undefined;
+      publish(s, { type: "step.ended", finish: status === "completed" ? "stop" : "cancelled", usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } }, true, turn_id);
       publish(s, { type: "usage.updated", context_tokens: 1200 + text.length, context_window: 200000, cost: { usd: 0.0021 }, session: { input_tokens: 1200, output_tokens: 300 } }, false, turn_id);
       publish(s, { type: "turn.settled", turn_id, status }, true, turn_id);
       setStatus(s, "idle");
@@ -171,6 +200,56 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     void stream();
   }
 
+  function termWrite(t: MockTerm, text: string) {
+    const bin = toBin(text);
+    const start = t.ringStart + t.ring.length;
+    t.ring += bin;
+    if (t.ring.length > ringCap) {
+      const drop = t.ring.length - ringCap;
+      t.ring = t.ring.slice(drop);
+      t.ringStart += drop;
+    }
+    if (t.attached) {
+      notify("event", { session_id: t.sessionId, ts: now(), event: { type: "terminal.output", terminal_id: t.id, start, end: start + bin.length, data_b64: btoa(bin) } });
+    }
+  }
+
+  function termExit(t: MockTerm, code: number | null) {
+    terms.delete(t.id);
+    notify("terminal.exited", { terminal_id: t.id, code });
+  }
+
+  function termInput(t: MockTerm, bin: string) {
+    const text = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    for (const ch of text) {
+      if (ch === "\r") {
+        const line = t.line.trim();
+        t.line = "";
+        if (line === "exit" || line.startsWith("exit ")) {
+          termWrite(t, "\r\nexit\r\n");
+          termExit(t, Number(line.slice(5)) || 0);
+          return;
+        }
+        const out = !line ? "" : line.startsWith("echo ") ? `${line.slice(5)}\r\n` : `mock: command not found: ${line.split(" ")[0]}\r\n`;
+        termWrite(t, `\r\n${out}${PROMPT}`);
+      } else if (ch === "\x7f") {
+        if (t.line) {
+          t.line = t.line.slice(0, -1);
+          termWrite(t, "\b \b");
+        }
+      } else {
+        t.line += ch;
+        termWrite(t, ch);
+      }
+    }
+  }
+
+  function term(id: unknown): MockTerm {
+    const t = terms.get(String(id));
+    if (!t) throw err("not_found", "terminal not found", -32004);
+    return t;
+  }
+
   function session(id: unknown): MockSession {
     const s = sessions.get(String(id));
     if (!s) throw err("not_found", `no session ${String(id)}`, -32004);
@@ -187,7 +266,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "session.create": (p) => {
       const id = uid("ses");
       const s: MockSession = {
-        info: { session_id: id, kind: p.kind ?? "chat", model: p.model, effort: p.effort ?? null, mode: p.mode ?? "default", head_seq: 0, status: "idle", created_at: now(), updated_at: now(), incognito: !!p.incognito, project_id: p.project_id ?? null, workspace_id: p.workspace_path ?? null, title: null },
+        info: { session_id: id, kind: p.kind ?? "chat", model: p.model, effort: p.effort ?? null, mode: p.mode ?? "default", head_seq: 0, status: "idle", created_at: now(), updated_at: now(), incognito: !!p.incognito, project_id: p.project_id ?? null, workspace_id: p.workspace_path ?? null, title: null, web_search: p.web_search ?? true, code_execution: p.code_execution ?? false },
         events: [],
         messages: [],
         subscribed: false,
@@ -234,6 +313,11 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "session.update": (p) => {
       const s = session(p.session_id);
       const { session_id: _ignored, ...changes } = p;
+      if ("project_id" in changes) {
+        if (s.info.kind !== "chat") throw err("invalid_params", "only Chat sessions belong to projects", -32602);
+        if (changes.project_id && !projects.some((x) => x.project_id === changes.project_id)) throw err("not_found", "no such project", -32004);
+        changes.project_id = changes.project_id || null;
+      }
       Object.assign(s.info, changes);
       publish(s, { type: "session.updated", ...changes });
       if (workspaceOn) notify("session.listed", { change: "updated", session: summary(s) });
@@ -242,6 +326,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "session.delete": (p) => {
       const s = session(p.session_id);
       sessions.delete(s.info.session_id);
+      for (const t of [...terms.values()]) if (t.sessionId === s.info.session_id) termExit(t, null);
       if (workspaceOn) notify("session.listed", { change: "deleted", session: summary(s) });
       return {};
     },
@@ -334,6 +419,13 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "memory.update": () => ({}),
     "memory.set_state": () => ({}),
     "mcp.list": () => ({ servers: [{ name: "files", scope: "user", status: "connected", tools: 4 }] }),
+    "mcp.resources": (p) => ({ items: p.name === "files" ? [{ uri: "file:///notes/todo.md", name: "todo.md", mimeType: "text/markdown" }, { uriTemplate: "file:///{path}", name: "any file" }] : [] }),
+    "mcp.prompts": (p) => ({ items: p.name === "files" ? [{ name: "summarize", description: "Summarize a file", arguments: [{ name: "path", required: true }, { name: "style" }] }] : [] }),
+    "mcp.resource.read": (p) => {
+      const blob_id = uid("blob");
+      blobs.set(blob_id, btoa(`resource ${p.uri}`));
+      return { blob_id, mime: "text/markdown" };
+    },
     "skill.list": () => ({ skills: [{ id: "pdf", name: "PDF", description: "Read and fill PDFs", enabled: true, source: "builtin" }] }),
     "usage.query": () => ({ rows: [{ keys: ["mock"], usage: { input_tokens: 12000, output_tokens: 3400 }, cost: { usd: 0.12 } }] }),
     "daemon.status": () => ({ version: "0.1.0-mock", pid: 1, uptime_s: 42, socket: "mock", channel: "dev", clients: [], sessions_running: 0 }),
@@ -342,8 +434,79 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "artifact.list": () => ({ artifacts: [] }),
     "browser.status": () => ({ installed: [], running: false, profile_path: "" }),
     "import.scan": () => ({ report: { items: [] } }),
-    "trust.get": (p) => ({ path: p.path, state: "unknown" }),
-    "trust.set": () => ({}),
+    "trust.get": (p) => ({ path: p.path, state: trusted.has(p.path) ? "trusted" : "unknown" }),
+    "trust.set": (p) => {
+      if (p.decision === "revoke") trusted.delete(p.path);
+      else trusted.set(p.path, { path: p.path, decision: p.decision === "deny" ? "deny" : "trust", decided_at: now(), approvals: 0 });
+      return {};
+    },
+    "trust.list": () => ({ items: [...trusted.values()] }),
+    "permissions.rules.list": () => ({ rules }),
+    "permissions.rules.remove": (p) => {
+      const i = rules.findIndex((r) => r.rule === p.rule && r.class === p.class && r.scope === p.scope);
+      if (i < 0) throw err("not_found", "no such rule", -32004);
+      if (rules[i].locked) throw err("locked", "managed by policy", -32011);
+      rules.splice(i, 1);
+      return {};
+    },
+    "data.delete_all.begin": () => {
+      deleteToken = uid("tok");
+      return { token: deleteToken, expires_in_s: 120, sessions: sessions.size, projects: projects.length, memories: memory.length, artifacts: 0, blob_bytes: 2048, clears_audit: true };
+    },
+    "data.delete_all.confirm": (p) => {
+      if (!deleteToken || p.token !== deleteToken) throw err("invalid_params", "token expired", -32602);
+      deleteToken = null;
+      const n = sessions.size;
+      for (const s of [...sessions.values()]) {
+        sessions.delete(s.info.session_id);
+        for (const t of [...terms.values()]) if (t.sessionId === s.info.session_id) termExit(t, null);
+      }
+      projects.splice(0);
+      memory.splice(0);
+      return { sessions_deleted: n, audit_cleared: true };
+    },
+    "project.file.list": (p) => ({ files: projectFiles.filter((f) => f.project_id === p.project_id).map(({ project_id: _p, ...f }) => f) }),
+    "project.file.add": (p) => {
+      const file_id = uid("pf");
+      projectFiles.push({ project_id: p.project_id, file_id, name: p.name, blob_id: p.blob_id, size: 100, tokens: 25, added_at: now() });
+      return { file_id };
+    },
+    "project.file.remove": (p) => {
+      const i = projectFiles.findIndex((f) => f.file_id === p.file_id);
+      if (i >= 0) projectFiles.splice(i, 1);
+      return {};
+    },
+    "terminal.open": (p) => {
+      const s = session(p.session_id);
+      if (s.info.kind !== "code") throw err("invalid_state", "terminals belong to Code sessions", -32010);
+      const t: MockTerm = { id: uid("term"), sessionId: s.info.session_id, ring: "", ringStart: 0, line: "", attached: false };
+      terms.set(t.id, t);
+      termWrite(t, PROMPT);
+      return { terminal_id: t.id };
+    },
+    "terminal.attach": (p) => {
+      const t = term(p.terminal_id);
+      t.attached = true;
+      const offset = Number(p.offset ?? 0);
+      const end = t.ringStart + t.ring.length;
+      if (offset < t.ringStart) {
+        const lastLine = t.ring.slice(t.ring.lastIndexOf("\n") + 1);
+        return { truncated: true, checkpoint_b64: btoa(lastLine), replay_b64: "", end_offset: end };
+      }
+      return { truncated: false, checkpoint_b64: null, replay_b64: btoa(t.ring.slice(Math.min(offset, end) - t.ringStart)), end_offset: end };
+    },
+    "terminal.input": (p) => {
+      termInput(term(p.terminal_id), atob(String(p.data_b64 ?? "")));
+      return {};
+    },
+    "terminal.resize": (p) => {
+      term(p.terminal_id);
+      return {};
+    },
+    "terminal.close": (p) => {
+      termExit(term(p.terminal_id), null);
+      return {};
+    },
     "blob.put.begin": () => {
       const id = uid("up");
       uploads.set(id, []);
@@ -365,6 +528,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     kind: "mock",
     sessions,
     emit,
+    notifications,
     async connect(onMessage) {
       listener = onMessage;
       onMessage({ kind: "status", state: "ready", engine_version: "0.1.0-mock" });
@@ -394,6 +558,21 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     },
     async saveFile(name) {
       return `~/Downloads/${name}`;
+    },
+    async pickFolder() {
+      return opts.pickFolder === undefined ? "/tmp/mock-repo" : opts.pickFolder;
+    },
+    async pickSavePath(name) {
+      return `/tmp/${name}`;
+    },
+    async notify(title, body) {
+      notifications.push({ title, body });
+    },
+    async installCli() {
+      return { path: "~/.local/bin/genie", target: "/Applications/Genie.app/Contents/MacOS/genie", dir: "~/.local/bin", on_path: false };
+    },
+    async notices() {
+      return "# Third-party notices\n\n- **OpenCode** (MIT)\n";
     },
     artifactUrl: () => "about:blank",
     log() {},

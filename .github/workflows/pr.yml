@@ -70,17 +70,21 @@ jobs:
       - run: cargo xtask ci clippy test
 
   frontend:
-    name: frontend (typecheck, lint, tests, pnpm audit)
+    name: frontend (typecheck, lint, tests, vite build, pnpm audit)
     runs-on: ubuntu-latest
-    # Runs once the pnpm workspace (apps/desktop, packages/ui) exists.
-    if: ${{ hashFiles('codebase/pnpm-workspace.yaml') != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          # The pnpm workspace (apps/desktop, packages/*) lives in codebase/.
+          package_json_file: codebase/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: codebase/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
+      # install --frozen-lockfile, build packages/artifact-runtime, typecheck, lint (if
+      # configured), vitest (incl. the artifact sandbox test in the runner's Chrome),
+      # vite build of apps/desktop, pnpm audit --prod.
       - run: cargo xtask ci frontend

@@ -8,8 +8,9 @@ import { Banner, Button, Field, Icon, Input, Segmented, Select, Switch, Textarea
 import { t } from "../../i18n";
 import { useApp, useAsync } from "../context";
 import { coerce, controlFor, description, keySchema, matches, sectionOf, SECTIONS, uiKeys, type Control, type KeyMeta, type SectionId } from "./schema";
-import { AccountSection, AppearanceSection, CapabilitiesSection, ConnectorsSection, DeveloperSection, GenieSection, GeneralExtras, PermissionsSection, PrivacySection, UsageSection } from "./Sections";
+import { AccountSection, AppearanceSection, CapabilitiesSection, ConnectorsSection, DeveloperSection, GenieSection, GeneralExtras, PrivacySection, UsageSection } from "./Sections";
 import { ProvidersSection } from "./ProvidersSection";
+import { PermissionsSection } from "./ManageSections";
 
 export function SettingsPage() {
   const app = useApp();

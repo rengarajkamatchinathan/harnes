@@ -21,7 +21,7 @@ default = []
 # Linux needs the WebKitGTK 4.1 development packages to build the webview. They are not
 # required for the relay, so plain `cargo build --workspace` works on a bare Linux box;
 # the real app is built with `--features linux-webview` (see README.md, Spec 05).
-linux-webview = ["dep:tauri", "dep:tauri-build"]
+linux-webview = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-notification"]
 
 [dependencies]
 genie-client.workspace = true
@@ -38,9 +38,14 @@ ulid.workspace = true
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tauri = { version = "2", features = [] }
+# Native file/folder pickers and OS notifications (05 §2.3, §3.1, §4; paused asks).
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tauri = { version = "2", features = [], optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
 
 [target.'cfg(not(target_os = "linux"))'.build-dependencies]
 tauri-build = { version = "2", features = [] }

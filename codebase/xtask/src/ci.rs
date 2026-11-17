@@ -41,7 +41,7 @@ pub const STEPS: &[(&str, &str)] = &[
     ),
     (
         "frontend",
-        "pnpm typecheck/lint/test + pnpm audit (when the pnpm workspace exists)",
+        "artifact runtime build, pnpm typecheck/lint/test, desktop vite build, pnpm audit",
     ),
 ];
 
@@ -151,11 +151,23 @@ fn frontend(root: &Path) -> Result<String, Vec<String>> {
         return missing("pnpm", "corepack enable");
     }
     cmd(root, "pnpm", &["install", "--frozen-lockfile"])?;
+    // The React artifact runtime (05 §8) is built first: its tests and the desktop
+    // bundle use packages/artifact-runtime/dist.
+    cmd(
+        root,
+        "pnpm",
+        &["--filter", "@genie/artifact-runtime", "run", "build"],
+    )?;
     for script in ["typecheck", "lint", "test"] {
         cmd(root, "pnpm", &["-r", "--if-present", script])?;
     }
+    cmd(
+        root,
+        "pnpm",
+        &["--filter", "@genie/desktop", "exec", "vite", "build"],
+    )?;
     cmd(root, "pnpm", &["audit", "--prod", "--audit-level", "high"])?;
-    Ok("frontend: typecheck, lint, test, audit".into())
+    Ok("frontend: artifact runtime, typecheck, lint, test, vite build, audit".into())
 }
 
 fn missing(tool: &str, install: &str) -> Result<String, Vec<String>> {

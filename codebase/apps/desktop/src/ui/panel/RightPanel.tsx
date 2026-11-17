@@ -7,7 +7,8 @@ import type { PanelTab } from "../../state/app";
 import { useApp } from "../context";
 import { ArtifactPanel } from "./ArtifactPanel";
 import { BrowserPanel } from "./BrowserPanel";
-import { ChangesPanel, FilesPanel, TerminalPanel } from "./CodePanels";
+import { ChangesPanel, FilesPanel } from "./CodePanels";
+import { TerminalPanel } from "./TerminalPanel";
 
 export function panelTabs(mode: string): PanelTab[] {
   return mode === "code" ? ["changes", "files", "terminal", "browser"] : ["artifact", "browser"];
@@ -59,7 +60,7 @@ export function RightPanel() {
         ) : tab === "files" ? (
           <FilesPanel sessionId={sid} />
         ) : (
-          <TerminalPanel />
+          <TerminalPanel sessionId={sid} />
         )}
       </div>
     </aside>

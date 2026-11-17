@@ -48,6 +48,8 @@ export interface MessageView {
   parts: PartView[];
   /** What the user sent (attachments, skills) for admitted user messages. */
   input?: InputPart[];
+  /** Assistant messages from `session.get`: tokens + cost of the step that produced it. */
+  usage?: TurnUsage;
   rev: number;
 }
 
@@ -87,12 +89,23 @@ export interface SessionModel {
   driver: ClientRef | null;
   leaseLost: boolean;
   artifacts: ArtifactVersioned[];
+  /** Tokens and cost per turn from `step.ended` events seen by this client (hover card). */
+  turnUsage: Map<string, TurnUsage>;
   subagents: Map<string, SubagentView>;
   browser: { control: BrowserControl | null; frame: BrowserFrame | null; actions: BrowserAction[] };
   /** Set by `branch.switched`: the caller reloads with `session.get`. */
   needsReload: boolean;
   synced: boolean;
   rev: number;
+}
+
+export interface TurnUsage {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  usd: number;
+  steps: number;
 }
 
 export function emptyModel(sessionId: string): SessionModel {
@@ -113,6 +126,7 @@ export function emptyModel(sessionId: string): SessionModel {
     driver: null,
     leaseLost: false,
     artifacts: [],
+    turnUsage: new Map(),
     subagents: new Map(),
     browser: { control: null, frame: null, actions: [] },
     needsReload: false,
@@ -139,6 +153,18 @@ function messageView(m: Message): MessageView {
     model: m.model ?? null,
     createdAt: m.created_at,
     parts: m.parts.filter((p) => p.type !== "unknown").map(partView),
+    ...(m.usage || m.cost
+      ? {
+          usage: {
+            input: m.usage?.input_tokens ?? 0,
+            output: m.usage?.output_tokens ?? 0,
+            reasoning: m.usage?.reasoning_tokens ?? 0,
+            cacheRead: m.usage?.cache_read_tokens ?? 0,
+            usd: m.cost?.usd ?? 0,
+            steps: 1,
+          },
+        }
+      : {}),
     rev: 0,
   };
 }
@@ -228,8 +254,21 @@ export function applyEvent(model: SessionModel, env: SessionEventEnvelope): bool
       model.retry = null;
       break;
     case "step.started":
-    case "step.ended":
       return false;
+    case "step.ended": {
+      if (!env.turn_id) return false;
+      const u = model.turnUsage.get(env.turn_id) ?? { input: 0, output: 0, reasoning: 0, cacheRead: 0, usd: 0, steps: 0 };
+      const next: TurnUsage = {
+        input: u.input + (e.usage.input_tokens ?? 0),
+        output: u.output + (e.usage.output_tokens ?? 0),
+        reasoning: u.reasoning + (e.usage.reasoning_tokens ?? 0),
+        cacheRead: u.cacheRead + (e.usage.cache_read_tokens ?? 0),
+        usd: u.usd + (e.cost?.usd ?? 0),
+        steps: u.steps + 1,
+      };
+      model.turnUsage = new Map(model.turnUsage).set(env.turn_id, next);
+      break;
+    }
     case "part.started": {
       if (findPart(model, e.part_id)) return false;
       const m = upsertMessage(model, e.message_id, "assistant", env);

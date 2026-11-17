@@ -1,7 +1,9 @@
 // Tauri implementation of the Platform adapter. This folder is the ONLY place that may
 // import `@tauri-apps/*` (01 §1.3; enforced by test/architecture.test.ts).
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { HostInfo, HostMessage, Platform, WireError } from "../types";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import type { CliInstall, HostInfo, HostMessage, Platform, WireError } from "../types";
 
 export function createTauriPlatform(): Platform {
   let os = "";
@@ -25,6 +27,20 @@ export function createTauriPlatform(): Platform {
     loadState: () => invoke<Record<string, unknown>>("host_state_load"),
     saveState: (state) => invoke("host_state_save", { state }),
     saveFile: (name, content) => invoke<string>("host_save_file", { name, text: "text" in content ? content.text : null, base64: "base64" in content ? content.base64 : null }),
+    async pickFolder(title) {
+      const r = await open({ directory: true, multiple: false, title });
+      return typeof r === "string" ? r : null;
+    },
+    async pickSavePath(defaultName, filters) {
+      return (await save({ defaultPath: defaultName, filters })) ?? null;
+    },
+    async notify(title, body) {
+      let ok = await isPermissionGranted();
+      if (!ok) ok = (await requestPermission()) === "granted";
+      if (ok) sendNotification({ title, body });
+    },
+    installCli: () => invoke<CliInstall>("host_install_cli"),
+    notices: () => invoke<string | null>("host_notices"),
     artifactUrl(artifactId, n) {
       const path = `${encodeURIComponent(artifactId)}/${n}/`;
       // WebView2 serves custom schemes as http://<scheme>.localhost (05 §8).

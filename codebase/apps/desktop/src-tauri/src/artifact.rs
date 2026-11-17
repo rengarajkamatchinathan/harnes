@@ -8,8 +8,12 @@
 //! from the scheme (`inline-<k>.js`), and a small bridge script (`/_genie/bridge.js`)
 //! implements the fixed postMessage schema and shims `alert/confirm/prompt`.
 //!
-//! React artifacts need `packages/artifact-runtime` (esbuild-wasm + bundled libraries),
-//! which is not built yet: they get a placeholder page.
+//! React artifacts get a page that loads `packages/artifact-runtime` from
+//! `/_genie/runtime/` on the same scheme (esbuild-wasm compiles the component inside the
+//! sandbox; imports resolve only to the bundled libraries). The artifact source is served as
+//! `source.js` (`globalThis.__GENIE_SOURCE__ = "<JSON string>"`), never inlined into HTML.
+
+use std::path::{Path, PathBuf};
 
 /// 05 §8, plus the Windows `http://genie-artifact.localhost` origin form.
 pub const CSP: &str = "default-src 'none'; \
@@ -71,6 +75,83 @@ pub struct Rendered {
     pub mime: &'static str,
     pub body: String,
     pub scripts: Vec<String>,
+    /// React artifacts: the script served as `source.js`.
+    pub source_js: Option<String>,
+}
+
+/// Base styles of the React page (inline styles are allowed by the CSP; scripts are not).
+const REACT_STYLE: &str = "html,body{margin:0}body{font:14px/1.5 system-ui,sans-serif;\
+padding:16px;color:#1f2328;background:#fff}\
+.genie-error{border:1px solid #e5534b;border-radius:8px;padding:12px;color:#a40e26;background:#fff5f5}\
+.genie-error pre{white-space:pre-wrap;font:12px ui-monospace,monospace;margin:8px 0 0}";
+
+/// The page for a React artifact (05 §8): bridge, runtime, source; no inline script.
+pub fn react_page(title: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <title>{}</title><script src=\"/_genie/bridge.js\"></script><style>{REACT_STYLE}</style></head>\
+         <body><div id=\"root\"></div><script src=\"source.js\"></script>\
+         <script src=\"/_genie/runtime/runtime.js\"></script></body></html>",
+        escape(title)
+    )
+}
+
+/// `source.js` for a React artifact: the code as a JSON string literal (valid JS).
+pub fn react_source_js(content: &str) -> String {
+    let lit = serde_json::to_string(content).unwrap_or_else(|_| "\"\"".into());
+    format!("globalThis.__GENIE_SOURCE__ = {lit};\n")
+}
+
+/// `/_genie/runtime/<rel>` → `rel` when it is a plain relative path inside the runtime.
+pub fn runtime_rel(path: &str) -> Option<&str> {
+    let rel = path.strip_prefix("/_genie/runtime/")?;
+    let ok = !rel.is_empty()
+        && rel
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
+        && rel
+            .split('/')
+            .all(|seg| !seg.is_empty() && !seg.starts_with('.'));
+    ok.then_some(rel)
+}
+
+/// Content type by extension for runtime files.
+pub fn runtime_mime(rel: &str) -> &'static str {
+    match rel.rsplit_once('.').map(|(_, e)| e) {
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json") => "application/json",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("ttf") => "font/ttf",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Folders that may hold the built runtime (`packages/artifact-runtime/dist`), in order:
+/// `GENIE_ARTIFACT_RUNTIME`, `<resources>/artifact-runtime`, and in debug builds the
+/// workspace copies. Release builds also find it embedded with the frontend
+/// (`dist/artifact-runtime`, copied there by the desktop Vite build).
+pub fn runtime_dirs(resource_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = vec![];
+    if let Some(d) = std::env::var_os("GENIE_ARTIFACT_RUNTIME") {
+        dirs.push(PathBuf::from(d));
+    }
+    if let Some(r) = resource_dir {
+        dirs.push(r.join("artifact-runtime"));
+    }
+    if cfg!(debug_assertions) {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        dirs.push(manifest.join("../../../packages/artifact-runtime/dist"));
+        dirs.push(manifest.join("../dist/artifact-runtime"));
+    }
+    dirs
+}
+
+/// Read `rel` (already checked by [`runtime_rel`]) from the first folder that has it.
+pub fn read_runtime_file(dirs: &[PathBuf], rel: &str) -> Option<Vec<u8>> {
+    dirs.iter().find_map(|d| std::fs::read(d.join(rel)).ok())
 }
 
 /// Build what the scheme serves for an artifact of `kind` with `content`.
@@ -82,6 +163,7 @@ pub fn render(kind: &str, title: &str, content: &str) -> Rendered {
                 mime: "text/html; charset=utf-8",
                 body: inject_bridge(&html),
                 scripts,
+                source_js: None,
             }
         }
         // Shown through `<img>`: scripts in an SVG never run in image context.
@@ -89,22 +171,19 @@ pub fn render(kind: &str, title: &str, content: &str) -> Rendered {
             mime: "image/svg+xml",
             body: content.to_string(),
             scripts: vec![],
+            source_js: None,
         },
         "react" => Rendered {
             mime: "text/html; charset=utf-8",
-            body: inject_bridge(&format!(
-                "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title></head>\
-                 <body style=\"font:14px system-ui;padding:16px;color:#555\">\
-                 <p>React previews need the artifact runtime, which is coming soon. \
-                 Use the Code tab to see the source.</p></body></html>",
-                escape(title)
-            )),
+            body: react_page(title),
             scripts: vec![],
+            source_js: Some(react_source_js(content)),
         },
         _ => Rendered {
             mime: "text/plain; charset=utf-8",
             body: content.to_string(),
             scripts: vec![],
+            source_js: None,
         },
     }
 }
@@ -222,12 +301,70 @@ mod tests {
     }
 
     #[test]
-    fn react_is_a_placeholder_and_svg_is_an_image() {
+    fn react_page_loads_the_runtime_and_never_inlines_the_source() {
+        let src = "export default () => <p>{\"</script><script>alert(1)</script>\"}</p>";
+        let r = render("react", "<x>", src);
+        assert!(r.body.contains("<title>&lt;x&gt;</title>"));
         assert!(
-            render("react", "<x>", "export default 1")
-                .body
-                .contains("&lt;x&gt;")
+            r.body
+                .contains("<script src=\"/_genie/bridge.js\"></script>")
         );
+        assert!(r.body.contains("<script src=\"source.js\"></script>"));
+        assert!(
+            r.body
+                .contains("<script src=\"/_genie/runtime/runtime.js\"></script>")
+        );
+        assert!(!r.body.contains("alert(1)"));
+        // Every <script> in the page has a src (the CSP has no 'unsafe-inline' for scripts).
+        assert_eq!(
+            r.body.matches("<script").count(),
+            r.body.matches("<script src=").count()
+        );
+        let js = r.source_js.unwrap();
+        let lit = js
+            .strip_prefix("globalThis.__GENIE_SOURCE__ = ")
+            .unwrap()
+            .trim_end()
+            .trim_end_matches(';');
+        assert_eq!(serde_json::from_str::<String>(lit).unwrap(), src);
+    }
+
+    #[test]
+    fn runtime_paths_stay_inside_the_runtime() {
+        assert_eq!(
+            runtime_rel("/_genie/runtime/runtime.js"),
+            Some("runtime.js")
+        );
+        assert_eq!(
+            runtime_rel("/_genie/runtime/libs/fonts/KaTeX_Main-Regular.woff2"),
+            Some("libs/fonts/KaTeX_Main-Regular.woff2")
+        );
+        for bad in [
+            "/_genie/runtime/../secret",
+            "/_genie/runtime/libs/../../x",
+            "/_genie/runtime/",
+            "/_genie/runtime//abs",
+            "/_genie/runtime/a%2e%2e/b",
+            "/_genie/runtime/.hidden",
+            "/other/runtime.js",
+        ] {
+            assert_eq!(runtime_rel(bad), None, "{bad}");
+        }
+        assert_eq!(runtime_mime("libs/katex.css"), "text/css; charset=utf-8");
+        assert_eq!(runtime_mime("x.woff2"), "font/woff2");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("libs")).unwrap();
+        std::fs::write(dir.path().join("libs/react.js"), "x").unwrap();
+        let dirs = vec![dir.path().join("missing"), dir.path().to_path_buf()];
+        assert_eq!(
+            read_runtime_file(&dirs, "libs/react.js"),
+            Some(b"x".to_vec())
+        );
+        assert_eq!(read_runtime_file(&dirs, "libs/none.js"), None);
+    }
+
+    #[test]
+    fn svg_is_an_image() {
         assert_eq!(render("svg", "", "<svg/>").mime, "image/svg+xml");
         assert_eq!(
             render("document", "", "# hi").mime,

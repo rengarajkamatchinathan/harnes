@@ -15,6 +15,8 @@ import {
   type SessionListed,
   type SessionSummary,
   type SessionSynced,
+  type TerminalExited,
+  type TerminalOutput,
   type UserNotification,
   type WorkspaceSnapshot,
 } from "@genie/protocol";
@@ -22,6 +24,7 @@ import { DEFAULT_APPEARANCE, type Appearance } from "@genie/ui";
 import { errorKind, errorMessage, type HostInfo, type HostMessage, type HostStatus, type Platform } from "../platform";
 import { Emitter } from "./emitter";
 import { SessionStore } from "./session";
+import { Terminals } from "./terminals";
 
 export type View = "main" | "settings" | "project";
 export type PanelTab = "artifact" | "browser" | "changes" | "files" | "terminal";
@@ -44,6 +47,12 @@ export interface UiState {
   model: string | null;
   effort: string | null;
   recentWorkspaces: string[];
+  /** Open terminal ids per session, for reattach after a reload (05 §10). */
+  terminals: Record<string, { id: string; title: string }[]>;
+  /** OS notifications for paused asks when the window is in the background. */
+  osNotifications: boolean;
+  /** The D35 notice was shown before code execution was first turned on. */
+  codeExecNoticeSeen: boolean;
 }
 
 const DEFAULT_UI: UiState = {
@@ -63,6 +72,9 @@ const DEFAULT_UI: UiState = {
   model: null,
   effort: null,
   recentWorkspaces: [],
+  terminals: {},
+  osNotifications: true,
+  codeExecNoticeSeen: false,
 };
 
 export interface Toast {
@@ -100,9 +112,12 @@ export class App extends Emitter {
   private configListeners = new Set<Listener<string[]>>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  readonly terminals: Terminals;
+
   constructor(readonly platform: Platform) {
     super();
     this.client = new GenieClient({ request: (m, p) => platform.request(m, p) });
+    this.terminals = new Terminals({ client: this.client, persistTerminals: (terminals) => this.setUi({ terminals }) });
   }
 
   async start() {
@@ -110,6 +125,7 @@ export class App extends Emitter {
     this.ui = { ...DEFAULT_UI, ...(state as Partial<UiState>), view: "main", appearance: { ...DEFAULT_APPEARANCE, ...((state as Partial<UiState>).appearance ?? {}) } };
     if ((state as { firstRunDone?: boolean }).firstRunDone) this.ui.firstRunDone = true;
     this.stateLoaded = true;
+    this.terminals.restore(this.ui.terminals);
     this.info = await this.platform.connect((m) => this.onHost(m));
     this.changedNow();
   }
@@ -180,6 +196,7 @@ export class App extends Emitter {
     if (this.everReady) {
       // The relay resubscribed sessions and the workspace feed itself (02 §3.1).
       void this.refreshLists();
+      this.terminals.reattachAll();
       return;
     }
     this.everReady = true;
@@ -205,9 +222,16 @@ export class App extends Emitter {
     switch (method) {
       case "event": {
         const env = params as SessionEventEnvelope;
+        if (env.event.type === "terminal.output") {
+          this.terminals.onOutput(env.event as unknown as TerminalOutput);
+          return;
+        }
         this.open.get(env.session_id)?.apply(env);
         return;
       }
+      case "terminal.exited":
+        this.terminals.onExited(params as TerminalExited);
+        return;
       case "session.synced":
         this.open.get((params as SessionSynced).session_id)?.markSynced();
         return;
@@ -227,7 +251,10 @@ export class App extends Emitter {
       case "session.listed": {
         const p = params as SessionListed;
         this.sessions = new Map(this.sessions);
-        if (p.change === "deleted") this.sessions.delete(p.session.session_id);
+        if (p.change === "deleted") {
+          this.sessions.delete(p.session.session_id);
+          if (this.terminals.list(p.session.session_id).length) this.terminals.forgetSession(p.session.session_id);
+        }
         else this.sessions.set(p.session.session_id, p.session);
         this.changed();
         return;
@@ -245,6 +272,7 @@ export class App extends Emitter {
       case "notification": {
         const n = params as UserNotification;
         this.toast({ title: n.title, body: n.body, tone: "info", link: n.link });
+        this.osNotify(n.title, n.body ?? undefined);
         return;
       }
       case "daemon.restarting":
@@ -264,6 +292,9 @@ export class App extends Emitter {
     if (!ask?.id) return;
     this.askReqs.set(ask.id, reqId);
     this.reqAsks.set(reqId, ask.id);
+    // The turn is paused on us: tell the user if Genie isn't in front (05 §4 notifications).
+    const title = this.sessions.get(ask.session_id)?.title;
+    this.osNotify("Genie needs your approval", [ask.tool ?? ask.kind, title].filter(Boolean).join(" · "));
     const s = this.open.get(ask.session_id);
     if (s) s.addAsk(ask);
     else this.toast({ title: "Genie needs your approval", body: ask.tool ?? ask.kind, tone: "info", link: `genie://session/${ask.session_id}` });
@@ -344,9 +375,34 @@ export class App extends Emitter {
     return r.session_id;
   }
 
+  /** Move a Chat into a project, or out of it with `null` (`session.update.project_id`, `""` = out). */
+  async moveToProject(id: string, projectId: string | null) {
+    await this.client.session.update({ session_id: id, project_id: projectId ?? "" });
+    const s = this.sessions.get(id);
+    if (s) {
+      this.sessions = new Map(this.sessions).set(id, { ...s, project_id: projectId });
+      this.changed();
+    }
+  }
+
+  /** After "Delete all data": forget everything local and reload from a fresh snapshot. */
+  async reloadAfterDeleteAll() {
+    for (const id of [...this.open.keys()]) this.closeSession(id);
+    for (const id of [...this.sessions.keys()]) this.terminals.forgetSession(id);
+    this.sessions = new Map();
+    this.setUi({ activeSession: null, activeProject: null, view: "main", terminals: {} });
+    try {
+      await this.client.workspace.subscribe({});
+    } catch (e) {
+      this.platform.log("warn", `workspace.subscribe: ${errorMessage(e)}`);
+    }
+    await this.refreshLists();
+  }
+
   async deleteSession(id: string) {
     await this.client.session.delete({ session_id: id });
     this.closeSession(id);
+    this.terminals.forgetSession(id);
     this.sessions = new Map(this.sessions);
     this.sessions.delete(id);
     if (this.ui.activeSession === id) this.setUi({ activeSession: null });
@@ -354,6 +410,15 @@ export class App extends Emitter {
   }
 
   // ---------- misc ----------
+
+  /** Is the app window in front? (OS notifications only go out when it isn't.) */
+  isForeground: () => boolean = () => typeof document !== "undefined" && !document.hidden && document.hasFocus();
+
+  /** OS notification when the window is in the background and the user allows them. */
+  osNotify(title: string, body?: string) {
+    if (!this.ui.osNotifications || this.isForeground()) return;
+    void this.platform.notify(title, body).catch((e) => this.platform.log("warn", `notification: ${errorMessage(e)}`));
+  }
 
   onConfigChanged(f: Listener<string[]>) {
     this.configListeners.add(f);

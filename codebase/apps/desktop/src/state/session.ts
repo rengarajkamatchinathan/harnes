@@ -135,6 +135,14 @@ export class SessionStore extends Emitter {
     await this.reload(siblingId);
   }
 
+  /** Per-chat provider tools (06 §8, D35); needs the driver lease. */
+  async setToggle(key: "web_search" | "code_execution", value: boolean) {
+    await this.app.client.session.update({ session_id: this.id, [key]: value });
+    if (this.model.info) this.model.info = { ...this.model.info, [key]: value };
+    this.model.rev++;
+    this.changedNow();
+  }
+
   removeQueued(inboxId: string) {
     return this.app.client.session.inbox.remove({ session_id: this.id, inbox_id: inboxId });
   }

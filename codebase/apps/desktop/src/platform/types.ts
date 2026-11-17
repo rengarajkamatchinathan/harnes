@@ -36,6 +36,13 @@ export interface HostInfo {
   batch_ms: number;
 }
 
+export interface CliInstall {
+  path: string;
+  target: string;
+  dir: string;
+  on_path: boolean;
+}
+
 export interface WireError {
   code: number;
   message: string;
@@ -61,6 +68,16 @@ export interface Platform {
   saveState(state: Record<string, unknown>): Promise<void>;
   /** Save an export to Downloads; resolves with the saved path. */
   saveFile(name: string, content: { text: string } | { base64: string }): Promise<string>;
+  /** Native folder picker (Code: new session); null when cancelled. */
+  pickFolder(title?: string): Promise<string | null>;
+  /** Native save dialog; resolves with the chosen path or null. */
+  pickSavePath(defaultName: string, filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
+  /** OS notification (paused asks, workspace `notification`) when the window is in the background. */
+  notify(title: string, body?: string): Promise<void>;
+  /** "Install `genie` command in PATH" (D40). */
+  installCli(): Promise<CliInstall>;
+  /** Third-party licence notices shipped with the app; null when not bundled. */
+  notices(): Promise<string | null>;
   /** URL of an artifact page on the sandboxed scheme (05 §8). */
   artifactUrl(artifactId: string, n: number): string;
   log(level: "info" | "warn" | "error", message: string): void;

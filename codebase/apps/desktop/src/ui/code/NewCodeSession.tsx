@@ -121,7 +121,12 @@ export function NewCodeSession({ onClose }: { onClose: () => void }) {
       <div className="stack">
         <label className="stack-tight">
           <span>{t("code.folder")}</span>
-          <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder={t("code.folderHint")} list="recent-workspaces" autoFocus />
+          <div className="row">
+            <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder={t("code.folderHint")} list="recent-workspaces" autoFocus />
+            <Button icon="folder" onClick={() => void app.platform.pickFolder(t("code.folder")).then((p) => p && setPath(p), () => {})}>
+              {t("code.chooseFolder")}
+            </Button>
+          </div>
           <datalist id="recent-workspaces">
             {app.ui.recentWorkspaces.map((w) => (
               <option key={w} value={w} />
