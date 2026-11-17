@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::common::{ClientRef, Mode, SessionKind};
+use crate::common::{ClientRef, Cost, Mode, SessionKind, Usage};
 use crate::session::LiveStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -152,6 +152,12 @@ pub struct Message {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
+    /// Assistant messages: the tokens of the step that produced this message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    /// Assistant messages: estimated cost of that step (D27).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Cost>,
 }
 
 /// One row in the session list (02 §6.2, workspace feed).
@@ -196,4 +202,14 @@ pub struct SessionInfo {
     pub incognito: bool,
     /// RFC 3339.
     pub created_at: String,
+    /// Per-chat provider web search toggle (06 §8).
+    #[serde(default = "yes")]
+    pub web_search: bool,
+    /// Per-chat provider code execution toggle (D35).
+    #[serde(default)]
+    pub code_execution: bool,
+}
+
+fn yes() -> bool {
+    true
 }

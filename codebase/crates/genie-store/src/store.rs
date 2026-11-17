@@ -17,7 +17,7 @@ use crate::migrate;
 pub const READERS: usize = 4;
 /// Backups kept before schema migrations (04 §5).
 pub const BACKUPS_KEPT: usize = 2;
-const BLOB_KEY_KV: &str = "blob_key";
+pub(crate) const BLOB_KEY_KV: &str = "blob_key";
 const BLOB_KEY_AAD: &[u8] = b"genie blob key v1";
 
 #[derive(Debug, Clone)]

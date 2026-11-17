@@ -237,6 +237,8 @@ mod tests {
                 created_at: String::new(),
                 model: None,
                 turn_id: None,
+                usage: None,
+                cost: None,
             },
             Message {
                 id: "m2".into(),
@@ -260,6 +262,8 @@ mod tests {
                 created_at: String::new(),
                 model: None,
                 turn_id: None,
+                usage: None,
+                cost: None,
             },
         ];
         let t = transcript("ses_9", &path);

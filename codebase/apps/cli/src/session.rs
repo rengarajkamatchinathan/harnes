@@ -98,6 +98,7 @@ pub async fn open(conn: &Connection, target: &Target, spec: &Spec, cwd: &Path) -
                     worktree: spec.worktree.as_ref().map(|_| WorktreeChoice::New),
                     worktree_name: spec.worktree.clone().filter(|w| !w.is_empty()),
                     settings: spec.overlay.clone(),
+                    ..CreateParams::default()
                 })
                 .await
                 .map_err(|e| anyhow!("creating a session: {}", errors::describe(&e)))?;

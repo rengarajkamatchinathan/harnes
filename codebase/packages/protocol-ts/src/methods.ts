@@ -43,6 +43,11 @@ export interface Requests {
   "trust.set": { params: T.TrustSetParams; result: T.Empty };
   "trust.pending_definitions": { params: T.PathParams; result: T.PendingDefinitionsResult };
   "trust.approve_definition": { params: T.ApproveDefinitionParams; result: T.Empty };
+  "trust.list": { params: T.Empty; result: T.TrustListResult };
+  "permissions.rules.list": { params: T.PermissionRulesListParams; result: T.PermissionRulesListResult };
+  "permissions.rules.remove": { params: T.PermissionRuleRemoveParams; result: T.Empty };
+  "data.delete_all.begin": { params: T.Empty; result: T.DeleteAllBeginResult };
+  "data.delete_all.confirm": { params: T.DeleteAllParams; result: T.DeleteAllResult };
   "provider.list": { params: T.Empty; result: T.ProviderListResult };
   "provider.credential.add": { params: T.CredentialAddParams; result: T.CredentialAddResult };
   "provider.credential.remove": { params: T.CredentialIdParams; result: T.Empty };
@@ -95,6 +100,7 @@ export interface Requests {
   "project.delete": { params: T.ProjectIdParams; result: T.Empty };
   "project.file.add": { params: T.ProjectFileAddParams; result: T.FileIdResult };
   "project.file.remove": { params: T.ProjectFileRemoveParams; result: T.Empty };
+  "project.file.list": { params: T.ProjectIdParams; result: T.ProjectFileListResult };
   "project.index.status": { params: T.ProjectIdParams; result: T.IndexStatus };
   "artifact.list": { params: T.ArtifactListParams; result: T.ArtifactListResult };
   "artifact.get": { params: T.ArtifactGetParams; result: T.ArtifactGetResult };
@@ -194,6 +200,11 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "trust.set", direction: "request", needsLease: false },
   { name: "trust.pending_definitions", direction: "request", needsLease: false },
   { name: "trust.approve_definition", direction: "request", needsLease: false },
+  { name: "trust.list", direction: "request", needsLease: false },
+  { name: "permissions.rules.list", direction: "request", needsLease: false },
+  { name: "permissions.rules.remove", direction: "request", needsLease: false },
+  { name: "data.delete_all.begin", direction: "request", needsLease: false },
+  { name: "data.delete_all.confirm", direction: "request", needsLease: false },
   { name: "provider.list", direction: "request", needsLease: false },
   { name: "provider.credential.add", direction: "request", needsLease: false },
   { name: "provider.credential.remove", direction: "request", needsLease: false },
@@ -246,6 +257,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "project.delete", direction: "request", needsLease: false },
   { name: "project.file.add", direction: "request", needsLease: false },
   { name: "project.file.remove", direction: "request", needsLease: false },
+  { name: "project.file.list", direction: "request", needsLease: false },
   { name: "project.index.status", direction: "request", needsLease: false },
   { name: "artifact.list", direction: "request", needsLease: false },
   { name: "artifact.get", direction: "request", needsLease: false },
@@ -360,6 +372,12 @@ export class GenieClient {
     restart: (params: T.DaemonRestartParams): Promise<T.Empty> => this.t.request("daemon.restart", params) as Promise<T.Empty>,
     status: (params: T.Empty = {}): Promise<T.DaemonStatus> => this.t.request("daemon.status", params) as Promise<T.DaemonStatus>,
   };
+  readonly data = {
+    delete_all: {
+      begin: (params: T.Empty = {}): Promise<T.DeleteAllBeginResult> => this.t.request("data.delete_all.begin", params) as Promise<T.DeleteAllBeginResult>,
+      confirm: (params: T.DeleteAllParams): Promise<T.DeleteAllResult> => this.t.request("data.delete_all.confirm", params) as Promise<T.DeleteAllResult>,
+    },
+  };
   readonly diagnostics = {
     collect: (params: T.DiagnosticsParams): Promise<T.DiagnosticsResult> => this.t.request("diagnostics.collect", params) as Promise<T.DiagnosticsResult>,
   };
@@ -418,6 +436,12 @@ export class GenieClient {
     pending: (params: T.PendingParams): Promise<T.PendingResult> => this.t.request("permission.pending", params) as Promise<T.PendingResult>,
     respond: (params: T.RespondParams): Promise<T.Empty> => this.t.request("permission.respond", params) as Promise<T.Empty>,
   };
+  readonly permissions = {
+    rules: {
+      list: (params: T.PermissionRulesListParams): Promise<T.PermissionRulesListResult> => this.t.request("permissions.rules.list", params) as Promise<T.PermissionRulesListResult>,
+      remove: (params: T.PermissionRuleRemoveParams): Promise<T.Empty> => this.t.request("permissions.rules.remove", params) as Promise<T.Empty>,
+    },
+  };
   readonly ping = (params: T.Empty = {}): Promise<T.Empty> => this.t.request("$/ping", params) as Promise<T.Empty>;
   readonly policy = {
     effective: (params: T.Empty = {}): Promise<T.PolicyEffectiveResult> => this.t.request("policy.effective", params) as Promise<T.PolicyEffectiveResult>,
@@ -427,6 +451,7 @@ export class GenieClient {
     delete: (params: T.ProjectIdParams): Promise<T.Empty> => this.t.request("project.delete", params) as Promise<T.Empty>,
     file: {
       add: (params: T.ProjectFileAddParams): Promise<T.FileIdResult> => this.t.request("project.file.add", params) as Promise<T.FileIdResult>,
+      list: (params: T.ProjectIdParams): Promise<T.ProjectFileListResult> => this.t.request("project.file.list", params) as Promise<T.ProjectFileListResult>,
       remove: (params: T.ProjectFileRemoveParams): Promise<T.Empty> => this.t.request("project.file.remove", params) as Promise<T.Empty>,
     },
     index: {
@@ -492,6 +517,7 @@ export class GenieClient {
   readonly trust = {
     approve_definition: (params: T.ApproveDefinitionParams): Promise<T.Empty> => this.t.request("trust.approve_definition", params) as Promise<T.Empty>,
     get: (params: T.PathParams): Promise<T.TrustGetResult> => this.t.request("trust.get", params) as Promise<T.TrustGetResult>,
+    list: (params: T.Empty = {}): Promise<T.TrustListResult> => this.t.request("trust.list", params) as Promise<T.TrustListResult>,
     pending_definitions: (params: T.PathParams): Promise<T.PendingDefinitionsResult> => this.t.request("trust.pending_definitions", params) as Promise<T.PendingDefinitionsResult>,
     set: (params: T.TrustSetParams): Promise<T.Empty> => this.t.request("trust.set", params) as Promise<T.Empty>,
   };

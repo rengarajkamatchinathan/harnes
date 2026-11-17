@@ -9,7 +9,7 @@ use crate::artifacts::{self, ArtifactVersion, INLINE_MAX};
 use crate::error::{Result, StoreError};
 use crate::keys::{DATA_KEY_ACCOUNT, KeyStore, RECOVERY_FILE};
 use crate::search;
-use crate::store::Store;
+use crate::store::{BLOB_KEY_KV, Store};
 use crate::util::now_ms;
 use crate::{events, kv};
 
@@ -27,6 +27,16 @@ pub struct BlobRow {
     pub mime: Option<String>,
     pub refcount: i64,
     pub created: i64,
+}
+
+/// Row counts shown before "Delete all data" (`Store::data_counts`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DataCounts {
+    pub sessions: u64,
+    pub projects: u64,
+    pub memories: u64,
+    pub artifacts: u64,
+    pub blob_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -194,6 +204,73 @@ impl Store {
             blobs_deleted,
             vacuumed,
         })
+    }
+
+    /// What "Delete all data" would remove: sessions, projects, memories, artifacts and
+    /// stored blob bytes.
+    pub fn data_counts(&self) -> Result<DataCounts> {
+        self.read(|c| {
+            let n = |sql: &str| -> Result<u64> {
+                let v: i64 = c.query_row(sql, [], |r| r.get(0))?;
+                Ok(u64::try_from(v).unwrap_or(0))
+            };
+            Ok(DataCounts {
+                sessions: n("SELECT COUNT(*) FROM session")?,
+                projects: n("SELECT COUNT(*) FROM project")?,
+                memories: n("SELECT COUNT(*) FROM memory")?,
+                artifacts: n("SELECT COUNT(*) FROM artifact")?,
+                blob_bytes: n("SELECT COALESCE(SUM(size), 0) FROM blob")?,
+            })
+        })
+    }
+
+    /// "Delete all data" while the daemon keeps running (04 §8): every row of every
+    /// table is deleted in one transaction (FTS indexes emptied), then the blob files,
+    /// shadow-git snapshots and caches are removed and the DB is vacuumed (with
+    /// `secure_delete` the freed pages are zeroed). The data key, the blob key and the
+    /// migration journal stay, so the open handle remains usable as an empty store.
+    pub fn wipe_all_data(&self) -> Result<()> {
+        let _blobs = self.blob_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.write(|tx| {
+            tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
+            let virtual_tables: Vec<String> = {
+                let mut st = tx.prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL%'",
+                )?;
+                st.query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<_>>()?
+            };
+            let tables: Vec<String> = {
+                let mut st = tx.prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'
+                       AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'",
+                )?;
+                st.query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<_>>()?
+            };
+            for t in &tables {
+                // FTS shadow tables belong to their virtual table; the journal and the
+                // blob key (in `kv`) keep the store usable.
+                if t == "migration" || virtual_tables.iter().any(|v| t.starts_with(&format!("{v}_")))
+                {
+                    continue;
+                }
+                if t == "kv" {
+                    tx.execute("DELETE FROM kv WHERE key <> ?1", [BLOB_KEY_KV])?;
+                } else {
+                    tx.execute_batch(&format!("DELETE FROM \"{}\"", t.replace('"', "\"\"")))?;
+                }
+            }
+            search::rebuild_all(tx)?;
+            Ok(())
+        })?;
+        for sub in ["blobs", "snapshots", "cache"] {
+            remove_path(&self.dir().join(sub))?;
+        }
+        crate::blobs::create_private_dir(self.blob_files().root())?;
+        drop(_blobs);
+        self.vacuum_if_needed(now_ms(), true)?;
+        Ok(())
     }
 
     /// Settings → Privacy → "Delete all data" (04 §8): closes the store and removes the

@@ -1324,6 +1324,13 @@
             "null"
           ]
         },
+        "code_execution": {
+          "description": "Per-chat provider code execution toggle (D35; default off).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "effort": {
           "type": [
             "string",
@@ -1364,6 +1371,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "web_search": {
+          "description": "Per-chat provider web search toggle (06 §8; default on).",
+          "type": [
+            "boolean",
+            "null"
           ]
         },
         "workspace_path": {
@@ -1612,6 +1626,89 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "DeleteAllBeginResult": {
+      "description": "What \"Delete all data\" will remove (04 §8), and the token that confirms it.",
+      "properties": {
+        "artifacts": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "blob_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "clears_audit": {
+          "description": "Whether the local audit log is removed too (kept under a managed audit policy).",
+          "type": "boolean"
+        },
+        "expires_in_s": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memories": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "projects": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessions": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "token": {
+          "description": "Pass to `data.delete_all.confirm` within `expires_in_s` seconds; single use.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token",
+        "expires_in_s",
+        "sessions",
+        "projects",
+        "memories",
+        "artifacts",
+        "blob_bytes",
+        "clears_audit"
+      ],
+      "type": "object"
+    },
+    "DeleteAllParams": {
+      "properties": {
+        "token": {
+          "description": "From `data.delete_all.begin`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "type": "object"
+    },
+    "DeleteAllResult": {
+      "properties": {
+        "audit_cleared": {
+          "type": "boolean"
+        },
+        "sessions_deleted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sessions_deleted",
+        "audit_cleared"
+      ],
+      "type": "object"
     },
     "Delivery": {
       "description": "How a prompt is delivered to a session (01 §5.2).",
@@ -3308,6 +3405,17 @@
     },
     "Message": {
       "properties": {
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cost"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Assistant messages: estimated cost of that step (D27)."
+        },
         "created_at": {
           "description": "RFC 3339.",
           "type": "string"
@@ -3341,6 +3449,17 @@
             "string",
             "null"
           ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Usage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Assistant messages: the tokens of the step that produced this message."
         }
       },
       "required": [
@@ -3864,6 +3983,165 @@
       ],
       "type": "object"
     },
+    "PermissionRule": {
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/PermissionRuleClass"
+        },
+        "locked": {
+          "description": "Cannot be removed with `permissions.rules.remove` (managed policy, CLI layer).",
+          "type": "boolean"
+        },
+        "rule": {
+          "description": "Rule text, e.g. `Bash(npm test:*)`.",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/PermissionRuleScope"
+        },
+        "source": {
+          "description": "The settings file the rule is in, or `policy` / `session`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "rule",
+        "class",
+        "scope",
+        "locked"
+      ],
+      "type": "object"
+    },
+    "PermissionRuleClass": {
+      "enum": [
+        "allow",
+        "ask",
+        "deny",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "PermissionRuleRemoveParams": {
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/PermissionRuleClass"
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/PermissionRuleScope",
+          "description": "`user`, `project`, `local` or `session`."
+        },
+        "session_id": {
+          "description": "Required for `session` scope.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "rule",
+        "class",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "PermissionRuleScope": {
+      "description": "Where a permission rule lives (06 §5.4, D23).",
+      "oneOf": [
+        {
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "user",
+          "description": "`~/.genie/settings.json`.",
+          "type": "string"
+        },
+        {
+          "const": "project",
+          "description": "`<project>/.genie/settings.json`.",
+          "type": "string"
+        },
+        {
+          "const": "local",
+          "description": "`<project>/.genie/settings.local.json`.",
+          "type": "string"
+        },
+        {
+          "const": "managed",
+          "description": "Managed policy (always locked).",
+          "type": "string"
+        },
+        {
+          "const": "session",
+          "description": "Remembered for one session only (\"always\" with session scope).",
+          "type": "string"
+        },
+        {
+          "const": "cli",
+          "description": "The session's CLI layer (`--allow`/`--deny`/`--settings`; locked).",
+          "type": "string"
+        }
+      ]
+    },
+    "PermissionRulesListParams": {
+      "properties": {
+        "cwd": {
+          "description": "Folder whose project/local layers to read (Code workspaces).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PermissionRuleScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only this scope; omit for every scope."
+        },
+        "session_id": {
+          "description": "Session whose session-scoped and CLI rules to include.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PermissionRulesListResult": {
+      "properties": {
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/PermissionRule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "type": "object"
+    },
     "PolicyChanged": {
       "description": "`policy.changed`.",
       "properties": {
@@ -4042,6 +4320,71 @@
         "project_id",
         "blob_id",
         "name"
+      ],
+      "type": "object"
+    },
+    "ProjectFileInfo": {
+      "description": "One file in a project's knowledge (`project.file.list`).",
+      "properties": {
+        "added_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "blob_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file_id": {
+          "type": "string"
+        },
+        "mime": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "description": "Bytes of the stored file.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokens": {
+          "description": "Estimated tokens of the extracted text.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "file_id",
+        "name",
+        "added_at"
+      ],
+      "type": "object"
+    },
+    "ProjectFileListResult": {
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/ProjectFileInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
       ],
       "type": "object"
     },
@@ -5305,6 +5648,11 @@
           "default": false,
           "type": "boolean"
         },
+        "code_execution": {
+          "default": false,
+          "description": "Per-chat provider code execution toggle (D35).",
+          "type": "boolean"
+        },
         "created_at": {
           "description": "RFC 3339.",
           "type": "string"
@@ -5374,6 +5722,11 @@
         "updated_at": {
           "description": "RFC 3339.",
           "type": "string"
+        },
+        "web_search": {
+          "default": true,
+          "description": "Per-chat provider web search toggle (06 §8).",
+          "type": "boolean"
         },
         "workspace_id": {
           "type": [
@@ -5556,6 +5909,12 @@
             "null"
           ]
         },
+        "code_execution": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "effort": {
           "type": [
             "string",
@@ -5584,9 +5943,22 @@
             "null"
           ]
         },
+        "project_id": {
+          "description": "`\"\"`: moved out of its project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "title": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "web_search": {
+          "type": [
+            "boolean",
             "null"
           ]
         }
@@ -6313,6 +6685,20 @@
       ],
       "type": "object"
     },
+    "TrustListResult": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/TrustedFolder"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
     "TrustSetParams": {
       "properties": {
         "decision": {
@@ -6336,6 +6722,43 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "TrustedFolder": {
+      "description": "One stored folder decision (`trust.json`, 08 §4). Revoke with\n`trust.set {path, decision: \"revoke\"}`.",
+      "properties": {
+        "approvals": {
+          "default": 0,
+          "description": "Approved project definitions (MCP servers, hooks) under this decision.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "decided_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/TrustDecision",
+          "description": "`trust` or `deny`."
+        },
+        "identity": {
+          "description": "Repository identity the decision is bound to, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Canonical folder path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "decision",
+        "decided_at"
+      ],
+      "type": "object"
     },
     "TurnInterrupted": {
       "properties": {
@@ -6431,6 +6854,13 @@
             "null"
           ]
         },
+        "code_execution": {
+          "description": "Per-chat provider code execution toggle (D35).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "effort": {
           "type": [
             "string",
@@ -6459,12 +6889,26 @@
             "null"
           ]
         },
+        "project_id": {
+          "description": "Move a Chat session into a project; `\"\"` moves it out of its project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "session_id": {
           "type": "string"
         },
         "title": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "web_search": {
+          "description": "Per-chat provider web search toggle (06 §8).",
+          "type": [
+            "boolean",
             "null"
           ]
         }
