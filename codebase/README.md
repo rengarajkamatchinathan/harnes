@@ -17,7 +17,7 @@ crates/
                    skew handling, idle exit, clean shutdown, standalone lease
   genie-client     endpoint layout, NDJSON framing, Connection, ensure (spawn / wait / retry)
   genie-process    kill-trees: Job Object (Windows) / process group (Unix), subreaper
-  genie-audit      tracing → rotating log files (10 × 10 MiB)
+  genie-audit      tracing → rotating log files (10 × 10 MiB); org audit stream → rotating JSONL
   genie-testkit    in-memory transport
   genie-secrets    SecretString re-export; credential model + store port (03 §10.1)
   genie-store      SQLCipher DB, migrations, GNB1 blobs, FTS, event log, retrieval index (spec 04)
@@ -25,7 +25,11 @@ crates/
                    error classification + retry policy, routes/presets, cassettes (spec 03)
   genie-catalog    model catalog: bundled snapshot, signed cache + ETag refresh, discovery
                    parsers, overrides/policy, effort map, pricing (spec 03 §8)
-  genie-{config,permissions,tools,mcp,skills,sandbox,browser,markdown}
+  genie-config     settings layers + schema/UI metadata, managed policy (sources, signed URL,
+                   merge), workspace trust + definition-hash approvals (06 §14, 08 §4–5)
+  genie-permissions  rule grammar, evaluator (policy deny → deny → ask → allow → mode),
+                   modes + policy floor, taint, "always" saving, read-only/arity tables (06 §5)
+  genie-{tools,mcp,skills,sandbox,browser,markdown}
                    placeholders: crate exists, implementation is in its own spec
 apps/cli           the `genie` binary: `genie daemon`, `genie status [--standalone]`, `genie doctor`
 packages/protocol-ts  generated TS types + typed client stub + JSON Schema (never edit by hand)
@@ -130,6 +134,53 @@ ask with no client → paused + notification + answered by another client, promp
 | 8 | catalog schema, tolerant decode, bundled snapshot, Ed25519-verified cache + ETag refresh, discovery parsers (OpenAI, Gemini, Ollama, Azure manual deployments), overrides (merge patch), policy, effort map, small model, embeddings default (SA-14), cost | `genie-catalog` |
 | 10.1 | credential model, precedence (stored beats env), store port + in-memory store | `genie-secrets::credentials` |
 | 11 | layer 1 cassettes (`tests/cassettes`, `CassetteTransport`, `RecordingTransport`, header scrubbing, secret check) and layer 2 goldens (`tests/golden`, `GENIE_UPDATE_GOLDEN=1`); layer 3 patch tests | `genie-providers/tests` |
+
+### Spec 06 §5 / 08 §3–6 (permissions, config, trust, policy, audit)
+
+| § | What | Where |
+|---|---|---|
+| 06 §5.1 | `Tool` / `Tool(spec)` grammar: `Bash`/`PowerShell` (exact, `prefix:*`, `*` glob), `Read`/`Edit`/`Write` globs (`//abs`, `~/`, `/root-rel`, `./cwd-rel`, bare = any depth), `WebFetch(domain:…)`, `WebSearch`, `Browser(site:…/action:…)`, `Artifact(…)`, `mcp__server[__tool|__*]`; Windows case-insensitive paths, normalised separators | `genie-permissions::{rule, path}` |
+| 06 §5.2 / 08 §3.1 | policy deny → deny (all layers) → ask → allow → mode default, by class not order; compound shell: every part must pass, any denied part denies; unparseable → ask (deny still checked on the raw text); cwd outside workspace → ask | `genie-permissions::eval::Evaluator::evaluate` |
+| 06 §5.3 / 08 §5.2 | modes default / accept-edits / plan / bypass; chat always `default`; plan = engine deny of shell, edits, browser act, non-read-only tools, MCP without an allow rule; bypass keeps deny + policy (incl. policy ask); `disableBypassMode` and `defaultMode` floor | `eval::{effective_mode, ModePolicy}` |
+| 06 §5.4 | save suggestions (arity prefix, dir globs, domain, `mcp__s__t`, site), default scope Code → local / Chat → user, `remember` (in-memory + where to persist), re-evaluation of pending asks (`released`); file write via `ConfigStore::add_permission_rule` / `remove_permission_rule` | `eval`, `genie-config::layers` |
+| 06 §5.5 (SA-29) | taint downgrade of rule / accept-edits allows to ask for mutating shell, edits outside the workspace, MCP not hinted read-only, new fetch domains, browser act on another origin; none in bypass | `eval::Taint` |
+| 06 §13.3 (rule side) | built-in read-only list (bash + PowerShell, disqualifying args, redirection chars), arity table, `ReadOnlyClassifier` hook | `genie-permissions::shell` |
+| D23 | layers default < user < project < local < CLI < policy, exact paths, project/local only when trusted; deep merge, arrays concatenated; sources per key; locked keys; per-key diagnostics (unknown → warning, invalid → error, sub-keys checked separately); malformed JSON keeps last good copy; content-hash change suppression (`refresh`, `watched_paths`); `config.set` with validation, 0600 atomic writes; JSON Schema + UI metadata (`config.schema`) | `genie-config::{layers, settings, fsutil}` |
+| 08 §4 / 06 §14 | `trust.json` `{canonical_path, identity, decision, decided_at, approvals}`; identity match, subfolder inheritance, deeper decision wins, once in memory, revoke; home, `/`, drive roots, system dirs refused; `trust.mode: never`, `trust.allowedRoots`; headless `--trust`; definition hash (canonical JSON SHA-256), pending list with line diff, approve only with the current hash, prune removed entries, approvals reset on re-trust with a new identity | `genie-config::trust` |
+| 08 §5.1 | file source (refuses non-root-owned or group/world-writable on Unix), MDM as a `PolicySource` port, signed remote URL (Ed25519, keys + URL only from file/MDM), last good copy per source + Problems, remote cache re-verified on load; merge: allow lists ∩, deny lists ∪, disabling booleans, ordered levels, min numbers, scalars remote > MDM > file; per-key source | `genie-config::policy` |
+| 08 §5.2–5.3 | key table merge rules; `org.name`, `disableBypassMode`, `defaultMode` floor, `audit.includeContent` notice text, "Blocked by <org> policy (rule)", "Managed by <org>" lock errors; `policy.effective` result | `policy::EffectivePolicy`, `Verdict::blocked_message`, `ConfigError::Locked` |
+| 08 §6 | record `{audit_schema: 1, ts, install_id, user, org, session_id?, event, attrs}`, event names, content only with `includeContent`, secret-named attrs always dropped, rotating JSONL (0600 files, 0700 dir, size-capped, N files), sink port, failures logged never raised | `genie-audit::audit` |
+
+Tests: `genie-permissions/tests/eval_table.rs` (evaluation order, shell cases, modes, policy floor,
+taint, save suggestions, always + release, Windows paths), `genie-config/tests/{layers,policy,trust}.rs`
+(merge/sources, trust gating, diagnostics/last good, policy locks, set/always, merge table, signed
+remote + tamper + cache, trust decision table, approvals), unit tests in each module.
+
+### Spec 06 §5 / 08 §3–6 gaps and deviations
+
+- **Not wired yet**: the daemon's `config.*`, `policy.*`, `trust.*` methods, the `ToolAuthorizer`
+  adapter in `genie-core` (fold `ConfigStore::permission_layers` + `EffectivePolicy` rules into a
+  `RuleSet`, build `ModePolicy` from `disable_bypass`/`mode_floor`, map `Verdict` to asks), audit
+  calls from the engine, and the debounced (100 ms) file watcher that calls `ConfigStore::refresh`.
+- **Shell scanner** (splitting compound bash/PowerShell commands) is not implemented; the
+  evaluator takes the already-split parts (`None` = unparseable → ask).
+- **CLI layer source**: the protocol's `ConfigSource` has no `cli`; CLI values report as
+  `unknown` until a `cli` variant is added to `genie-protocol`.
+- **OS sources are ports only**: macOS configuration-profile and Windows registry readers, the
+  ADMX template, the Windows ACL check on `policy.json` (Unix checks root owner + no g/o write),
+  the hourly remote refresh loop and its HTTP fetcher, and the OTLP audit exporter.
+- **Assumptions** (spec ambiguous): `defaultMode` floor = most permissive mode allowed; policy
+  `permissions.ask` still asks in bypass; plan mode blocks MCP unless an allow rule matches (no
+  ask); reads outside the workspace + `additionalDirectories` ask; `Read(...)` and `Edit(...)`
+  rules don't cover each other (`Write` is an alias of `Edit`); `prefix:*` is word-bounded;
+  `*.example.com` also matches the apex; `/path` rules are relative to the project root in
+  every layer; `trust.allowedRoots` auto-trusts beneath them (even with `trust.mode: never`);
+  a policy file that disappears keeps its last good copy for the daemon's lifetime; settings
+  keys locked by policy are the exact settings paths a policy sets.
+- **Settings schema** covers permissions and the keys policy can lock; `mcpServers`, `hooks`
+  and `providers` are opaque JSON until their specs land. Deprecated-key migration is not built.
+- Audit content opt-in drops content attrs, but callers must still route content through
+  `Attrs::content`; nothing scans plain attribute values.
 
 ## Known gaps and deviations
 
