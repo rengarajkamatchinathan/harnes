@@ -1,0 +1,1 @@
+- Keep answers short. Use a tool only when you need it.

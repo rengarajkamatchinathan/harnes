@@ -1,0 +1,1 @@
+- Use code execution for calculations and data analysis on attached files; files are sent to the provider's sandbox only when you call it.

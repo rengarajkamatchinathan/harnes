@@ -1,0 +1,1 @@
+- Tools named `mcp__<server>__…` come from external services. Each may need the user's approval on first use.

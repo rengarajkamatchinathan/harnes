@@ -9,6 +9,7 @@
 //! * Version skew (01 §4.2), idle exit after 10 min (01 §4.3, SA-01), clean shutdown,
 //!   crash recovery via execution claims, standalone lease mode (01 §4.4).
 
+mod keystore;
 mod lease;
 mod listener;
 mod registry;
@@ -22,7 +23,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use genie_client::Endpoint;
+use genie_core::journal::StoreJournal;
+use genie_core::runtime::models::CatalogResolver;
+use genie_core::runtime::{ConversationStore, ModelResolver, NoModels, RuntimeBuilder};
 use genie_core::{Engine, EngineBuilder, TaskScope};
+
+pub use keystore::PlaceholderKeyStore;
 
 pub use lease::LEASE_GRACE;
 pub use server::{DaemonState, ShutdownReason, serve_stream};
@@ -110,6 +116,48 @@ fn create_run_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Open the channel's store (spec 04). The data key comes from the placeholder keystore
+/// until spec 08's keychain lands.
+pub fn open_store(ep: &Endpoint) -> Result<Arc<genie_store::Store>, genie_store::StoreError> {
+    let name = format!("genie{}.db", ep.channel.dir_suffix());
+    let opts = genie_store::StoreOptions::new(ep.data_dir.clone(), name);
+    // TODO(spec 08): the OS keychain instead of `PlaceholderKeyStore`.
+    let keys = PlaceholderKeyStore::new(&ep.data_dir);
+    genie_store::Store::open_with_keystore(&opts, &keys).map(Arc::new)
+}
+
+/// Wire the engine (01 §3): store journal + the agent runtime (06) with the session
+/// registry as its settings source. Falls back to in-memory state if the store can't
+/// be opened, so the daemon still serves clients and reports the problem.
+fn build_engine(
+    ep: &Endpoint,
+    root: &TaskScope,
+    registry: Arc<registry::Registry>,
+) -> (Engine, Option<Arc<dyn ConversationStore>>) {
+    let models: Arc<dyn ModelResolver> = match CatalogResolver::live() {
+        Ok(r) => Arc::new(r),
+        Err(e) => {
+            tracing::error!(error = %e, "HTTP client unavailable; turns will fail");
+            Arc::new(NoModels)
+        }
+    };
+    let mut rb = RuntimeBuilder::new(registry, models);
+    let mut eb = EngineBuilder::new();
+    match open_store(ep) {
+        Ok(store) => {
+            rb = rb.store(store.clone());
+            eb = eb.journal(Arc::new(StoreJournal::new(store)));
+        }
+        Err(e) => tracing::error!(error = %e, "store unavailable; sessions are not persisted"),
+    }
+    let runner = rb.build();
+    let conversation = runner.conversation();
+    (
+        eb.turn_runner(Arc::new(runner)).build(root),
+        Some(conversation),
+    )
+}
+
 /// Run the daemon until idle exit, restart, lease end or signal.
 pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     let ep = cfg.endpoint.clone();
@@ -126,18 +174,21 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     token::write(&ep.token_path(), &token)?;
 
     let root = TaskScope::root();
-    let engine: Engine = EngineBuilder::new().build(&root);
+    let registry = Arc::new(registry::Registry::default());
+    let (engine, conversation) = build_engine(&ep, &root, registry.clone());
     match engine.recover_on_start() {
         Ok(n) if n > 0 => tracing::info!(interrupted = n, "marked crashed turns interrupted"),
         Ok(_) => {}
         Err(d) => tracing::error!(incident_id = %d.incident_id, "crash recovery failed"),
     }
 
-    let state = Arc::new(DaemonState::new(
+    let state = Arc::new(DaemonState::with_runtime(
         cfg.clone(),
         engine.clone(),
         token,
         root.clone(),
+        registry,
+        conversation,
     ));
     let listener = listener::bind(&ep.address)?;
     tracing::info!(

@@ -638,9 +638,16 @@ version = "0.1.0"
 name = "genie-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures",
+ "genie-catalog",
  "genie-protocol",
+ "genie-providers",
+ "genie-secrets",
  "genie-store",
+ "genie-tools",
+ "http",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
@@ -661,6 +668,7 @@ dependencies = [
  "genie-core",
  "genie-process",
  "genie-protocol",
+ "genie-store",
  "genie-testkit",
  "getrandom 0.3.4",
  "hex",
@@ -674,6 +682,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -779,6 +788,16 @@ dependencies = [
 [[package]]
 name = "genie-tools"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "genie-protocol",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
 
 [[package]]
 name = "getrandom"

@@ -1,0 +1,3 @@
+- Be concise. Use headings, lists and tables only when they make the answer easier to scan.
+- Put code, commands, paths and identifiers in code formatting.
+- State uncertainty plainly. Don't invent facts, citations, file contents or command output.

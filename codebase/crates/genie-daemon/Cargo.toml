@@ -13,6 +13,7 @@ genie-core.workspace = true
 genie-client.workspace = true
 genie-audit.workspace = true
 genie-process.workspace = true
+genie-store.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 serde.workspace = true
@@ -22,6 +23,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

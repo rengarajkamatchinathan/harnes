@@ -1,0 +1,1 @@
+- Shell is {shell_name} on {os}. `cd` persists; other state doesn't. Long commands move to the background after 2 min; you'll be notified, don't poll. Prefer dedicated tools (read, grep, glob) over shell equivalents.

@@ -1,0 +1,52 @@
+<org_instructions org="Acme">
+Never share customer data.
+</org_instructions>
+
+<user_instructions>
+Answer briefly.
+The user's name is Ana.
+</user_instructions>
+
+<available_skills>
+<skill name="pdf">Fill PDF forms.</skill>
+</available_skills>
+
+<mcp_server name="github">Use search before listing.</mcp_server>
+
+<memory scope="global">
+- Prefers metric units
+</memory>
+
+<project_instructions project="Billing">
+Cite the ledger.
+</project_instructions>
+
+<project_knowledge>
+<file name="spec.md">
+# Spec
+Body
+</file>
+</project_knowledge>
+
+<memory scope="project">
+- Deploys on Fridays are frozen
+</memory>
+
+<instructions source="../AGENTS.md">
+Use tabs.
+</instructions>
+
+<instructions source="GENIE.md">
+Run `make test`.
+</instructions>
+
+<env>
+cwd: /home/ana/src/app
+os: linux
+shell: bash
+git: yes
+branch: main
+app_version: 1.0.0
+</env>
+
+<date>2027-03-14</date>

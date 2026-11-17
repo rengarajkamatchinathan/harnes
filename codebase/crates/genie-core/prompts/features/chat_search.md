@@ -1,0 +1,1 @@
+- Search past chats when the user refers to earlier work or when earlier context would clearly help; cite the chat you used.

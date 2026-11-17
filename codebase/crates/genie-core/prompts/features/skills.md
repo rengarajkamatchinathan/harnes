@@ -1,0 +1,1 @@
+- When a task matches a skill in <available_skills>, load it with the `skill` tool before starting.

@@ -1,0 +1,1 @@
+- Delegate broad searches or independent sub-tasks to subagents; results arrive automatically, don't poll; use `task_wait` before your final answer if you need them.

@@ -1,0 +1,1 @@
+- Long tool output is cut and marked `[showing 1–N of M; full output: <ref>]`. Page the rest with `tool_output_read` only if you need it.

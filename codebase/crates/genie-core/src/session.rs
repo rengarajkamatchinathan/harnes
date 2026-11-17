@@ -46,6 +46,16 @@ pub enum InboxKind {
     Resume {
         turn_id: TurnId,
     },
+    /// Manual compaction (`session.compact`, `/compact [focus]`, D33). Runs as its own
+    /// turn so it never races a running one.
+    Compact {
+        focus: Option<String>,
+    },
+    /// A sibling assistant reply for the user message above `message_id`
+    /// (`session.regenerate`, D24).
+    Regenerate {
+        message_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,9 +82,17 @@ impl InboxItem {
 
     fn source(&self) -> MessageSource {
         match self.kind {
-            InboxKind::User | InboxKind::Resume { .. } => MessageSource::User,
+            InboxKind::User
+            | InboxKind::Resume { .. }
+            | InboxKind::Compact { .. }
+            | InboxKind::Regenerate { .. } => MessageSource::User,
             InboxKind::Synthetic { .. } => MessageSource::Synthetic,
         }
+    }
+
+    /// Whether admitting this item creates a user message.
+    pub fn admits_message(&self) -> bool {
+        matches!(self.kind, InboxKind::User | InboxKind::Synthetic { .. })
     }
 }
 
@@ -285,6 +303,32 @@ impl SessionHandle {
         res?;
         self.sh.doorbell.notify_one();
         Ok((id, message_id))
+    }
+
+    /// Queue a manual compaction (`session.compact`). It runs when the session is idle.
+    pub fn compact(&self, focus: Option<String>) -> Result<InboxItemId, CoreError> {
+        let text = match &focus {
+            Some(f) => format!("/compact {f}"),
+            None => "/compact".to_string(),
+        };
+        self.push(
+            InboxKind::Compact { focus },
+            vec![InputPart::text(text)],
+            Delivery::Queue,
+        )
+        .map(|(inbox, _)| inbox)
+    }
+
+    /// Queue a regeneration of the assistant reply `message_id` (`session.regenerate`).
+    pub fn regenerate(&self, message_id: impl Into<String>) -> Result<InboxItemId, CoreError> {
+        self.push(
+            InboxKind::Regenerate {
+                message_id: message_id.into(),
+            },
+            vec![InputPart::text("/regenerate")],
+            Delivery::Queue,
+        )
+        .map(|(inbox, _)| inbox)
     }
 
     /// Remove a waiting (not yet admitted) item (`session.inbox.remove`).
@@ -558,7 +602,9 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
             item_id: item.id.clone(),
             items,
         });
-        sh.publish_logged(admitted(&item));
+        if item.admits_message() {
+            sh.publish_logged(admitted(&item));
+        }
     }
     if let Err(d) = journal.claim_turn(&sh.id, &turn_id) {
         tracing::error!(incident_id = %d.incident_id, "claim_turn failed");
@@ -568,7 +614,7 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
         turn_id: turn_id.clone(),
         item_id: item.id.clone(),
         resume,
-        message_id: (!resume).then(|| item.message_id.clone()),
+        message_id: (!resume && item.admits_message()).then(|| item.message_id.clone()),
     });
 
     let ctx = TurnCtx {
@@ -593,6 +639,8 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
     // Stop anything the turn left behind (tool tasks, process trees, subagents).
     turn_scope.cancel();
 
+    let mut error_message = None;
+    let mut error_link = None;
     let (finish, error_code) = match result {
         Err(panic) => {
             // Panics are caught per session; the daemon and other sessions live (01 §4.3).
@@ -606,7 +654,13 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
         Ok(_) if interrupt_requested => (TurnFinish::Cancelled, None),
         Ok(Ok(())) => (TurnFinish::Completed, None),
         Ok(Err(TurnError::Cancelled)) => (TurnFinish::Cancelled, None),
-        Ok(Err(e)) => (TurnFinish::Failed, Some(e.code().to_string())),
+        Ok(Err(e)) => {
+            if let TurnError::Provider { fix_link, .. } = &e {
+                error_link.clone_from(fix_link);
+            }
+            error_message = Some(e.to_string());
+            (TurnFinish::Failed, Some(e.code().to_string()))
+        }
     };
 
     // Pending asks of this turn resolve as cancelled, not declined (01 §5.3).
@@ -634,6 +688,8 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
         turn_id: turn_id.clone(),
         finish,
         error_code,
+        error_message,
+        error_link,
     });
     if finish == TurnFinish::Interrupted {
         sh.publish_logged(CoreEvent::TurnInterrupted {
