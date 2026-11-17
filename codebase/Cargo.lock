@@ -572,6 +572,8 @@ dependencies = [
 name = "genie-audit"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-subscriber",
@@ -633,6 +635,18 @@ dependencies = [
 [[package]]
 name = "genie-config"
 version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "genie-protocol",
+ "hex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
 
 [[package]]
 name = "genie-core"
@@ -687,6 +701,10 @@ version = "0.1.0"
 [[package]]
 name = "genie-permissions"
 version = "0.1.0"
+dependencies = [
+ "genie-protocol",
+ "thiserror",
+]
 
 [[package]]
 name = "genie-process"

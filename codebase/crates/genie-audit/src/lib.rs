@@ -1,10 +1,12 @@
 //! `genie-audit`: observability (spec/01-architecture.md §8).
 //!
-//! This milestone ships the log side: `tracing` to rotating files
-//! `<data dir>/logs/<name>.log` (10 × 10 MiB). Spans carry ids, never prompt content.
-//! The audit stream (OTLP/JSONL), crash reports and analytics land with spec 08 §5–6 and
-//! stay separate from logs.
+//! - Logs: `tracing` to rotating files `<data dir>/logs/<name>.log` (10 × 10 MiB). Spans
+//!   carry ids, never prompt content.
+//! - [`audit`]: the org audit stream (08 §6) — versioned records, content exclusion, the
+//!   local rotating JSONL sink. The OTLP exporter, crash reports and analytics are later
+//!   work and stay separate from logs.
 
+pub mod audit;
 pub mod rotating;
 
 use std::io;
@@ -13,6 +15,7 @@ use std::path::Path;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
+pub use audit::{Attrs, AuditContext, AuditEvent, AuditRecord, AuditSink, Auditor, JsonlSink};
 pub use rotating::RotatingLog;
 
 /// Number of files kept (current + rotated).
