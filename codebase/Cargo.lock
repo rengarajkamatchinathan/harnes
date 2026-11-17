@@ -1190,13 +1190,18 @@ name = "genie-tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "genie-process",
  "genie-protocol",
+ "libc",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
