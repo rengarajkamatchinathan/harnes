@@ -12,7 +12,7 @@ pub mod connect;
 pub mod errors;
 pub mod headless;
 pub mod hook_adapter;
-pub mod import;
+pub use genie_config::import;
 pub mod render;
 pub mod session;
 pub mod tui;

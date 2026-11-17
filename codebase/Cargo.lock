@@ -1302,6 +1302,7 @@ dependencies = [
  "crossterm",
  "futures",
  "genie-client",
+ "genie-config",
  "genie-core",
  "genie-daemon",
  "genie-protocol",
@@ -1342,6 +1343,7 @@ dependencies = [
 name = "genie-config"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "ed25519-dalek",
  "genie-protocol",
