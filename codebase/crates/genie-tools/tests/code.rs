@@ -75,7 +75,12 @@ impl T {
     }
 
     async fn call_as(&self, session: &str, name: &str, input: Value) -> Result<String, ToolError> {
-        let tool = self.tools.iter().find(|t| t.name() == name).unwrap().clone();
+        let tool = self
+            .tools
+            .iter()
+            .find(|t| t.name() == name)
+            .unwrap()
+            .clone();
         let ctx = ToolCtx {
             env: Arc::new(ToolEnv::new(session, SessionKind::Code)),
             turn_id: "trn".into(),
@@ -110,12 +115,26 @@ async fn tools_are_code_only() {
     let code_env = ToolEnv::new("s", SessionKind::Code);
     for tool in &t.tools {
         assert!(!tool.availability(&chat).is_available(), "{}", tool.name());
-        assert!(tool.availability(&code_env).is_available(), "{}", tool.name());
+        assert!(
+            tool.availability(&code_env).is_available(),
+            "{}",
+            tool.name()
+        );
     }
     let names: Vec<&str> = t.tools.iter().map(|t| t.name()).collect();
     assert_eq!(
         names,
-        ["read", "write", "edit", "multi_edit", "patch", "grep", "glob", "list", "todo_write"]
+        [
+            "read",
+            "write",
+            "edit",
+            "multi_edit",
+            "patch",
+            "grep",
+            "glob",
+            "list",
+            "todo_write"
+        ]
     );
 }
 
@@ -125,20 +144,25 @@ async fn read_numbers_lines_pages_and_asks_with_the_path() {
     let text: String = (1..=30).map(|i| format!("line {i}\n")).collect();
     t.put("src/a.txt", &text);
     let out = t
-        .call("read", json!({"file_path": "src/a.txt", "offset": 3, "limit": 2}))
+        .call(
+            "read",
+            json!({"file_path": "src/a.txt", "offset": 3, "limit": 2}),
+        )
         .await
         .unwrap();
     assert_eq!(
         out,
         "     3\tline 3\n     4\tline 4\n\n[showing lines 3–4 of 30; read with offset=5 to continue]"
     );
-    let seen = t.gate.seen.lock().unwrap();
+    let first = t.gate.seen.lock().unwrap()[0].resource.clone();
     assert_eq!(
-        seen[0].resource.as_deref(),
+        first.as_deref(),
         Some(t.root().join("src/a.txt").to_str().unwrap())
     );
-    drop(seen);
-    let e = msg(t.call("read", json!({"path": "src/b.txt"})).await.unwrap_err());
+    let e = msg(t
+        .call("read", json!({"path": "src/b.txt"}))
+        .await
+        .unwrap_err());
     assert!(e.contains("does not exist"), "{e}");
     let e = msg(t.call("read", json!({"path": "src"})).await.unwrap_err());
     assert!(e.contains("directory"), "{e}");
@@ -148,58 +172,70 @@ async fn read_numbers_lines_pages_and_asks_with_the_path() {
 async fn write_creates_and_overwrites_only_after_read() {
     let t = setup();
     let out = t
-        .call("write", json!({"path": "new/dir/f.txt", "content": "hello\n"}))
+        .call(
+            "write",
+            json!({"path": "new/dir/f.txt", "content": "hello\n"}),
+        )
         .await
         .unwrap();
     assert_eq!(out, "Created new/dir/f.txt (1 lines).");
     assert_eq!(t.get("new/dir/f.txt"), "hello\n");
     // The writer may overwrite what it just wrote.
-    t.call("write", json!({"path": "new/dir/f.txt", "content": "again\n"}))
-        .await
-        .unwrap();
+    t.call(
+        "write",
+        json!({"path": "new/dir/f.txt", "content": "again\n"}),
+    )
+    .await
+    .unwrap();
     // A file never read can't be overwritten.
     t.put("other.txt", "x\n");
-    let e = msg(
-        t.call("write", json!({"path": "other.txt", "content": "y"}))
-            .await
-            .unwrap_err(),
-    );
+    let e = msg(t
+        .call("write", json!({"path": "other.txt", "content": "y"}))
+        .await
+        .unwrap_err());
     assert!(e.contains("has not been read"), "{e}");
     // Stale: changed after the read.
     t.call("read", json!({"path": "other.txt"})).await.unwrap();
     t.put("other.txt", "changed\n");
-    let e = msg(
-        t.call("write", json!({"path": "other.txt", "content": "y"}))
-            .await
-            .unwrap_err(),
-    );
+    let e = msg(t
+        .call("write", json!({"path": "other.txt", "content": "y"}))
+        .await
+        .unwrap_err());
     assert!(e.contains("changed since it was last read"), "{e}");
     assert_eq!(t.get("other.txt"), "changed\n");
     // Another session's read doesn't count.
-    let e = msg(
-        t.call_as("s2", "write", json!({"path": "new/dir/f.txt", "content": "z"}))
-            .await
-            .unwrap_err(),
-    );
+    let e = msg(t
+        .call_as(
+            "s2",
+            "write",
+            json!({"path": "new/dir/f.txt", "content": "z"}),
+        )
+        .await
+        .unwrap_err());
     assert!(e.contains("has not been read"), "{e}");
 }
 
 #[tokio::test]
 async fn edit_matches_asks_after_the_match_and_keeps_crlf_and_bom() {
     let t = setup();
-    t.put("a.rs", "\u{feff}fn main() {\r\n    println!(\"hi\");\r\n}\r\n");
+    t.put(
+        "a.rs",
+        "\u{feff}fn main() {\r\n    println!(\"hi\");\r\n}\r\n",
+    );
     t.call("read", json!({"path": "a.rs"})).await.unwrap();
     // A miss never asks.
     let before = t.gate.seen.lock().unwrap().len();
-    let e = msg(
-        t.call(
+    let e = msg(t
+        .call(
             "edit",
             json!({"path": "a.rs", "old_string": "println!(\"hello\");", "new_string": "x"}),
         )
         .await
-        .unwrap_err(),
+        .unwrap_err());
+    assert!(
+        e.contains("not found") && e.contains("Closest lines"),
+        "{e}"
     );
-    assert!(e.contains("not found") && e.contains("Closest lines"), "{e}");
     assert_eq!(t.gate.seen.lock().unwrap().len(), before);
     // A hit asks once with a diff, then writes with CRLF + BOM kept.
     let out = t
@@ -210,13 +246,12 @@ async fn edit_matches_asks_after_the_match_and_keeps_crlf_and_bom() {
         .await
         .unwrap();
     assert!(out.starts_with("Edited a.rs (+2 −1)."), "{out}");
-    let seen = t.gate.seen.lock().unwrap();
-    let Some(Preview::Diff { path, unified }) = &seen.last().unwrap().preview else {
+    let last = t.gate.seen.lock().unwrap().last().unwrap().preview.clone();
+    let Some(Preview::Diff { path, unified }) = last else {
         panic!("no diff preview")
     };
     assert_eq!(path, "a.rs");
     assert!(unified.contains("-    println!(\"hi\");\n+    println!(\"bye\");\n+return;"));
-    drop(seen);
     assert_eq!(
         t.get("a.rs"),
         "\u{feff}fn main() {\r\n    println!(\"bye\");\r\nreturn;\r\n}\r\n"
@@ -235,11 +270,13 @@ async fn edit_uniqueness_replace_all_tiers_and_decline() {
     let t = setup();
     t.put("f.txt", "a = 1\na = 1\nsay \u{201C}hi\u{201D}\n");
     t.call("read", json!({"path": "f.txt"})).await.unwrap();
-    let e = msg(
-        t.call("edit", json!({"path": "f.txt", "old_string": "a = 1", "new_string": "b"}))
-            .await
-            .unwrap_err(),
-    );
+    let e = msg(t
+        .call(
+            "edit",
+            json!({"path": "f.txt", "old_string": "a = 1", "new_string": "b"}),
+        )
+        .await
+        .unwrap_err());
     assert!(e.contains("matches 2 places"), "{e}");
     let out = t
         .call(
@@ -266,11 +303,16 @@ async fn edit_uniqueness_replace_all_tiers_and_decline() {
     };
     t2.put("g.txt", "keep\n");
     t2.call("read", json!({"path": "g.txt"})).await.unwrap_err(); // read asks too
-    t2.cfg
-        .reads
-        .record("s1", &t2.root().join("g.txt"), code::Stamp::of(b"keep\n", None));
+    t2.cfg.reads.record(
+        "s1",
+        &t2.root().join("g.txt"),
+        code::Stamp::of(b"keep\n", None),
+    );
     let e = t2
-        .call("edit", json!({"path": "g.txt", "old_string": "keep", "new_string": "gone"}))
+        .call(
+            "edit",
+            json!({"path": "g.txt", "old_string": "keep", "new_string": "gone"}),
+        )
         .await
         .unwrap_err();
     assert!(matches!(e, ToolError::Declined { .. }));
@@ -282,8 +324,8 @@ async fn multi_edit_is_atomic() {
     let t = setup();
     t.put("m.txt", "one\ntwo\nthree\n");
     t.call("read", json!({"path": "m.txt"})).await.unwrap();
-    let e = msg(
-        t.call(
+    let e = msg(t
+        .call(
             "multi_edit",
             json!({"path": "m.txt", "edits": [
                 {"old_string": "one", "new_string": "1"},
@@ -291,8 +333,7 @@ async fn multi_edit_is_atomic() {
             ]}),
         )
         .await
-        .unwrap_err(),
-    );
+        .unwrap_err());
     assert!(e.contains("edits[1].old_string"), "{e}");
     assert_eq!(t.get("m.txt"), "one\ntwo\nthree\n");
     t.call(
@@ -319,7 +360,10 @@ async fn patch_applies_all_or_nothing() {
     let good = "*** Begin Patch\n*** Add File: added.txt\n+new\n*** Delete File: gone.txt\n\
                 *** Update File: keep.txt\n*** Move to: moved.txt\n@@\n alpha\n-beta\n+BETA\n*** End Patch";
     let out = t.call("patch", json!({"patch": good})).await.unwrap();
-    assert!(out.contains("A added.txt") && out.contains("D gone.txt"), "{out}");
+    assert!(
+        out.contains("A added.txt") && out.contains("D gone.txt"),
+        "{out}"
+    );
     assert_eq!(t.get("added.txt"), "new\n");
     assert_eq!(t.get("moved.txt"), "alpha\nBETA\ngamma\n");
     assert!(!t.root().join("gone.txt").exists());
@@ -368,7 +412,10 @@ async fn grep_glob_list_respect_ignore_rules() {
     let mut files: Vec<&str> = out.lines().collect();
     files.sort();
     assert_eq!(files, ["src/lib.rs", "src/main.rs"]);
-    let out = t.call("glob", json!({"pattern": "src/m*.rs"})).await.unwrap();
+    let out = t
+        .call("glob", json!({"pattern": "src/m*.rs"}))
+        .await
+        .unwrap();
     assert_eq!(out, "src/main.rs");
     let out = t.call("list", json!({})).await.unwrap();
     assert_eq!(out, "./\n  src/\n    lib.rs\n    main.rs");
@@ -385,7 +432,10 @@ async fn grep_caps_results() {
     let text: String = (0..150).map(|i| format!("hit {i}\n")).collect();
     t.put("many.txt", &text);
     let out = t.call("grep", json!({"pattern": "hit"})).await.unwrap();
-    assert_eq!(out.lines().filter(|l| l.starts_with("many.txt:")).count(), 100);
+    assert_eq!(
+        out.lines().filter(|l| l.starts_with("many.txt:")).count(),
+        100
+    );
     assert!(out.ends_with("[results cut at 100; narrow the path or pattern]"));
 }
 
@@ -451,7 +501,9 @@ async fn edits_to_one_path_are_serialised() {
 async fn repo(dir: &Path) {
     let g = Git::new(dir);
     g.ok(&["init", "-q", "-b", "main"]).await.unwrap();
-    g.ok(&["config", "user.email", "t@example.com"]).await.unwrap();
+    g.ok(&["config", "user.email", "t@example.com"])
+        .await
+        .unwrap();
     g.ok(&["config", "user.name", "T"]).await.unwrap();
     g.ok(&["config", "commit.gpgsign", "false"]).await.unwrap();
     std::fs::write(dir.join("a.txt"), "a\n").unwrap();
@@ -490,7 +542,10 @@ async fn shadow_snapshots_capture_changes_skip_big_files_and_restore() {
         ]
     );
     // The user's repo is untouched (no new refs, nothing staged).
-    let st = Git::new(&work).ok(&["status", "--porcelain"]).await.unwrap();
+    let st = Git::new(&work)
+        .ok(&["status", "--porcelain"])
+        .await
+        .unwrap();
     assert!(st.contains(" M a.txt") && st.contains("?? new.txt"), "{st}");
     // Restore only the named paths.
     shadow
@@ -501,7 +556,10 @@ async fn shadow_snapshots_capture_changes_skip_big_files_and_restore() {
     assert!(!work.join("new.txt").exists());
     assert!(work.join("big.bin").exists());
     // Refs keep trees alive until dropped.
-    shadow.keep("refs/genie/s1/1/after", &s2.tree).await.unwrap();
+    shadow
+        .keep("refs/genie/s1/1/after", &s2.tree)
+        .await
+        .unwrap();
     assert_eq!(shadow.drop_refs("refs/genie/s1/").await.unwrap(), 1);
     shadow.gc().await.unwrap();
 }
@@ -514,7 +572,9 @@ async fn shadow_works_in_a_plain_folder() {
     std::fs::write(work.join("f"), "1").unwrap();
     let (top, info) = ShadowRepo::work_tree_of(&work).await;
     assert!(info.is_none());
-    let shadow = ShadowRepo::open(d.path().join("sh"), top, None).await.unwrap();
+    let shadow = ShadowRepo::open(d.path().join("sh"), top, None)
+        .await
+        .unwrap();
     let a = shadow.snapshot().await.unwrap();
     std::fs::write(work.join("f"), "2").unwrap();
     let b = shadow.snapshot().await.unwrap();
@@ -560,7 +620,11 @@ async fn worktree_create_merge_and_discard() {
 
     // PR: instructions only, nothing removed.
     let pr = worktree::finish(&w2, Finish::Pr).await.unwrap();
-    assert!(pr.message.contains("push -u origin genie/fix-bug-2"), "{}", pr.message);
+    assert!(
+        pr.message.contains("push -u origin genie/fix-bug-2"),
+        "{}",
+        pr.message
+    );
     assert!(w2.path.exists());
     // Discard keeps a branch with unpushed commits.
     std::fs::write(w2.path.join("b.txt"), "b\n").unwrap();
@@ -571,11 +635,17 @@ async fn worktree_create_merge_and_discard() {
     assert!(gone.removed && !gone.branch_deleted, "{gone:?}");
     assert!(!w2.path.exists());
     // A clean, empty one is fully discarded.
-    let w3 = worktree::create(&CreateSpec::new(&work, "tmp")).await.unwrap();
+    let w3 = worktree::create(&CreateSpec::new(&work, "tmp"))
+        .await
+        .unwrap();
     let gone = worktree::finish(&w3, Finish::Discard).await.unwrap();
     assert!(gone.branch_deleted);
     // Non-git folders can't have worktrees.
     let plain = base.join("plain");
     std::fs::create_dir(&plain).unwrap();
-    assert!(worktree::create(&CreateSpec::new(&plain, "x")).await.is_err());
+    assert!(
+        worktree::create(&CreateSpec::new(&plain, "x"))
+            .await
+            .is_err()
+    );
 }

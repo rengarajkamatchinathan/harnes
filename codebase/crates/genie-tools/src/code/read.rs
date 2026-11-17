@@ -8,8 +8,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{
-    CodeConfig, MAX_LINE_CHARS, MAX_READ_BYTES, MAX_READ_LINES, Stamp, alias_keys,
-    authorize_read, code_only, display, mtime,
+    CodeConfig, MAX_LINE_CHARS, MAX_READ_BYTES, MAX_READ_LINES, Stamp, alias_keys, authorize_read,
+    code_only, display, mtime,
 };
 use crate::registry::{parse_input, schema_of};
 use crate::tool::{Availability, Tool, ToolCtx, ToolEnv, ToolError, ToolKind, ToolOutput};
@@ -205,7 +205,10 @@ mod tests {
     #[test]
     fn render_numbers_pages_and_cuts() {
         let text: String = (1..=5).map(|i| format!("l{i}\n")).collect();
-        assert_eq!(render(&text, 1, 2000), "     1\tl1\n     2\tl2\n     3\tl3\n     4\tl4\n     5\tl5");
+        assert_eq!(
+            render(&text, 1, 2000),
+            "     1\tl1\n     2\tl2\n     3\tl3\n     4\tl4\n     5\tl5"
+        );
         let r = render(&text, 2, 2);
         assert_eq!(
             r,

@@ -66,7 +66,11 @@ impl Git {
 
     /// Run `git args…` (stdin from `input` when given). `Err` only when git couldn't be
     /// run at all or timed out.
-    pub async fn run<S: AsRef<str>>(&self, args: &[S], input: Option<&[u8]>) -> Result<GitOut, String> {
+    pub async fn run<S: AsRef<str>>(
+        &self,
+        args: &[S],
+        input: Option<&[u8]>,
+    ) -> Result<GitOut, String> {
         let mut env = Env::inherit()
             .with("GIT_TERMINAL_PROMPT", "0")
             .with("GIT_OPTIONAL_LOCKS", "0")

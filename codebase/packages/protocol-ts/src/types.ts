@@ -586,6 +586,11 @@ export interface GitCommitParams {
 
 export interface GitCommitResult {
   commit: string;
+  /**
+   * What the user still has to do (e.g. the commands that open a pull request when
+   * the engine doesn't push itself).
+   */
+  note?: string | null;
   pr_url?: string | null;
 }
 
@@ -1617,4 +1622,15 @@ export type WorktreeChoice = "auto" | "new" | "none" | "unknown";
 export interface WorktreeFinishParams {
   action: WorktreeAction;
   session_id: string;
+}
+
+/** `worktree.finish` result (additive: older clients read it as `{}`). */
+export interface WorktreeFinishResult {
+  /** The `genie/<slug>` branch was deleted. */
+  branch_deleted?: boolean;
+  merge_commit?: string | null;
+  /** What happened, for the user (PR commands, why a branch was kept …). */
+  message?: string;
+  /** The worktree folder was removed. */
+  removed?: boolean;
 }

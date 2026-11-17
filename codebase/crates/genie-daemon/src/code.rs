@@ -97,7 +97,10 @@ impl CodeServices {
             return Err(RpcError::new(ErrorKind::NotFound, "session not found"));
         }
         self.registry.extra(sid).workspace.ok_or_else(|| {
-            RpcError::new(ErrorKind::InvalidState, "this session has no workspace folder")
+            RpcError::new(
+                ErrorKind::InvalidState,
+                "this session has no workspace folder",
+            )
         })
     }
 
@@ -434,7 +437,7 @@ pub(crate) fn session_deleted(state: &Arc<DaemonState>, sid: &str) {
         c.end_session(sid);
     }
     let sid = sid.to_string();
-    let _ = state
+    state
         .root_scope()
         .child("code-cleanup")
         .spawn(async move {
@@ -572,7 +575,12 @@ async fn git_commit(
     repo_root(ws).await?;
     let git = Git::new(ws);
     let mut add = vec!["add".to_string(), "-A".into()];
-    let mut commit = vec!["commit".to_string(), "-q".into(), "-m".into(), message.into()];
+    let mut commit = vec![
+        "commit".to_string(),
+        "-q".into(),
+        "-m".into(),
+        message.into(),
+    ];
     if let Some(ps) = paths.filter(|p| !p.is_empty()) {
         add.push("--".into());
         add.extend(ps.iter().cloned());
@@ -666,7 +674,8 @@ fn files_tree(ws: &Path, rel: Option<&str>) -> Result<FilesTreeResult, RpcError>
 
 fn files_read(me: &CodeServices, ws: &Path, rel: &str) -> Result<FilesReadResult, RpcError> {
     let p = confine(ws, Some(rel))?;
-    let meta = std::fs::metadata(&p).map_err(|_| RpcError::new(ErrorKind::NotFound, "no such file"))?;
+    let meta =
+        std::fs::metadata(&p).map_err(|_| RpcError::new(ErrorKind::NotFound, "no such file"))?;
     if meta.is_dir() {
         return Err(RpcError::invalid_params("that is a folder; use files.tree"));
     }

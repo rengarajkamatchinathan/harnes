@@ -188,7 +188,8 @@ async fn run(
         message: format!("can't write {shown}: {e}"),
         may_have_run: true,
     })?;
-    cfg.reads.record(&sid, &path, Stamp::of(&bytes, mtime(&path)));
+    cfg.reads
+        .record(&sid, &path, Stamp::of(&bytes, mtime(&path)));
     let mut out = if existing.is_none() {
         format!("Created {shown}.")
     } else {

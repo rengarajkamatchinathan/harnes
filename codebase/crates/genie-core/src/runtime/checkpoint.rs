@@ -548,7 +548,12 @@ impl Checkpoints {
         let mut out: Vec<(String, u64)> = rd
             .flatten()
             .filter(|e| e.path().is_dir())
-            .map(|e| (e.file_name().to_string_lossy().into_owned(), dir_size(&e.path())))
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    dir_size(&e.path()),
+                )
+            })
             .collect();
         out.sort();
         out

@@ -140,7 +140,9 @@ struct H {
 async fn git_repo(dir: &Path) {
     let g = Git::new(dir);
     g.ok(&["init", "-q", "-b", "main"]).await.unwrap();
-    g.ok(&["config", "user.email", "t@example.com"]).await.unwrap();
+    g.ok(&["config", "user.email", "t@example.com"])
+        .await
+        .unwrap();
     g.ok(&["config", "user.name", "T"]).await.unwrap();
     std::fs::write(dir.join("a.txt"), "one\ntwo\nthree\n").unwrap();
     g.ok(&["add", "."]).await.unwrap();
@@ -278,9 +280,21 @@ async fn edits_and_shell_leave_checkpoints_that_rewind_and_undo() {
         // step (serialised per path), then done.
         tools(&[("t1", "read", json!({"path": "a.txt"}))]),
         tools(&[
-            ("t2", "edit", json!({"path": "a.txt", "old_string": "one", "new_string": "ONE"})),
-            ("t3", "edit", json!({"path": "a.txt", "old_string": "two", "new_string": "TWO"})),
-            ("t4", "write", json!({"path": "b.txt", "content": "new file\n"})),
+            (
+                "t2",
+                "edit",
+                json!({"path": "a.txt", "old_string": "one", "new_string": "ONE"}),
+            ),
+            (
+                "t3",
+                "edit",
+                json!({"path": "a.txt", "old_string": "two", "new_string": "TWO"}),
+            ),
+            (
+                "t4",
+                "write",
+                json!({"path": "b.txt", "content": "new file\n"}),
+            ),
         ]),
         done(),
         // Turn 2: a shell command changes files too.
@@ -298,7 +312,10 @@ async fn edits_and_shell_leave_checkpoints_that_rewind_and_undo() {
     assert_eq!(h.read("a.txt").unwrap(), "ONE\nTWO\nthree\n");
     assert_eq!(h.read("b.txt").unwrap(), "new file\n");
     // The user's repo has no new commits or staged changes from the shadow repo.
-    let st = Git::new(&h.ws).ok(&["status", "--porcelain"]).await.unwrap();
+    let st = Git::new(&h.ws)
+        .ok(&["status", "--porcelain"])
+        .await
+        .unwrap();
     assert_eq!(st, " M a.txt\n?? b.txt");
 
     h.s.prompt("more", Delivery::Steer).unwrap();
@@ -325,7 +342,10 @@ async fn edits_and_shell_leave_checkpoints_that_rewind_and_undo() {
         .await
         .unwrap();
     assert_eq!(pv.files.len(), 1);
-    assert_eq!((pv.files[0].path.as_str(), pv.files[0].change.as_str()), ("c.txt", "deleted"));
+    assert_eq!(
+        (pv.files[0].path.as_str(), pv.files[0].change.as_str()),
+        ("c.txt", "deleted")
+    );
     assert!(pv.external_changes.is_empty());
     let path_len = conv.path(&sid).unwrap().len();
     h.cps
@@ -334,11 +354,18 @@ async fn edits_and_shell_leave_checkpoints_that_rewind_and_undo() {
         .unwrap();
     assert!(h.read("c.txt").is_none());
     assert_eq!(h.read("a.txt").unwrap(), "ONE\nTWO\nthree\n");
-    assert_eq!(conv.path(&sid).unwrap().len(), path_len, "conversation untouched");
+    assert_eq!(
+        conv.path(&sid).unwrap().len(),
+        path_len,
+        "conversation untouched"
+    );
     // Undo puts it back.
     h.cps.undo(&sid, conv).await.unwrap();
     assert_eq!(h.read("c.txt").unwrap(), "hi\n");
-    assert!(h.cps.undo(&sid, conv).await.is_err(), "nothing staged any more");
+    assert!(
+        h.cps.undo(&sid, conv).await.is_err(),
+        "nothing staged any more"
+    );
 
     // External change detection: the user edits a.txt by hand.
     std::fs::write(h.ws.join("a.txt"), "hand edit\n").unwrap();
@@ -410,5 +437,11 @@ async fn failed_edit_and_read_only_steps_leave_no_checkpoint() {
     assert_eq!(outcomes(&ev), [ToolOutcome::Error, ToolOutcome::Ok]);
     assert!(checkpoints(&ev).is_empty());
     assert_eq!(h.read("a.txt").unwrap(), "one\ntwo\nthree\n");
-    assert!(h.cps.list(h.s.id(), h.conv.as_ref()).await.unwrap().is_empty());
+    assert!(
+        h.cps
+            .list(h.s.id(), h.conv.as_ref())
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

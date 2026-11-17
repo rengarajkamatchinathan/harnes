@@ -116,7 +116,12 @@ pub async fn create(spec: &CreateSpec) -> Result<WorktreeInfo, String> {
         let branch = format!("{}{slug}", spec.branch_prefix);
         let taken = git
             .run(
-                &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("refs/heads/{branch}"),
+                ],
                 None,
             )
             .await
@@ -263,7 +268,10 @@ pub async fn finish(w: &WorktreeInfo, how: Finish) -> Result<Finished, String> {
             if ahead.trim() != "0" {
                 let msg = format!("Merge {} (Genie worktree)", w.branch);
                 let o = git
-                    .run(&["merge", "--no-ff", "--no-edit", "-m", &msg, &w.branch], None)
+                    .run(
+                        &["merge", "--no-ff", "--no-edit", "-m", &msg, &w.branch],
+                        None,
+                    )
                     .await?;
                 if !o.ok() {
                     let _ = git.run(&["merge", "--abort"], None).await;
@@ -286,7 +294,11 @@ pub async fn finish(w: &WorktreeInfo, how: Finish) -> Result<Finished, String> {
                 removed: true,
                 branch_deleted: deleted,
                 message: match &merge_commit {
-                    Some(c) => format!("Merged {} into {base} ({}).", w.branch, &c[..c.len().min(12)]),
+                    Some(c) => format!(
+                        "Merged {} into {base} ({}).",
+                        w.branch,
+                        &c[..c.len().min(12)]
+                    ),
                     None => format!("{} had no new commits; nothing to merge.", w.branch),
                 },
                 merge_commit,

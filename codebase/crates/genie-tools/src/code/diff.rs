@@ -119,7 +119,9 @@ pub fn unified(path: &str, old: &str, new: &str) -> String {
             return String::new();
         }
         // Only a trailing newline differs.
-        return format!("--- a/{path}\n+++ b/{path}\n@@ end of file @@\n\\ trailing newline changed\n");
+        return format!(
+            "--- a/{path}\n+++ b/{path}\n@@ end of file @@\n\\ trailing newline changed\n"
+        );
     }
     const CTX: usize = 3;
     let mut out = format!("--- a/{path}\n+++ b/{path}\n");
@@ -238,7 +240,10 @@ mod tests {
             (&["x", "a", "b", "y"], &["a", "q", "b"]),
         ];
         for (a, b) in cases {
-            assert_eq!(apply(a, b), b.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            assert_eq!(
+                apply(a, b),
+                b.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+            );
         }
     }
 
@@ -247,7 +252,10 @@ mod tests {
         let old = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
         let new = "1\n2\n3\n4\nfive\n6\n7\n8\n9\n10\n";
         let d = unified("f.txt", old, new);
-        assert!(d.starts_with("--- a/f.txt\n+++ b/f.txt\n@@ -2,7 +2,7 @@\n"), "{d}");
+        assert!(
+            d.starts_with("--- a/f.txt\n+++ b/f.txt\n@@ -2,7 +2,7 @@\n"),
+            "{d}"
+        );
         assert!(d.contains("-5\n+five\n"));
         assert_eq!(stat(&d), (1, 1));
         assert_eq!(unified("f", "a\n", "a\n"), "");

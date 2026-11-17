@@ -73,7 +73,11 @@ fn err(line: usize, msg: impl std::fmt::Display) -> String {
 
 /// Parse the envelope.
 pub fn parse(text: &str) -> Result<Vec<Hunk>, String> {
-    let lines: Vec<&str> = text.trim().lines().map(|l| l.trim_end_matches('\r')).collect();
+    let lines: Vec<&str> = text
+        .trim()
+        .lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .collect();
     if lines.first().map(|l| l.trim()) != Some("*** Begin Patch") {
         return Err("the patch must start with `*** Begin Patch`".into());
     }
@@ -175,7 +179,10 @@ pub fn parse(text: &str) -> Result<Vec<Hunk>, String> {
                 chunks.push(c);
             }
             if chunks.is_empty() && move_to.is_none() {
-                return Err(err(ln, format!("`*** Update File: {}` has no hunks", p.trim())));
+                return Err(err(
+                    ln,
+                    format!("`*** Update File: {}` has no hunks", p.trim()),
+                ));
             }
             hunks.push(Hunk::Update {
                 path: p.trim().to_string(),
@@ -241,7 +248,10 @@ pub fn apply_chunks(text: &str, chunks: &[Chunk], shown: &str) -> Result<String,
             {
                 cursor = i + 1;
             } else if c.old.is_empty() {
-                return Err(format!("{shown}: hunk {} context `@@ {h}` not found", n + 1));
+                return Err(format!(
+                    "{shown}: hunk {} context `@@ {h}` not found",
+                    n + 1
+                ));
             }
         }
         if c.old.is_empty() {
@@ -457,7 +467,10 @@ impl PatchTool {
                     let f = TextFile::decode(&bytes)?;
                     let text = apply_chunks(&f.text, chunks, &shown).map_err(ToolError::failed)?;
                     let nf = f.new_like(text.clone());
-                    match move_to.as_deref().filter(|m| super::resolve_in(root, m) != p) {
+                    match move_to
+                        .as_deref()
+                        .filter(|m| super::resolve_in(root, m) != p)
+                    {
                         Some(m) => {
                             let dst = super::resolve_in(root, m);
                             let dshown = display(root, &dst);
@@ -526,7 +539,12 @@ mod tests {
                 content: "one\ntwo\n".into()
             }
         );
-        assert_eq!(h[1], Hunk::Delete { path: "b.txt".into() });
+        assert_eq!(
+            h[1],
+            Hunk::Delete {
+                path: "b.txt".into()
+            }
+        );
         let Hunk::Update {
             move_to, chunks, ..
         } = &h[2]
@@ -552,7 +570,10 @@ mod tests {
             new: vec!["B".into(), "C".into()],
             eof: false,
         }];
-        assert_eq!(apply_chunks(text, &chunks, "f").unwrap(), "a\nb\nc\nd\nB\nC\n");
+        assert_eq!(
+            apply_chunks(text, &chunks, "f").unwrap(),
+            "a\nb\nc\nd\nB\nC\n"
+        );
         let add = vec![Chunk {
             header: None,
             old: vec![],

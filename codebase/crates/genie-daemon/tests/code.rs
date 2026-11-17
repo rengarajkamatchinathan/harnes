@@ -38,7 +38,9 @@ impl TurnRunner for Runner {
 async fn repo(dir: &Path) {
     let g = Git::new(dir);
     g.ok(&["init", "-q", "-b", "main"]).await.unwrap();
-    g.ok(&["config", "user.email", "t@example.com"]).await.unwrap();
+    g.ok(&["config", "user.email", "t@example.com"])
+        .await
+        .unwrap();
     g.ok(&["config", "user.name", "T"]).await.unwrap();
     g.ok(&["config", "commit.gpgsign", "false"]).await.unwrap();
     std::fs::write(dir.join("a.txt"), "a\n").unwrap();
@@ -141,12 +143,12 @@ async fn worktree_session_git_files_and_finish() {
     assert!(base.join("proj.genie-worktrees/session/a.txt").exists());
 
     // Files panel.
-    let tree = conn
-        .call::<m::FilesTree>(sp(&named, None))
-        .await
-        .unwrap();
+    let tree = conn.call::<m::FilesTree>(sp(&named, None)).await.unwrap();
     let names: Vec<(String, bool)> = tree.nodes.iter().map(|n| (n.path.clone(), n.dir)).collect();
-    assert_eq!(names, [("src".to_string(), true), ("a.txt".to_string(), false)]);
+    assert_eq!(
+        names,
+        [("src".to_string(), true), ("a.txt".to_string(), false)]
+    );
     let f = conn
         .call::<m::FilesRead>(sp(&named, Some("src/lib.rs")))
         .await
@@ -176,7 +178,10 @@ async fn worktree_session_git_files_and_finish() {
             ("new.txt".to_string(), "added".to_string())
         ]
     );
-    let diff = conn.call::<m::GitDiff>(sp(&named, Some("a.txt"))).await.unwrap();
+    let diff = conn
+        .call::<m::GitDiff>(sp(&named, Some("a.txt")))
+        .await
+        .unwrap();
     assert!(diff.text.contains("-a\n+changed"), "{}", diff.text);
     let c = conn
         .call::<m::GitCommit>(GitCommitParams {

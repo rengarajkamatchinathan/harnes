@@ -386,7 +386,10 @@ mod tests {
     #[test]
     fn resolve_and_display() {
         let root = Path::new("/w/repo");
-        assert_eq!(resolve_in(root, "src/a.rs"), PathBuf::from("/w/repo/src/a.rs"));
+        assert_eq!(
+            resolve_in(root, "src/a.rs"),
+            PathBuf::from("/w/repo/src/a.rs")
+        );
         assert_eq!(resolve_in(root, "./src/../b"), PathBuf::from("/w/repo/b"));
         assert_eq!(resolve_in(root, "/etc/x"), PathBuf::from("/etc/x"));
         assert_eq!(display(root, Path::new("/w/repo/src/a.rs")), "src/a.rs");

@@ -77,10 +77,8 @@ impl ShadowRepo {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(
-                    &repo.git_dir,
-                    std::fs::Permissions::from_mode(0o700),
-                );
+                let _ =
+                    std::fs::set_permissions(&repo.git_dir, std::fs::Permissions::from_mode(0o700));
             }
             repo.git().ok(&["init", "-q"]).await?;
             for (k, v) in [
@@ -176,7 +174,15 @@ impl ShadowRepo {
         let o = self
             .git()
             .run(
-                &["diff-tree", "-r", "-z", "--no-renames", "--name-status", from, to],
+                &[
+                    "diff-tree",
+                    "-r",
+                    "-z",
+                    "--no-renames",
+                    "--name-status",
+                    from,
+                    to,
+                ],
                 None,
             )
             .await?;
@@ -205,7 +211,10 @@ impl ShadowRepo {
         }
         let o = self
             .git()
-            .run(&["ls-tree", "-r", "-z", "--name-only", "--full-tree", tree], None)
+            .run(
+                &["ls-tree", "-r", "-z", "--name-only", "--full-tree", tree],
+                None,
+            )
             .await?;
         if !o.ok() {
             return Err(format!("git ls-tree failed: {}", o.stderr));
@@ -262,7 +271,10 @@ impl ShadowRepo {
 
     /// Keep `object` alive under `refname` (`refs/genie/…`).
     pub async fn keep(&self, refname: &str, object: &str) -> Result<(), String> {
-        self.git().ok(&["update-ref", refname, object]).await.map(|_| ())
+        self.git()
+            .ok(&["update-ref", refname, object])
+            .await
+            .map(|_| ())
     }
 
     /// Delete every ref under `prefix` (e.g. `refs/genie/<session>/`).
@@ -285,7 +297,10 @@ impl ShadowRepo {
     /// `git gc --prune=now` (after refs were dropped).
     pub async fn gc(&self) -> Result<(), String> {
         let _g = self.lock.lock().await;
-        self.git().ok(&["gc", "--prune=now", "-q"]).await.map(|_| ())
+        self.git()
+            .ok(&["gc", "--prune=now", "-q"])
+            .await
+            .map(|_| ())
     }
 
     /// Bytes used by the shadow repository on disk.
