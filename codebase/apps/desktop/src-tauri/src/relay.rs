@@ -127,7 +127,9 @@ pub fn os_user_name() -> String {
             return name;
         }
     }
-    let login = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();
+    let login = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default();
     #[cfg(target_os = "linux")]
     if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
         let gecos = passwd

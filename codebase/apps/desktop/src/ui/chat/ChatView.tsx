@@ -10,6 +10,8 @@ import { useApp, useSession } from "../context";
 import { AskCard } from "./AskCard";
 import { Composer, ContextRing, ModelPicker } from "./Composer";
 import { TitlebarControls } from "../Sidebar";
+import { GenieMark } from "../GenieMark";
+import { useShell } from "../shell";
 import { effectiveTab, PANEL_ICON, panelTabs } from "../panel/RightPanel";
 import type { PanelTab } from "../../state/app";
 import { Transcript } from "./Transcript";
@@ -35,10 +37,10 @@ export function greeting(name: string, now: Date = new Date()): string {
 
 /** Top strip of the main column: drag region, title, right-side panel buttons. */
 function Header({ children, right, panels = true, hasArtifacts = false }: { children?: ReactNode; right?: ReactNode; panels?: boolean; hasArtifacts?: boolean }) {
-  const app = useApp();
+  const shell = useShell();
   return (
-    <header className={`chat__header ${app.ui.sidebarCollapsed ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
-      {app.ui.sidebarCollapsed && <TitlebarControls />}
+    <header className={`chat__header ${shell.sidebarHidden ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
+      {shell.sidebarHidden && <TitlebarControls />}
       {children}
       <span className="grow" data-tauri-drag-region />
       {right}
@@ -106,7 +108,7 @@ function EmptyHero({ noProvider }: { noProvider: boolean }) {
         <div className="hero__inner">
           <h1 className="hero__title">
             <span className="hero__mark" aria-hidden>
-              <Icon name={app.ui.incognito ? "ghost" : "sparkle"} size={30} />
+              {app.ui.incognito ? <Icon name="ghost" size={30} /> : <GenieMark size={36} />}
             </span>
             {app.ui.incognito ? t("sidebar.incognito") : greeting(app.userName)}
           </h1>
@@ -127,8 +129,8 @@ function EmptyHero({ noProvider }: { noProvider: boolean }) {
             <Menu
               label={t("chat.projectOrFolder")}
               items={[
-                { id: "", label: t("row.noProject"), icon: !project ? "check" : undefined, onSelect: () => app.setUi({ activeProject: null }) },
-                ...app.projects.map((p) => ({ id: p.project_id, label: p.name, icon: p.project_id === project?.project_id ? ("check" as const) : undefined, onSelect: () => app.setUi({ activeProject: p.project_id }) })),
+                { id: "", label: t("row.noProject"), checked: !project, onSelect: () => app.setUi({ activeProject: null }) },
+                ...app.projects.map((p) => ({ id: p.project_id, label: p.name, checked: p.project_id === project?.project_id, onSelect: () => app.setUi({ activeProject: p.project_id }) })),
               ]}
               trigger={(p) => (
                 <button className="textbtn" {...p}>
@@ -180,7 +182,7 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
       <div className="hero hero--code">
         <div className="folder-card">
           <span className="hero__mark folder-card__mark" aria-hidden>
-            <Icon name="sparkle" size={26} />
+            <GenieMark size={30} />
           </span>
           <div className="folder-card__box">
             {choices.map((w) => (
@@ -407,8 +409,19 @@ function SessionView({ id }: { id: string }) {
             ))}
           </div>
         )}
-        {asks.map((a) => (
-          <AskCard key={a.id} ask={a} onAnswer={(ans) => store.answer(a, ans)} onBrowserTakeOver={() => (app.setUi({ panelOpen: true, panelTab: "browser" }), void app.client.browser.takeover({ session_id: id }).catch(fail))} />
+        {asks.map((a, i) => (
+          <AskCard
+            key={a.id}
+            ask={a}
+            onAnswer={(ans) => store.answer(a, ans)}
+            onBrowserTakeOver={() => (app.setUi({ panelOpen: true, panelTab: "browser" }), void app.client.browser.takeover({ session_id: id }).catch(fail))}
+            permission={{
+              autoFocus: i === 0,
+              project: code ? folderName(info?.workspace_id ?? "") || undefined : undefined,
+              mode: code ? (info?.mode ?? "default") : undefined,
+              onSetMode: code && !a.subagent ? (md) => app.client.session.update({ session_id: id, mode: md }).then(() => undefined) : undefined,
+            }}
+          />
         ))}
         <Composer store={store} readOnly={!!elsewhere || m.leaseLost} placeholder={code ? t("code.placeholder") : t("composer.placeholderReply")} />
         <div className="composer-foot">
@@ -433,7 +446,7 @@ function SessionView({ id }: { id: string }) {
               label={t("code.mode")}
               placement="up"
               align="right"
-              items={MODES.map((md) => ({ id: md, label: t(`code.mode.${md}` as Parameters<typeof t>[0]), icon: (info?.mode ?? "default") === md ? ("check" as const) : undefined, onSelect: () => void app.client.session.update({ session_id: id, mode: md }).catch(fail) }))}
+              items={MODES.map((md) => ({ id: md, label: t(`code.mode.${md}` as Parameters<typeof t>[0]), checked: (info?.mode ?? "default") === md, onSelect: () => void app.client.session.update({ session_id: id, mode: md }).catch(fail) }))}
               trigger={(p) => (
                 <button className="textbtn" aria-label={t("code.mode")} {...p}>
                   {t(`code.mode.${info?.mode ?? "default"}` as Parameters<typeof t>[0])}

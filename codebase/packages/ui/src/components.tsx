@@ -1,17 +1,24 @@
-// Core components (05 §6, §11). Plain React on the tokens; keyboard and ARIA handled here
-// so app code doesn't have to.
+// Core components (05 §6, §11). React on the tokens; popovers (menu, select, tooltip) use Radix
+// primitives (D19) for positioning, focus and keyboard handling so app code doesn't have to.
 import {
+  createContext,
+  Fragment,
+  useContext,
   useEffect,
   useId,
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type CSSProperties,
   type InputHTMLAttributes,
+  type ReactElement,
   type ReactNode,
-  type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import * as RMenu from "@radix-ui/react-dropdown-menu";
+import * as RSelect from "@radix-ui/react-select";
+import * as RTooltip from "@radix-ui/react-tooltip";
 import { Icon, type IconName } from "./icons";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -41,18 +48,49 @@ export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>
   size?: "sm" | "md";
 }
 
-export function IconButton({ icon, label, variant = "ghost", size = "md", className, type = "button", ...rest }: IconButtonProps) {
-  return (
-    <button
-      type={type}
-      aria-label={label}
-      title={label}
-      className={cx("g-btn", "g-btn--icon", `g-btn--${variant}`, size === "sm" && "g-btn--sm", className)}
-      {...rest}
-    >
+export function IconButton({ icon, label, variant = "ghost", size = "md", className, type = "button", tooltip = true, shortcut, ...rest }: IconButtonProps & { tooltip?: boolean; shortcut?: string }) {
+  const btn = (
+    <button type={type} aria-label={label} className={cx("g-btn", "g-btn--icon", `g-btn--${variant}`, size === "sm" && "g-btn--sm", className)} {...rest}>
       <Icon name={icon} />
     </button>
   );
+  return tooltip ? (
+    <Tooltip content={label} shortcut={shortcut}>
+      {btn}
+    </Tooltip>
+  ) : (
+    btn
+  );
+}
+
+/* ---------- Tooltip (Radix) ---------- */
+
+const TooltipScope = createContext(false);
+
+/** One shared tooltip delay group for the app (hovering from one icon to the next shows at once). */
+export function UiProvider({ children }: { children: ReactNode }) {
+  return (
+    <RTooltip.Provider delayDuration={450} skipDelayDuration={300}>
+      <TooltipScope.Provider value={true}>{children}</TooltipScope.Provider>
+    </RTooltip.Provider>
+  );
+}
+
+/** Hover/focus tooltip in a portal, collision-aware. `children` must be one element that takes a ref. */
+export function Tooltip({ content, shortcut, side = "bottom", children }: { content: ReactNode; shortcut?: string; side?: "top" | "bottom" | "left" | "right"; children: ReactElement }) {
+  const scoped = useContext(TooltipScope);
+  const tip = (
+    <RTooltip.Root>
+      <RTooltip.Trigger asChild>{children}</RTooltip.Trigger>
+      <RTooltip.Portal>
+        <RTooltip.Content className="g-tooltip" side={side} sideOffset={6} collisionPadding={8}>
+          {content}
+          {shortcut && <span className="g-tooltip__kbd">{shortcut}</span>}
+        </RTooltip.Content>
+      </RTooltip.Portal>
+    </RTooltip.Root>
+  );
+  return scoped ? tip : <RTooltip.Provider delayDuration={450}>{tip}</RTooltip.Provider>;
 }
 
 export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
@@ -70,36 +108,65 @@ export interface SelectOption {
   group?: string;
 }
 
-export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange"> {
+export interface SelectProps {
   options: SelectOption[];
+  value?: string;
   onChange?: (value: string) => void;
+  disabled?: boolean;
+  id?: string;
+  className?: string;
+  style?: CSSProperties;
+  placeholder?: string;
+  "aria-label"?: string;
 }
 
-/** Native select (accessible, keyboard-friendly); options with `group` become optgroups. */
-export function Select({ options, onChange, className, ...rest }: SelectProps) {
+// Radix Select reserves "" for "no value"; map it to a sentinel so "" stays a real option.
+const EMPTY = "\u0000empty";
+const toRadix = (v: string) => (v === "" ? EMPTY : v);
+const fromRadix = (v: string) => (v === EMPTY ? "" : v);
+
+/** Custom dropdown (Radix Select): keyboard + typeahead, popover in a portal; `group` adds section labels. */
+export function Select({ options, value, onChange, disabled, id, className, style, placeholder, "aria-label": ariaLabel }: SelectProps) {
   const groups = new Map<string, SelectOption[]>();
   for (const o of options) {
     const g = o.group ?? "";
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g)!.push(o);
   }
+  const current = options.find((o) => o.value === value);
   const render = (o: SelectOption) => (
-    <option key={o.value} value={o.value} disabled={o.disabled}>
-      {o.label}
-    </option>
+    <RSelect.Item key={o.value} value={toRadix(o.value)} disabled={o.disabled} className="g-menu__item g-select__item">
+      <RSelect.ItemText>{o.label}</RSelect.ItemText>
+      <RSelect.ItemIndicator className="g-menu__check">
+        <Icon name="check" />
+      </RSelect.ItemIndicator>
+    </RSelect.Item>
   );
   return (
-    <select className={cx("g-select", className)} onChange={(e) => onChange?.(e.target.value)} {...rest}>
-      {[...groups.entries()].map(([g, opts]) =>
-        g ? (
-          <optgroup key={g} label={g}>
-            {opts.map(render)}
-          </optgroup>
-        ) : (
-          opts.map(render)
-        ),
-      )}
-    </select>
+    <RSelect.Root value={value === undefined ? undefined : toRadix(value)} onValueChange={(v) => onChange?.(fromRadix(v))} disabled={disabled}>
+      <RSelect.Trigger id={id} className={cx("g-select", className)} style={style} aria-label={ariaLabel}>
+        <span className="g-select__value">{current?.label ?? placeholder ?? ""}</span>
+        <RSelect.Icon className="g-select__chev">
+          <Icon name="chevronDown" size={14} />
+        </RSelect.Icon>
+      </RSelect.Trigger>
+      <RSelect.Portal>
+        <RSelect.Content className="g-menu__list g-select__list" position="popper" sideOffset={4} collisionPadding={8}>
+          <RSelect.Viewport>
+            {[...groups.entries()].map(([g, opts]) =>
+              g ? (
+                <RSelect.Group key={g}>
+                  <RSelect.Label className="g-menu__label">{g}</RSelect.Label>
+                  {opts.map(render)}
+                </RSelect.Group>
+              ) : (
+                opts.map(render)
+              ),
+            )}
+          </RSelect.Viewport>
+        </RSelect.Content>
+      </RSelect.Portal>
+    </RSelect.Root>
   );
 }
 
@@ -310,72 +377,78 @@ export interface MenuItem {
   id: string;
   label: ReactNode;
   icon?: IconName;
+  /** Secondary text under or beside the label (e.g. a model's provider). */
+  hint?: ReactNode;
+  /** Shows a check at the right edge (the current choice). */
+  checked?: boolean;
+  /** Section label shown above this item when it differs from the previous item's. */
+  group?: string;
   danger?: boolean;
   disabled?: boolean;
   title?: string;
   onSelect: () => void;
 }
 
-/** Button + popup menu; closes on outside click, Esc and selection. */
+/**
+ * Button + popup menu (Radix DropdownMenu): portalled, collision-aware, typeahead, arrow keys,
+ * closes on outside click / Esc / selection. `trigger` gets props to spread on one element.
+ */
 export function Menu({
   trigger,
   items,
   label,
   placement = "down",
   align = "left",
+  className,
 }: {
-  trigger: (props: { onClick: () => void; "aria-expanded": boolean; "aria-haspopup": "menu" }) => ReactNode;
+  trigger: (props: { "aria-expanded": boolean; "aria-haspopup": "menu" }) => ReactElement;
   items: MenuItem[];
   label: string;
   placement?: "down" | "up";
   align?: "left" | "right";
+  /** Extra class on the popup list. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    ref.current?.querySelector<HTMLElement>(".g-menu__item:not(:disabled)")?.focus();
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-  const onKey = (e: ReactKeyboardEvent) => {
-    if (e.key === "Escape") setOpen(false);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const list = [...(ref.current?.querySelectorAll<HTMLElement>(".g-menu__item:not(:disabled)") ?? [])];
-      const i = list.indexOf(document.activeElement as HTMLElement);
-      const n = e.key === "ArrowDown" ? (i + 1) % list.length : (i - 1 + list.length) % list.length;
-      list[n]?.focus();
-    }
-  };
   return (
-    <div className="g-menu" ref={ref} onKeyDown={onKey}>
-      {trigger({ onClick: () => setOpen((o) => !o), "aria-expanded": open, "aria-haspopup": "menu" })}
-      {open && (
-        <ul className={cx("g-menu__list", placement === "up" && "g-menu__list--up", align === "right" && "g-menu__list--right")} role="menu" aria-label={label}>
-          {items.map((it) => (
-            <li key={it.id} role="none">
-              <button
-                type="button"
-                role="menuitem"
-                className={cx("g-menu__item", it.danger && "g-menu__item--danger")}
-                disabled={it.disabled}
-                title={it.title}
-                onClick={() => {
-                  setOpen(false);
-                  it.onSelect();
-                }}
-              >
-                {it.icon && <Icon name={it.icon} />}
-                {it.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="g-menu">
+      <RMenu.Root open={open} onOpenChange={setOpen} modal={false}>
+        <RMenu.Trigger asChild>{trigger({ "aria-expanded": open, "aria-haspopup": "menu" })}</RMenu.Trigger>
+        <RMenu.Portal>
+          <RMenu.Content
+            className={cx("g-menu__list", className)}
+            side={placement === "up" ? "top" : "bottom"}
+            align={align === "right" ? "end" : "start"}
+            sideOffset={6}
+            collisionPadding={8}
+            loop
+            aria-label={label}
+          >
+            {items.map((it, i) => (
+              <Fragment key={it.id}>
+                {it.group && it.group !== items[i - 1]?.group && (
+                  <>
+                    {i > 0 && <RMenu.Separator className="g-menu__sep" />}
+                    <RMenu.Label className="g-menu__label">{it.group}</RMenu.Label>
+                  </>
+                )}
+                <RMenu.Item className={cx("g-menu__item", it.danger && "g-menu__item--danger")} disabled={it.disabled} title={it.title} onSelect={() => it.onSelect()}>
+                  {it.icon && it.icon !== "check" && <Icon name={it.icon} />}
+                  <span className="g-menu__text">
+                    <span className="g-menu__label-text">{it.label}</span>
+                    {it.hint && <span className="g-menu__hint">{it.hint}</span>}
+                  </span>
+                  {(it.checked || it.icon === "check") && (
+                    <span className="g-menu__check" aria-label="Selected">
+                      <Icon name="check" />
+                    </span>
+                  )}
+                </RMenu.Item>
+              </Fragment>
+            ))}
+          </RMenu.Content>
+        </RMenu.Portal>
+      </RMenu.Root>
     </div>
   );
 }

@@ -16,7 +16,7 @@ use genie_tools::{
 
 use crate::error::{BlockSource as CoreBlock, ToolError};
 use crate::ids::new_id;
-use crate::runtime::ports::{AuthzDecision, AuthzRequest, ToolAuthorizer};
+use crate::runtime::ports::{AuthzDecision, AuthzRequest, SettingsSource, ToolAuthorizer};
 use crate::session::TurnCtx;
 
 impl From<TError> for ToolError {
@@ -56,6 +56,9 @@ pub(crate) struct Started {
     pub(crate) name: String,
     pub(crate) kind: ToolKind,
     blocked: Mutex<Option<ErrorInfo>>,
+    /// The user declined without feedback: like Claude's "No", the turn stops after this
+    /// step and waits for the user instead of letting the model try something else.
+    stop: AtomicBool,
 }
 
 impl Started {
@@ -72,7 +75,12 @@ impl Started {
             name,
             kind,
             blocked: Mutex::new(None),
+            stop: AtomicBool::new(false),
         })
+    }
+
+    pub(crate) fn stop_requested(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
     }
 
     pub(crate) fn set_blocked(&self, info: ErrorInfo) {
@@ -110,7 +118,12 @@ pub(crate) struct CallGate {
     pub authorizer: Arc<dyn ToolAuthorizer>,
     pub tool: String,
     pub kind: ToolKind,
+    /// The mode at turn start; the live session mode wins when it can be read, so a
+    /// mode switch (e.g. to accept-edits) applies to the calls still to come in this turn.
     pub mode: Mode,
+    pub settings: Arc<dyn SettingsSource>,
+    /// The agent's `permissionMode`, which only narrows the session mode (D46).
+    pub agent_mode: Option<Mode>,
     pub started: Arc<Started>,
     /// The turn's taint (SA-29), set by earlier tool results.
     pub taint: Arc<Mutex<Option<String>>>,
@@ -121,6 +134,12 @@ pub(crate) struct CallGate {
 #[async_trait]
 impl PermissionGate for CallGate {
     async fn assert(&self, req: PermissionRequest) -> Result<(), TError> {
+        let mode = self
+            .settings
+            .settings(&self.turn.session_id)
+            .map_or(self.mode, |s| {
+                crate::runtime::agents::narrow_mode(s.mode, self.agent_mode)
+            });
         let areq = AuthzRequest {
             session_id: self.turn.session_id.clone(),
             turn_id: self.turn.turn_id.clone(),
@@ -129,7 +148,7 @@ impl PermissionGate for CallGate {
             resource: req.resource.clone(),
             preview: req.preview,
             save_suggestions: req.save_suggestions,
-            mode: self.mode,
+            mode,
             taint: self.taint.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         };
         let mut decision = self.authorizer.authorize(&areq);
@@ -190,6 +209,10 @@ impl PermissionGate for CallGate {
                 match ans.decision {
                     Decision::Once | Decision::Always | Decision::Submit => {}
                     Decision::Reject => {
+                        if ans.message.as_deref().is_none_or(|m| m.trim().is_empty()) {
+                            self.started.stop.store(true, Ordering::SeqCst);
+                            return Err(TError::Declined { message: None });
+                        }
                         return Err(TError::Declined {
                             message: ans.message,
                         });

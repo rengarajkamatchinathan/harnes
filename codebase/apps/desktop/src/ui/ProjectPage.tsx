@@ -6,8 +6,10 @@ import { t } from "../i18n";
 import { formatBytes, uploadBlob } from "../state/attachments";
 import { useApp } from "./context";
 import { TitlebarControls } from "./Sidebar";
+import { useShell } from "./shell";
 
 export function ProjectPage({ id }: { id: string }) {
+  const shell = useShell();
   const app = useApp();
   const p = app.projects.find((x) => x.project_id === id);
   const [name, setName] = useState(p?.name ?? "");
@@ -43,8 +45,8 @@ export function ProjectPage({ id }: { id: string }) {
 
   return (
     <div className="chat">
-      <header className={`chat__header ${app.ui.sidebarCollapsed ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
-        {app.ui.sidebarCollapsed && <TitlebarControls />}
+      <header className={`chat__header ${shell.sidebarHidden ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
+        {shell.sidebarHidden && <TitlebarControls />}
         <span className="chat__title chat__title--muted">{t("sidebar.projects")}</span>
       </header>
       <div className="page">

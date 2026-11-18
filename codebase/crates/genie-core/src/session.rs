@@ -143,6 +143,8 @@ pub(crate) struct Deps {
 struct CurrentTurn {
     token: CancellationToken,
     interrupt_requested: bool,
+    /// Per tool call: cancelled to move a running call out of the foreground (ticket 43).
+    detach: HashMap<String, CancellationToken>,
 }
 
 struct PendingAsk {
@@ -388,6 +390,20 @@ impl SessionHandle {
         cancelled
     }
 
+    /// Move a running tool call of the current turn to the background (ticket 43,
+    /// `session.background_tool`). `false` when no such call is running; tools that can't
+    /// run in the background ignore the request.
+    pub fn background_tool(&self, call_id: &str) -> bool {
+        let st = self.sh.lock();
+        match st.current.as_ref().and_then(|c| c.detach.get(call_id)) {
+            Some(t) if !t.is_cancelled() => {
+                t.cancel();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Resume an interrupted turn (user-initiated only, D20).
     pub fn resume(&self) -> Result<(), CoreError> {
         let turn_id = {
@@ -597,6 +613,7 @@ async fn run_turn(sh: &Arc<Shared>, item: InboxItem) {
         st.current = Some(CurrentTurn {
             token: turn_scope.token().clone(),
             interrupt_requested: false,
+            detach: HashMap::new(),
         });
         st.last_activity = Instant::now();
     }
@@ -749,7 +766,11 @@ fn resolve_ask(
         serde_json::from_value::<AskAnswer>(answer.clone()),
     ) {
         (Some(Decision::Always), Ok(a)) => {
-            crate::runtime::ports::saved_rule(&p.ask, &a).map(|s| s.rule)
+            let rules: Vec<String> = crate::runtime::ports::saved_rules(&p.ask, &a)
+                .into_iter()
+                .map(|s| s.rule)
+                .collect();
+            (!rules.is_empty()).then(|| rules.join(", "))
         }
         _ => None,
     };
@@ -785,6 +806,15 @@ impl TurnCtx {
     /// The turn token. Cancelled by interrupt, session close or daemon shutdown.
     pub fn token(&self) -> &CancellationToken {
         self.scope.token()
+    }
+
+    /// The detach token of a tool call, registered so `background_tool` can reach it.
+    pub fn detach_token(&self, call_id: &str) -> CancellationToken {
+        let mut st = self.sh.lock();
+        match st.current.as_mut() {
+            Some(cur) => cur.detach.entry(call_id.to_string()).or_default().clone(),
+            None => CancellationToken::new(),
+        }
     }
 
     /// The turn scope: make `child("step")` / `child("tool")` scopes from it.

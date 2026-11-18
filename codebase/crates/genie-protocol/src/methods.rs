@@ -120,6 +120,8 @@ methods! {
     SessionPrompt = "session.prompt", Request, true, session::PromptParams => session::PromptResult;
     SessionRegenerate = "session.regenerate", Request, true, session::RegenerateParams => Empty;
     SessionInterrupt = "session.interrupt", Request, true, session::InterruptParams => session::InterruptResult;
+    /// Move a running tool call (a `shell` command) to the background (ticket 43).
+    SessionBackgroundTool = "session.background_tool", Request, true, session::BackgroundToolParams => session::BackgroundToolResult;
     SessionResume = "session.resume", Request, true, session::SessionIdParams => Empty;
     SessionTakeOver = "session.take_over", Request, false, session::SessionIdParams => Empty;
     SessionRelease = "session.release", Request, false, session::SessionIdParams => Empty;

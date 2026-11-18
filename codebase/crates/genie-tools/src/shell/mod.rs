@@ -47,6 +47,8 @@ pub use tool::ShellTool;
 pub const NAME: &str = "shell";
 /// 06 §13.1: 2 min, then the command moves to the background.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
+/// How often a running foreground command is checked for listening ports (ticket 43).
+pub const SERVER_PROBE: Duration = Duration::from_millis(1_500);
 /// The longest timeout the model may request.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -138,6 +140,10 @@ pub struct ShellConfig {
     pub tail_lines: usize,
     /// The output file stops growing here.
     pub file_cap: u64,
+    /// Server detection (ticket 43): while a foreground command runs, check this often
+    /// whether its process tree listens on a TCP port, and if so move it to the
+    /// background. `None` turns it off. Needs [`ShellConfig::jobs`].
+    pub server_probe: Option<Duration>,
 }
 
 impl ShellConfig {
@@ -165,6 +171,7 @@ impl ShellConfig {
             head_lines: 400,
             tail_lines: 400,
             file_cap: 64 * 1024 * 1024,
+            server_probe: Some(SERVER_PROBE),
         }
     }
 

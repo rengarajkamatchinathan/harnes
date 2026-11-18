@@ -2,9 +2,10 @@
 // (if found) → Memory notice. The trust dialog comes with the first Code folder; the
 // passphrase step is the Unlock screen when the engine reports a locked store.
 import { useEffect, useState } from "react";
-import { Button, Card, Icon, Select, Switch } from "@genie/ui";
+import { Button, Card, Select, Switch } from "@genie/ui";
 import { t } from "../i18n";
 import { useApp } from "./context";
+import { GenieMark } from "./GenieMark";
 import { ProviderCard } from "./settings/ProvidersSection";
 
 export type Step = "welcome" | "privacy" | "provider" | "import" | "memory";
@@ -71,7 +72,7 @@ export function FirstRun() {
           <>
             <h1 className="firstrun__title">
               <span className="hero__mark" aria-hidden>
-                <Icon name="sparkle" size={30} />
+                <GenieMark size={36} />
               </span>
               {t("firstrun.welcome")}
             </h1>

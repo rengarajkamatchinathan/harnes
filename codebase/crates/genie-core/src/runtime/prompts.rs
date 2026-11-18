@@ -230,10 +230,25 @@ pub fn base_prompt(i: &BasePromptInput) -> String {
 
 /// The compaction instruction (06 §2.6.7), with an optional `/compact [focus]`.
 pub fn compaction_prompt(focus: Option<&str>) -> String {
-    match focus.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(fx) => render(f::COMPACTION, &[("focus", fx)], &["focus"]),
-        None => render(f::COMPACTION, &[], &[]),
+    compaction_prompt_with(focus, None)
+}
+
+/// [`compaction_prompt`] plus the user's newest message when it is being summarised
+/// mid-turn: the summary must carry it as the goal, or the turn loses the request.
+pub fn compaction_prompt_with(focus: Option<&str>, request: Option<&str>) -> String {
+    let focus = focus.map(str::trim).filter(|s| !s.is_empty());
+    let request = request.map(str::trim).filter(|s| !s.is_empty());
+    let mut vars = vec![];
+    let mut flags = vec![];
+    if let Some(fx) = focus {
+        vars.push(("focus", fx));
+        flags.push("focus");
     }
+    if let Some(r) = request {
+        vars.push(("request", r));
+        flags.push("request");
+    }
+    render(f::COMPACTION, &vars, &flags)
 }
 
 /// Template headings the summary must keep (06 §3 "template check").

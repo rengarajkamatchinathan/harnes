@@ -59,6 +59,30 @@ fn resolve_err(e: ResolveError) -> TurnError {
 }
 
 /// `rate_limited`, `context_overflow` … (03 §7).
+/// The result of a mutating call skipped because an earlier one in its step was declined.
+const SKIPPED_AFTER_DECLINE: &str = "Not run: the user declined an earlier tool call in this \
+     step, and this one may depend on it. Ask or adjust before trying again.";
+
+/// A message's text parts, joined.
+fn message_text(m: &Message) -> String {
+    m.parts
+        .iter()
+        .filter_map(|p| match p {
+            Part::Text(t) => Some(t.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// At most `max` characters, marking a cut.
+fn clip_chars(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => format!("{}…", &s[..i]),
+        None => s.to_string(),
+    }
+}
+
 pub(crate) fn error_class(k: &ErrorKind) -> String {
     serde_json::to_value(k)
         .ok()
@@ -132,6 +156,7 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
         registry,
         taint: taint_cell,
         step_cp: None,
+        serial: Mutex::new(None),
     };
     let res = r.go().await;
     r.rt.taints.leave(&r.sid, &r.turn.turn_id);
@@ -185,6 +210,8 @@ enum StepResult {
     Done {
         finish: FinishReason,
         client_calls: bool,
+        /// The user declined a call without feedback: end the turn after this step.
+        user_stopped: bool,
     },
     Overflow,
 }
@@ -203,6 +230,9 @@ struct Run {
     taint: Arc<Mutex<Option<String>>>,
     /// The running step's checkpoint (Code, D49).
     step_cp: Option<Arc<crate::runtime::checkpoint::StepCheckpoint>>,
+    /// The step's last mutating call: the next one waits for its verdict (ticket 45).
+    /// `false` = it was declined or skipped, so later mutating calls are skipped too.
+    serial: Mutex<Option<tokio::sync::oneshot::Receiver<bool>>>,
     /// The agent this session runs as (06 §11).
     agent: Option<crate::runtime::agents::AgentDef>,
     /// Hooks of this turn (06 §12; Code with hooks configured).
@@ -430,10 +460,16 @@ impl Run {
                 StepResult::Done {
                     finish,
                     client_calls,
+                    user_stopped,
                 } => {
                     overflow = 0;
                     let steered = self.inject_steer()?;
                     if final_step {
+                        return Ok(());
+                    }
+                    // A plain "Deny" waits for the user (Claude's "No"); a steer typed
+                    // meanwhile is that instruction, so the turn goes on with it.
+                    if user_stopped && !steered {
                         return Ok(());
                     }
                     if client_calls {
@@ -774,12 +810,15 @@ impl Run {
             call_id: call.id.0.clone(),
             tool_name: name.clone(),
             cancel: scope.token().clone(),
+            detach: self.turn.detach_token(&call.id.0),
             permissions: Arc::new(CallGate {
                 turn: self.turn.clone(),
                 authorizer: self.rt.authorizer.clone(),
                 tool: name,
                 kind,
                 mode: self.settings.mode,
+                settings: self.rt.settings.clone(),
+                agent_mode: self.agent.as_ref().and_then(|a| a.permission_mode),
                 started: started.clone(),
                 taint: self.taint.clone(),
                 hooks: call_hooks.clone(),
@@ -793,14 +832,52 @@ impl Run {
             .clone()
             .filter(|_| crate::runtime::checkpoint::StepCheckpoint::captures(tool.name()));
         let started2 = started.clone();
+        // Calls that change things run one at a time, in the order the model wrote them
+        // (ticket 45): a step's commands often depend on each other ("check the port, then
+        // start the server"), and parallel calls also put several approval prompts up at
+        // once. Read-only calls still run in parallel.
+        let gate = (kind == genie_tools::ToolKind::Mutating).then(|| {
+            let (done, next) = tokio::sync::oneshot::channel::<bool>();
+            let prev = self
+                .serial
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .replace(next);
+            (prev, done)
+        });
         let task = scope.spawn(async move {
-            if let Some(cp) = cp {
-                cp.before().await;
+            let (prev, done) = match gate {
+                Some((p, d)) => (p, Some(d)),
+                None => (None, None),
+            };
+            let run = async {
+                if let Some(prev) = prev
+                    && matches!(prev.await, Ok(false))
+                {
+                    return (
+                        Err(genie_tools::ToolError::Failed {
+                            message: SKIPPED_AFTER_DECLINE.into(),
+                            may_have_run: false,
+                        }),
+                        false,
+                    );
+                }
+                if let Some(cp) = cp {
+                    cp.before().await;
+                }
+                let r =
+                    crate::runtime::hooks::run_tool(tool, input, ctx, call_hooks, started2).await;
+                let go_on = !matches!(r, Err(genie_tools::ToolError::Declined { .. }));
+                (r, go_on)
+            };
+            let (r, go_on) = tokio::select! {
+                x = run => x,
+                () = token.cancelled() => (Err(genie_tools::ToolError::Cancelled), false),
+            };
+            if let Some(done) = done {
+                let _ = done.send(go_on);
             }
-            tokio::select! {
-                r = crate::runtime::hooks::run_tool(tool, input, ctx, call_hooks, started2) => r,
-                () = token.cancelled() => Err(genie_tools::ToolError::Cancelled),
-            }
+            r
         });
         Call {
             call: call.clone(),
@@ -833,6 +910,7 @@ impl Run {
         req: LlmRequest,
     ) -> Result<StepResult, TurnError> {
         let msg_id = new_id("msg");
+        *self.serial.get_mut().unwrap_or_else(|e| e.into_inner()) = None;
         let route = &self.model.route;
         self.publish(SessionEvent::StepStarted(StepStarted {
             step: n,
@@ -1089,6 +1167,7 @@ impl Run {
             }
         }
 
+        let mut user_stopped = false;
         // Join every call; results in emitted order.
         let tool_msg = new_id("msg");
         let mut results: Vec<Part> = vec![];
@@ -1113,6 +1192,8 @@ impl Run {
                     may_have_run: false,
                 }),
             };
+            let stopped_here = c.started.as_ref().is_some_and(|s| s.stop_requested());
+            user_stopped |= stopped_here;
             if let Some(s) = &c.started
                 && !s.is_set()
                 && outcome.is_ok()
@@ -1146,6 +1227,11 @@ impl Run {
                         _ => ToolOutcome::Error,
                     };
                     let mut text = e.model_text();
+                    if stopped_here {
+                        text = "The user declined this tool call. Stop what you are doing and \
+                                wait for the user to tell you how to proceed."
+                            .into();
+                    }
                     if let ToolError::Blocked { origin, .. } = &e {
                         let info =
                             c.started
@@ -1247,6 +1333,7 @@ impl Run {
             None => Ok(StepResult::Done {
                 finish,
                 client_calls,
+                user_stopped,
             }),
             Some(_) if cancelled => Err(TurnError::Cancelled),
             Some(_) if overflow => Ok(StepResult::Overflow),
@@ -1406,6 +1493,31 @@ impl Run {
             // turn can continue (the summary covers the rest).
             cut = f;
         }
+        // The user's newest message must survive (ticket 42): mid-turn, the tool calls and
+        // results after it can outgrow the tail budget, and summarising the request made
+        // the model go back to the previous goal. Keep it verbatim when the tail from it
+        // fits in half the threshold; otherwise quote it in the summary instruction.
+        let last_user = history
+            .iter()
+            .rposition(|m| m.kind == MsgKind::Normal && m.message.role == Role::User);
+        let mut request = None;
+        if trigger != "manual"
+            && let Some(u) = last_user
+            && u < cut
+        {
+            let from_user: u64 = history[u..]
+                .iter()
+                .map(|m| estimate_message(&m.message))
+                .sum();
+            let room =
+                compaction_threshold(self.model.context_window(), self.rt.cfg.compaction_buffer)
+                    / 2;
+            if u > 0 && from_user <= room {
+                cut = u;
+            } else {
+                request = Some(clip_chars(&message_text(&history[u].message), 4_000));
+            }
+        }
         let kept_from = history.get(cut).map(|m| m.id().to_string());
         let to_summarise: Vec<StoredMessage> = history[..cut].to_vec();
         let protocol = self.model.route.protocol.kind();
@@ -1413,7 +1525,10 @@ impl Run {
         messages.push(Message::new(
             new_id("msg"),
             Role::User,
-            vec![Part::text(prompts::compaction_prompt(focus))],
+            vec![Part::text(prompts::compaction_prompt_with(
+                focus,
+                request.as_deref(),
+            ))],
         ));
         let (mut req, _) = self.assemble(false)?;
         req.messages = messages;

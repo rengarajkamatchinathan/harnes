@@ -1,8 +1,8 @@
 /*
  * Genie design tokens (spec 05 §6, D19, t29).
  *
- * Seed colours → 12-step OKLCH scales → semantic variables. Neutral greys are near
- * chroma-free (0.003, hue 260); the accent is the SA-20 placeholder teal oklch(0.62 0.13 195)
+ * Seed colours → 12-step OKLCH scales → semantic variables. Neutral greys are
+ * chroma-free, with lightness steps tuned to the Claude Desktop reference (C1: pattern, not palette); the accent is the SA-20 placeholder teal oklch(0.62 0.13 195)
  * (step 9) until brand input arrives. It must not resemble Anthropic's palette (C1).
  *
  * The theme is chosen by `data-theme="light" | "dark"` on <html>; `applyTheme()` sets it
@@ -39,15 +39,27 @@
   --control-h: 32px;
   --row-h: 32px;
 
-  /* Motion */
+  /* Motion: short, ease-out for things entering, ease-in for things leaving. */
+  --dur-instant: 80ms;
   --dur-fast: 120ms;
   --dur-base: 200ms;
+  --dur-slow: 280ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Layers */
+  --z-panel: 20;
+  --z-drawer: 60;
+  --z-dialog: 100;
+  --z-popover: 200;
+  --z-toast: 300;
 
   /* Layout */
-  --sidebar-w: 272px;
+  --sidebar-w: 280px;
   --panel-w: 420px;
-  --content-max: 760px;
+  --content-max: 768px;
 }
 
 [data-density="compact"] {
@@ -59,8 +71,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --dur-instant: 0ms;
     --dur-fast: 0ms;
     --dur-base: 0ms;
+    --dur-slow: 0ms;
   }
 }
 
@@ -68,18 +82,18 @@
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --gray-1: oklch(0.995 0.003 260);
-  --gray-2: oklch(0.982 0.003 260);
-  --gray-3: oklch(0.962 0.003 260);
-  --gray-4: oklch(0.940 0.003 260);
-  --gray-5: oklch(0.918 0.003 260);
-  --gray-6: oklch(0.890 0.003 260);
-  --gray-7: oklch(0.850 0.003 260);
-  --gray-8: oklch(0.780 0.003 260);
-  --gray-9: oklch(0.640 0.003 260);
-  --gray-10: oklch(0.570 0.003 260);
-  --gray-11: oklch(0.450 0.003 260);
-  --gray-12: oklch(0.220 0.003 260);
+  --gray-1: oklch(0.995 0 0);
+  --gray-2: oklch(0.982 0 0);
+  --gray-3: oklch(0.965 0 0);
+  --gray-4: oklch(0.945 0 0);
+  --gray-5: oklch(0.925 0 0);
+  --gray-6: oklch(0.900 0 0);
+  --gray-7: oklch(0.860 0 0);
+  --gray-8: oklch(0.790 0 0);
+  --gray-9: oklch(0.650 0 0);
+  --gray-10: oklch(0.580 0 0);
+  --gray-11: oklch(0.460 0 0);
+  --gray-12: oklch(0.230 0 0);
 
   --accent-1: oklch(0.990 0.008 195);
   --accent-2: oklch(0.975 0.018 195);
@@ -96,12 +110,14 @@
 
   --bg: var(--gray-1);
   --bg-subtle: var(--gray-2);
-  --surface: oklch(0.996 0.001 255);
+  --surface: oklch(1 0 0);
   --surface-raised: oklch(1 0 0);
   --surface-hover: var(--gray-3);
-  --surface-active: var(--gray-4);
+  --surface-active: var(--gray-5);
   --border: var(--gray-6);
   --border-subtle: var(--gray-4);
+  --sidebar-bg: var(--gray-2);
+  --bubble: var(--gray-3);
   --text: var(--gray-12);
   --text-muted: var(--gray-11);
   --text-faint: var(--gray-10);
@@ -122,24 +138,26 @@
   --diff-del: oklch(0.940 0.045 27);
   --code-bg: var(--gray-2);
   --shadow: 0 1px 2px oklch(0 0 0 / 0.06), 0 4px 16px oklch(0 0 0 / 0.06);
-  --overlay: oklch(0.2 0.01 255 / 0.35);
+  --shadow-pop: 0 0 0 1px oklch(0 0 0 / 0.04), 0 4px 12px oklch(0 0 0 / 0.08), 0 16px 40px oklch(0 0 0 / 0.08);
+  --shadow-composer: 0 1px 2px oklch(0 0 0 / 0.04), 0 4px 20px oklch(0 0 0 / 0.05);
+  --overlay: oklch(0.2 0 0 / 0.35);
 }
 
 /* ---------- Dark ---------- */
 [data-theme="dark"] {
   color-scheme: dark;
-  --gray-1: oklch(0.205 0.003 260);
-  --gray-2: oklch(0.225 0.003 260);
-  --gray-3: oklch(0.250 0.003 260);
-  --gray-4: oklch(0.280 0.003 260);
-  --gray-5: oklch(0.310 0.003 260);
-  --gray-6: oklch(0.345 0.003 260);
-  --gray-7: oklch(0.400 0.003 260);
-  --gray-8: oklch(0.480 0.003 260);
-  --gray-9: oklch(0.590 0.003 260);
-  --gray-10: oklch(0.660 0.003 260);
-  --gray-11: oklch(0.800 0.003 260);
-  --gray-12: oklch(0.950 0.003 260);
+  --gray-1: oklch(0.209 0 0);
+  --gray-2: oklch(0.231 0 0);
+  --gray-3: oklch(0.260 0 0);
+  --gray-4: oklch(0.285 0 0);
+  --gray-5: oklch(0.309 0 0);
+  --gray-6: oklch(0.349 0 0);
+  --gray-7: oklch(0.390 0 0);
+  --gray-8: oklch(0.450 0 0);
+  --gray-9: oklch(0.560 0 0);
+  --gray-10: oklch(0.660 0 0);
+  --gray-11: oklch(0.780 0 0);
+  --gray-12: oklch(0.940 0 0);
 
   --accent-1: oklch(0.180 0.020 195);
   --accent-2: oklch(0.210 0.030 195);
@@ -157,14 +175,16 @@
   --bg: var(--gray-1);
   --bg-subtle: var(--gray-2);
   --surface: var(--gray-2);
-  --surface-raised: var(--gray-3);
-  --surface-hover: var(--gray-4);
-  --surface-active: var(--gray-5);
-  --border: var(--gray-6);
-  --border-subtle: var(--gray-4);
+  --surface-raised: var(--gray-4);
+  --surface-hover: var(--gray-5);
+  --surface-active: var(--gray-6);
+  --border: oklch(0.335 0 0);
+  --border-subtle: oklch(0.290 0 0);
+  --sidebar-bg: var(--gray-2);
+  --bubble: var(--gray-3);
   --text: var(--gray-12);
-  --text-muted: var(--gray-11);
-  --text-faint: var(--gray-10);
+  --text-muted: oklch(0.730 0 0);
+  --text-faint: oklch(0.600 0 0);
   --accent: var(--accent-10);
   --accent-fg: oklch(0.170 0.020 195);
   --accent-subtle: var(--accent-3);
@@ -180,7 +200,9 @@
   --info-subtle: oklch(0.270 0.050 250);
   --diff-add: oklch(0.300 0.060 150);
   --diff-del: oklch(0.300 0.060 27);
-  --code-bg: var(--gray-2);
+  --code-bg: oklch(0.218 0 0);
   --shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 6px 20px oklch(0 0 0 / 0.35);
-  --overlay: oklch(0 0 0 / 0.55);
+  --shadow-pop: 0 0 0 1px oklch(1 0 0 / 0.04), 0 4px 12px oklch(0 0 0 / 0.35), 0 16px 40px oklch(0 0 0 / 0.4);
+  --shadow-composer: 0 1px 2px oklch(0 0 0 / 0.25), 0 6px 24px oklch(0 0 0 / 0.2);
+  --overlay: oklch(0 0 0 / 0.5);
 }

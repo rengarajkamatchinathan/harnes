@@ -295,6 +295,11 @@ impl PipeChild {
         self.tree.id()
     }
 
+    /// See [`crate::ProcessTree::probe`].
+    pub fn probe(&self) -> crate::ports::TreeProbe {
+        self.tree.probe()
+    }
+
     pub fn take_stdin(&mut self) -> Option<ChildStdin> {
         self.stdin.take()
     }

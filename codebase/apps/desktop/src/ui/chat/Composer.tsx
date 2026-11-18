@@ -59,7 +59,8 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
         label={t("composer.model")}
         placement="up"
         align="right"
-        items={app.models.map((m) => ({ id: m.id, label: m.name || m.id, title: m.provider, icon: m.id === currentModel ? "check" : undefined, onSelect: () => setModel(m.id) }))}
+        className="modelpick__list"
+        items={app.models.map((m) => ({ id: m.id, label: m.name || m.id, group: new Set(app.models.map((x) => x.provider)).size > 1 ? m.provider : undefined, checked: m.id === currentModel, onSelect: () => setModel(m.id) }))}
         trigger={(p) => (
           <button className="textbtn" aria-label={t("composer.model")} {...p}>
             {modelInfo?.name || currentModel || "—"}
@@ -71,7 +72,7 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
           label={t("composer.effort")}
           placement="up"
           align="right"
-          items={effortLevels.map((e) => ({ id: e, label: e[0].toUpperCase() + e.slice(1), icon: e === effort ? "check" : undefined, onSelect: () => setEffort(e) }))}
+          items={effortLevels.map((e) => ({ id: e, label: e[0].toUpperCase() + e.slice(1), checked: e === effort, onSelect: () => setEffort(e) }))}
           trigger={(p) => (
             <button className="textbtn textbtn--muted" aria-label={t("composer.effort")} {...p}>
               {effort ? effort[0].toUpperCase() + effort.slice(1) : ""}

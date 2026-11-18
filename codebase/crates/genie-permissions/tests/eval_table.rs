@@ -899,3 +899,81 @@ fn rule_set_management() {
     assert!(!rs.remove(A, Local, "Bash(ls:*)"));
     assert_eq!(rs.len(), 1);
 }
+
+/// Read-only shell commands only skip the prompt when every path they touch is inside the
+/// workspace (+ additional dirs or a `Read` allow rule); `cd` moves the base of later parts.
+#[test]
+fn read_only_shell_stays_in_the_workspace() {
+    let cases: &[(&[(RuleClass, Origin, &str)], &str, Want)] = &[
+        (&[], "cd /repo/src && ls", Want::Allow),
+        // Ticket 45: a port check before starting a dev server. `shell()` splits on `&&`
+        // only; the real scanner also splits `|| true` off, as here.
+        (
+            &[],
+            "cd /repo && lsof -nP -iTCP:1420 -sTCP:LISTEN && true",
+            Want::Allow,
+        ),
+        // … and the process check after it (`ps aux | egrep "…" | head`, split at the pipes).
+        (
+            &[],
+            "cd /repo && ps aux && egrep \"node .*node_modules/.bin/vite\" && head",
+            Want::Allow,
+        ),
+        (&[], "cd \"/repo/a b\" && cat x.txt", Want::Allow),
+        (&[], "cd src && cat ../README.md", Want::Allow),
+        (&[], "cat /repo/a", Want::Allow),
+        (&[], "ls /shared/x", Want::Allow),
+        (&[], "ls /etc", Want::Ask),
+        (&[], "cat ~/.ssh/id_rsa", Want::Ask),
+        (&[], "cd src && cat ../../etc/passwd", Want::Ask),
+        (&[], "cd /tmp && ls", Want::Ask),
+        (&[], "cd", Want::Ask),
+        (&[], "cd ~bob", Want::Ask),
+        (&[], "echo /etc/passwd", Want::Allow),
+        (&[], "git status /etc", Want::Allow),
+        (&[(A, User, "Read(//etc/**)")], "ls /etc", Want::Allow),
+        (
+            &[(A, User, "Read(~/notes/**)")],
+            "cat ~/notes/a.md",
+            Want::Allow,
+        ),
+        (
+            &[(D, User, "Read(./secrets/**)")],
+            "cat secrets/key",
+            Want::Ask,
+        ),
+        // An explicit Bash rule is the user's choice and is not path-checked.
+        (&[(A, User, "Bash(cat:*)")], "cat /etc/hosts", Want::Allow),
+    ];
+    for (rs, cmd, want) in cases {
+        let ev = code_eval(Mode::Default, rules(rs));
+        assert_eq!(
+            kind(&ev.evaluate(&Request::new(shell(cmd)))),
+            *want,
+            "{cmd}"
+        );
+    }
+}
+
+#[test]
+fn outside_paths_suggest_read_rules_not_blanket_commands() {
+    let ev = code_eval(Mode::Default, RuleSet::new());
+    let sugg = |cmd: &str| match ev.evaluate(&Request::new(shell(cmd))) {
+        Verdict::Ask {
+            save_suggestions, ..
+        } => save_suggestions
+            .into_iter()
+            .map(|s| s.rule)
+            .collect::<Vec<_>>(),
+        v => panic!("{cmd}: {v:?}"),
+    };
+    assert_eq!(sugg("ls /etc"), ["Read(//etc/**)"]);
+    assert_eq!(sugg("cat ~/.ssh/id_rsa"), ["Read(//home/me/.ssh/**)"]);
+    assert_eq!(sugg("cd /tmp && ls"), ["Read(//tmp/**)"]);
+    // Every part that needs a rule gets one.
+    assert_eq!(
+        sugg("cd /repo && ps aux && npm test && rm -rf build"),
+        ["Bash(npm test:*)", "Bash(rm:*)"]
+    );
+    assert_eq!(sugg("cd /"), Vec::<String>::new());
+}

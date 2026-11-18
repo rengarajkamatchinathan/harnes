@@ -21,6 +21,7 @@ export interface Requests {
   "session.prompt": { params: T.PromptParams; result: T.PromptResult };
   "session.regenerate": { params: T.RegenerateParams; result: T.Empty };
   "session.interrupt": { params: T.InterruptParams; result: T.InterruptResult };
+  "session.background_tool": { params: T.BackgroundToolParams; result: T.BackgroundToolResult };
   "session.resume": { params: T.SessionIdParams; result: T.Empty };
   "session.take_over": { params: T.SessionIdParams; result: T.Empty };
   "session.release": { params: T.SessionIdParams; result: T.Empty };
@@ -177,6 +178,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "session.prompt", direction: "request", needsLease: true },
   { name: "session.regenerate", direction: "request", needsLease: true },
   { name: "session.interrupt", direction: "request", needsLease: true },
+  { name: "session.background_tool", direction: "request", needsLease: true },
   { name: "session.resume", direction: "request", needsLease: true },
   { name: "session.take_over", direction: "request", needsLease: false },
   { name: "session.release", direction: "request", needsLease: false },
@@ -477,6 +479,7 @@ export class GenieClient {
     unlock: (params: T.UnlockParams): Promise<T.OkResult> => this.t.request("secrets.unlock", params) as Promise<T.OkResult>,
   };
   readonly session = {
+    background_tool: (params: T.BackgroundToolParams): Promise<T.BackgroundToolResult> => this.t.request("session.background_tool", params) as Promise<T.BackgroundToolResult>,
     compact: (params: T.CompactParams): Promise<T.Empty> => this.t.request("session.compact", params) as Promise<T.Empty>,
     create: (params: T.CreateParams): Promise<T.CreateResult> => this.t.request("session.create", params) as Promise<T.CreateResult>,
     delete: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("session.delete", params) as Promise<T.Empty>,

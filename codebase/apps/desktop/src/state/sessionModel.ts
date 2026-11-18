@@ -48,6 +48,8 @@ export interface MessageView {
   parts: PartView[];
   /** What the user sent (attachments, skills) for admitted user messages. */
   input?: InputPart[];
+  /** Written by Genie, not the user (a background job finished …): shown as a notice. */
+  synthetic?: boolean;
   /** Assistant messages from `session.get`: tokens + cost of the step that produced it. */
   usage?: TurnUsage;
   rev: number;
@@ -152,6 +154,7 @@ function messageView(m: Message): MessageView {
     turnId: m.turn_id ?? null,
     model: m.model ?? null,
     createdAt: m.created_at,
+    synthetic: m.source === "synthetic",
     parts: m.parts.filter((p) => p.type !== "unknown").map(partView),
     ...(m.usage || m.cost
       ? {
@@ -239,6 +242,7 @@ export function applyEvent(model: SessionModel, env: SessionEventEnvelope): bool
       if (findMessage(model, e.message_id)) return false;
       const m = upsertMessage(model, e.message_id, "user", env, e.parent_id ?? null);
       m.input = e.parts;
+      m.synthetic = e.source === "synthetic";
       m.parts = e.parts
         .filter((p): p is Extract<InputPart, { type: "text" }> => p.type === "text")
         .map((p, i) => ({ id: `${e.message_id}:${i}`, kind: "text", text: p.text, json: "", final: { type: "text", id: `${e.message_id}:${i}`, text: p.text }, streaming: false }));

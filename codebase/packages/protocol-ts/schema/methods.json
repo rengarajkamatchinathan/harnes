@@ -218,6 +218,18 @@
     },
     {
       "direction": "request",
+      "ident": "SessionBackgroundTool",
+      "name": "session.background_tool",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/BackgroundToolParams"
+      },
+      "result": {
+        "$ref": "#/$defs/BackgroundToolResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "SessionResume",
       "name": "session.resume",
       "needs_lease": true,

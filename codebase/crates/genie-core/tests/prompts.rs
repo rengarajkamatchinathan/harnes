@@ -120,6 +120,10 @@ fn hidden_prompts() {
             prompts::compaction_prompt(Some("the API design")),
         ),
         (
+            "compaction_request",
+            prompts::compaction_prompt_with(None, Some("start the app")),
+        ),
+        (
             "subagent_report",
             render(
                 fragments::SUBAGENT_REPORT,
@@ -136,8 +140,14 @@ fn hidden_prompts() {
             "background_done",
             render(
                 fragments::BACKGROUND_DONE,
-                &[("id", "bg_1"), ("code", "0"), ("ref", "blob_x")],
-                &[],
+                &[
+                    ("id", "bg_1"),
+                    ("command", "bun run dev"),
+                    ("status", "exit code 0"),
+                    ("ref", "blob_x"),
+                    ("tail", "ready on :3000"),
+                ],
+                &["ref", "tail"],
             ),
         ),
         (

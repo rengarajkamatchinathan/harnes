@@ -244,6 +244,7 @@ fn ctx(gate: Arc<Gate>, turn: &str, cancel: CancellationToken) -> ToolCtx {
         call_id: "call".into(),
         tool_name: "web_fetch".into(),
         cancel,
+        detach: CancellationToken::new(),
         permissions: gate,
         events: Arc::new(NullSink),
     }

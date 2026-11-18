@@ -99,6 +99,9 @@ pub struct ToolCtx {
     pub tool_name: String,
     /// The call's token: a child of the turn token (01 §6).
     pub cancel: CancellationToken,
+    /// Cancelled when the user asks to move this call out of the foreground (ticket 43,
+    /// `session.background_tool`). Only `shell` acts on it; it never stops the call.
+    pub detach: CancellationToken,
     pub permissions: Arc<dyn PermissionGate>,
     pub events: Arc<dyn EventSink>,
 }

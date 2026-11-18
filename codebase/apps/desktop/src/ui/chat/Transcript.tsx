@@ -11,6 +11,7 @@ import type { MessageView, PartView, SessionModel, ToolView } from "../../state/
 import { siblingInfo } from "../../state/sessionModel";
 import type { SessionStore } from "../../state/session";
 import { useAppStatic } from "../context";
+import { GenieMark } from "../GenieMark";
 import { TextPart } from "./Markdown";
 import { headTail, resultText, summarizeTool, toolActivity, toolGroupSummary } from "./toolInfo";
 
@@ -39,6 +40,25 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.loading]);
 
+  // Rows that appear after the transcript has loaded ease in once; rows remounted by the
+  // virtualiser when scrolling back are not "new". Keys first seen > 600 ms ago never animate.
+  const born = useRef<Map<string, number> | null>(null);
+  if (!store.loading && born.current === null) born.current = new Map(items.map((r) => [r.key, 0]));
+  const now = performance.now();
+  if (born.current) for (const r of items) if (!born.current.has(r.key)) born.current.set(r.key, now);
+  const isNew = (key: string) => {
+    const t0 = born.current?.get(key);
+    return !!t0 && now - t0 < 600;
+  };
+  let lastAssistant = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const r = items[i];
+    if (r.kind === "msg" && r.msg.role === "assistant") {
+      lastAssistant = i;
+      break;
+    }
+  }
+
   const jumpToBottom = () => {
     const el = parentRef.current;
     if (!el) return;
@@ -66,7 +86,13 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
         {virt.getVirtualItems().map((vi) => {
           const row = items[vi.index];
           return (
-            <div key={vi.key} data-index={vi.index} ref={virt.measureElement} className="transcript__item" style={{ transform: `translateY(${vi.start}px)` }}>
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virt.measureElement}
+              className={`transcript__item${isNew(row.key) ? " is-new" : ""}${vi.index === lastAssistant && !busy ? " is-last" : ""}`}
+              style={{ transform: `translateY(${vi.start}px)` }}
+            >
               {row.kind === "msg" ? (
                 <MessageRow msg={row.msg} rev={row.msg.rev} store={store} model={model} tools={model.tools} busy={busy} compact={!!compact} onRewind={onRewind} />
               ) : (
@@ -100,6 +126,8 @@ const MessageRow = memo(
     const copy = () => void navigator.clipboard?.writeText(text);
     const isUser = msg.role === "user";
     const streaming = msg.parts.some((p) => p.streaming);
+
+    if (isUser && msg.synthetic) return <Notice text={text} />;
 
     if (isUser && editing)
       return (
@@ -226,6 +254,38 @@ function Thought({ part }: { part: PartView }) {
   );
 }
 
+/** Terminal colour codes, for notices stored before the engine stripped them. */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+
+/**
+ * A user-role message Genie wrote (a background job finished, a resume note): one quiet
+ * line with the details folded away, never a chat bubble in the user's name (ticket 44).
+ */
+function Notice({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const body = text.replace(ANSI, "").replace(/<\/?system-update>/g, "").trim();
+  const nl = body.indexOf("\n");
+  const head = nl < 0 ? body : body.slice(0, nl);
+  const rest = nl < 0 ? "" : body.slice(nl + 1).trim();
+  return (
+    <div className="divider notice" role="note">
+      <span className="notice__head">
+        {head}
+        {rest && (
+          <>
+            {" · "}
+            <button className="linklike" onClick={() => setOpen((o) => !o)}>
+              {open ? t("chat.hideDetails") : t("chat.showDetails")}
+            </button>
+          </>
+        )}
+      </span>
+      {open && rest && <pre className="divider__summary notice__body">{rest}</pre>}
+    </div>
+  );
+}
+
 function Compaction({ summary, native }: { summary: string | null; native: boolean }) {
   const [open, setOpen] = useState(false);
   return (
@@ -280,6 +340,7 @@ function findResult(model: SessionModel, tool: ToolView | undefined): Part | nul
 function ToolRow({ part, model, busy, compact, nested }: { part: PartView; model: SessionModel; busy: boolean; compact: boolean; nested?: boolean }) {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState(false);
+  const [moving, setMoving] = useState(false);
   const app = useAppStatic();
   const call = part.final?.type === "tool_call" ? part.final : null;
   const tool = call ? model.tools.get(call.call_id) : undefined;
@@ -338,6 +399,26 @@ function ToolRow({ part, model, busy, compact, nested }: { part: PartView; model
           <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
         </span>
       </button>
+      {running && name === "shell" && call && (
+        // A server or watcher never exits: let the user hand it to a background job so the
+        // turn continues (ticket 43). The daemon also does this when it sees a listening port.
+        <button
+          className="linklike tool__bg"
+          disabled={moving}
+          title={t("tool.moveToBackgroundHint")}
+          onClick={() => {
+            setMoving(true);
+            app.client.session
+              .background_tool({ session_id: model.sessionId, call_id: call.call_id })
+              .catch((e) => {
+                setMoving(false);
+                app.toast({ title: app.describeError(e), tone: "danger" });
+              });
+          }}
+        >
+          {t("tool.moveToBackground")}
+        </button>
+      )}
       {tool?.error && <div className="tool__error">{tool.error.message}</div>}
       {open && (
         <div className="tool__body">
@@ -410,7 +491,7 @@ export function TurnIndicator({ store }: { store: SessionStore }) {
     // While reply text streams, tuck the mark into the reply's reserved action row.
     <div className={`turn ${label ? "" : "turn--tuck"}`} role="status" aria-label={label || t("chat.statusRunning")}>
       <span className="turn__mark" aria-hidden>
-        <Icon name="sparkle" size={18} />
+        <GenieMark size={20} state="thinking" />
       </span>
       {label && <span className="turn__label">{label}</span>}
     </div>

@@ -59,6 +59,50 @@ pub fn head(text: &str, limits: OutputLimits) -> (&str, usize) {
     (&text[..end], n)
 }
 
+/// `text` without terminal escape sequences (colours, cursor moves, OSC titles and
+/// links). Dev servers and compilers colour their logs; the model and the transcript
+/// only need the words.
+pub fn strip_ansi(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('\u{1b}') {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut it = text.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            // CSI: parameters and intermediates, then one final byte in @..~.
+            Some('[') => {
+                for n in it.by_ref() {
+                    if ('@'..='~').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            // OSC: until BEL or ESC \.
+            Some(']') => {
+                while let Some(n) = it.next() {
+                    if n == '\u{7}' {
+                        break;
+                    }
+                    if n == '\u{1b}' {
+                        if it.peek() == Some(&'\\') {
+                            it.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            // Any other two-character escape (charset selection, keypad mode …).
+            _ => {}
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 pub fn line_count(text: &str) -> usize {
     if text.is_empty() {
         0
@@ -133,6 +177,23 @@ impl SpillStore for MemorySpill {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_ansi_removes_colours_and_osc() {
+        let log = "\u{1b}[2m2026-11-18T11:49:07Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[1mrequest\u{1b}[0m{\u{1b}[3mmethod\u{1b}[0m\u{1b}[2m=\u{1b}[0mGET}";
+        assert_eq!(
+            strip_ansi(log),
+            "2026-11-18T11:49:07Z  INFO request{method=GET}"
+        );
+        assert_eq!(
+            strip_ansi("\u{1b}]8;;http://x\u{7}link\u{1b}]8;;\u{1b}\\ ok"),
+            "link ok"
+        );
+        assert!(matches!(
+            strip_ansi("plain"),
+            std::borrow::Cow::Borrowed("plain")
+        ));
+    }
 
     #[test]
     fn small_output_passes_through() {

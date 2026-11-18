@@ -111,6 +111,10 @@ fn fixture() -> Fixture {
 
 impl Fixture {
     fn ctx(&self, cancel: CancellationToken) -> ToolCtx {
+        self.ctx_detach(cancel, CancellationToken::new())
+    }
+
+    fn ctx_detach(&self, cancel: CancellationToken, detach: CancellationToken) -> ToolCtx {
         let mut env = ToolEnv::new("ses", SessionKind::Code);
         env.services.spill = Some(self.spill.clone());
         ToolCtx {
@@ -119,6 +123,7 @@ impl Fixture {
             call_id: "call".into(),
             tool_name: "shell".into(),
             cancel,
+            detach,
             permissions: self.gate.clone(),
             events: Arc::new(NullSink),
         }
@@ -206,6 +211,94 @@ async fn timeout_moves_the_command_to_the_background() {
     assert_eq!((done.exit_code, done.killed), (Some(0), false));
     assert_eq!(done.code_text(), "0");
     assert!(done.output.contains("started\ndone"), "{}", done.output);
+    assert!(f.rt.running_jobs("ses").is_empty());
+}
+
+/// Ticket 43: a server started in the foreground leaves it as soon as it listens on a
+/// port, instead of blocking the turn until `timeout_ms`.
+#[tokio::test]
+async fn a_listening_server_moves_to_the_background() {
+    if std::process::Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    let f = fixture_with(ShellKind::Bash, "/bin/bash", |c| {
+        c.server_probe = Some(Duration::from_millis(200));
+    });
+    let server = "python3 -c \"import socket,time; s=socket.socket(); \
+                  s.bind(('127.0.0.1',0)); s.listen(); print('ready', flush=True); \
+                  time.sleep(60)\"";
+    let t0 = std::time::Instant::now();
+    let out = f
+        .run(json!({"command": server, "timeout_ms": 600_000}))
+        .await
+        .unwrap();
+    assert!(
+        t0.elapsed() < Duration::from_secs(15),
+        "took {:?}",
+        t0.elapsed()
+    );
+    assert!(
+        out.contains("The command is a server: it is listening on port"),
+        "{out}"
+    );
+    assert!(out.contains("as job bg_"), "{out}");
+    assert!(out.contains("ready"), "output so far: {out}");
+    assert_eq!(f.rt.running_jobs("ses").len(), 1, "it keeps running");
+    f.rt.end_session("ses");
+}
+
+/// Ticket 43: "Move to background" (`ctx.detach`) hands a running command to a job.
+#[tokio::test]
+async fn detach_moves_a_running_command_to_the_background() {
+    let f = fixture();
+    let detach = CancellationToken::new();
+    let d = detach.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        d.cancel();
+    });
+    let t0 = std::time::Instant::now();
+    let out = f
+        .tool
+        .execute(
+            json!({"command": "echo up; sleep 30", "timeout_ms": 600_000}),
+            f.ctx_detach(CancellationToken::new(), detach),
+        )
+        .await
+        .unwrap();
+    let ToolOutput::Text(out) = out else {
+        panic!("text output")
+    };
+    assert!(
+        t0.elapsed() < Duration::from_secs(5),
+        "took {:?}",
+        t0.elapsed()
+    );
+    assert!(
+        out.contains("The user moved the still-running command to the background"),
+        "{out}"
+    );
+    assert!(out.contains("up"), "output so far: {out}");
+    assert_eq!(f.rt.running_jobs("ses").len(), 1);
+    f.rt.end_session("ses");
+}
+
+/// Ordinary commands are not mistaken for servers.
+#[tokio::test]
+async fn quick_commands_still_return_their_output() {
+    let f = fixture_with(ShellKind::Bash, "/bin/bash", |c| {
+        c.server_probe = Some(Duration::from_millis(100));
+    });
+    let out = f
+        .run(json!({"command": "sleep 0.5; echo finished"}))
+        .await
+        .unwrap();
+    assert_eq!(out.trim(), "finished");
     assert!(f.rt.running_jobs("ses").is_empty());
 }
 

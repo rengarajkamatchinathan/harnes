@@ -16,11 +16,15 @@ describe("components", () => {
     expect(renderToStaticMarkup(<Ring value={0.5} label="Context 50%" />)).toContain('aria-label="Context 50%"');
   });
 
-  it("groups select options and shows locks", () => {
+  it("renders the select trigger with the current label, and shows locks", () => {
     const html = renderToStaticMarkup(
-      <Select value="a" options={[{ value: "a", label: "A", group: "P1" }, { value: "b", label: "B", group: "P2" }]} />,
+      <Select value="b" aria-label="Pick" options={[{ value: "a", label: "A", group: "P1" }, { value: "b", label: "Bee", group: "P2" }]} />,
     );
-    expect(html).toContain('<optgroup label="P1">');
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-label="Pick"');
+    expect(html).toContain(">Bee<");
+    // "" is a valid option value (Radix reserves it, so it is mapped internally).
+    expect(renderToStaticMarkup(<Select value="" options={[{ value: "", label: "None" }]} />)).toContain(">None<");
     const f = renderToStaticMarkup(
       <Field label="Theme" locked="Managed by Acme" error="bad">
         <input />

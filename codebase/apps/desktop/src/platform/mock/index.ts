@@ -162,11 +162,14 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         const callPart = uid("prt");
         const call_id = uid("call");
         publish(s, { type: "part.started", kind: "tool_call", message_id: msgId, part_id: callPart }, true, turn_id);
-        const part: Part = { type: "tool_call", id: callPart, call_id, name: "shell", input: { command: "ls -la" } };
+        const command = 'ps aux | egrep -i "vite|tauri" | head -20';
+        const cwd = s.info.workspace_id || "/Users/me/projects/app";
+        const part: Part = { type: "tool_call", id: callPart, call_id, name: "shell", input: { command } };
         assistant.parts.push(part);
         publish(s, { type: "part.ended", part_id: callPart, part }, true, turn_id);
-        publish(s, { type: "tool.started", call_id, name: "shell", resource: "ls -la" }, true, turn_id);
-        const ask: Ask = { id: uid("ask"), kind: "permission", session_id: s.info.session_id, created_at: now(), tool: "shell", resource: "ls -la", preview: { type: "command", command: "ls -la", cwd: "~" }, save_suggestions: [{ rule: "Bash(ls:*)", scope: "user" }], turn_id };
+        publish(s, { type: "tool.started", call_id, name: "shell", resource: `Bash(${command})` }, true, turn_id);
+        const scope = s.info.kind === "code" ? "local" : "user";
+        const ask: Ask = { id: uid("ask"), kind: "permission", session_id: s.info.session_id, created_at: now(), tool: "shell", resource: `Bash(${command})`, preview: { type: "command", command, cwd }, save_suggestions: [{ rule: "Bash(ps:*)", scope }, { rule: "Bash(egrep:*)", scope }], turn_id };
         publish(s, { type: "permission.asked", ask }, true, turn_id);
         setStatus(s, "awaiting_ask");
         const answer = await askUser(ask);
@@ -310,6 +313,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       s.running?.cancel();
       return { interrupted: was };
     },
+    "session.background_tool": () => ({ backgrounded: false }),
     "session.update": (p) => {
       const s = session(p.session_id);
       const { session_id: _ignored, ...changes } = p;

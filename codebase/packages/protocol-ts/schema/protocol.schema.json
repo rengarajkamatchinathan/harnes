@@ -470,6 +470,34 @@
         }
       ]
     },
+    "BackgroundToolParams": {
+      "description": "Move a running tool call out of the foreground (ticket 43). Only `shell` acts on it:\nthe command keeps running as a background job and the turn continues.",
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "call_id"
+      ],
+      "type": "object"
+    },
+    "BackgroundToolResult": {
+      "properties": {
+        "backgrounded": {
+          "description": "False when that call isn't running in the current turn.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "backgrounded"
+      ],
+      "type": "object"
+    },
     "BlobGetParams": {
       "properties": {
         "blob_id": {
@@ -3443,6 +3471,17 @@
         },
         "role": {
           "$ref": "#/$defs/Role"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MessageSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "User-role messages Genie wrote (`synthetic`: a background job finished, a resume\nnote …), so clients show them as notices, not as the user's words. Absent = the user."
         },
         "turn_id": {
           "type": [

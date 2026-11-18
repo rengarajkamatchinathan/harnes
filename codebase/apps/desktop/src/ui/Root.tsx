@@ -1,5 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { applyAppearance, Banner, Button, Card, Input, Spinner } from "@genie/ui";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { layoutFor, ShellContext, useWindowWidth, type ShellState } from "./shell";
+import { applyAppearance, Banner, Button, Card, Input } from "@genie/ui";
+import { GenieMark } from "./GenieMark";
 import { t } from "../i18n";
 import { preloadOnIdle } from "../markdown/markdown";
 import { useApp } from "./context";
@@ -86,9 +88,31 @@ export function Root() {
 function Shell() {
   const app = useApp();
   const { ui, status } = app;
+  const width = useWindowWidth();
+  const panelShown = ui.view !== "project" && ui.panelOpen;
+  const { narrow, overlay, panelWidth } = layoutFor(width, { sidebarWidth: ui.sidebarWidth, panelOpen: panelShown, panelWidth: ui.panelWidth });
+  const [drawerOpen, setDrawer] = useState(false);
+  // The drawer is transient: it closes when the layout widens or the user goes somewhere.
+  useEffect(() => {
+    if (!overlay) setDrawer(false);
+  }, [overlay]);
+  useEffect(() => setDrawer(false), [ui.activeSession, ui.activeProject, ui.view, ui.mode]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawer(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+  const sidebarHidden = overlay ? !drawerOpen : ui.sidebarCollapsed;
+  const shell = useMemo<ShellState>(() => ({ width, overlay, narrow, drawerOpen, setDrawer, sidebarHidden }), [width, overlay, narrow, drawerOpen, sidebarHidden]);
+  const cls = ["shell", overlay ? "shell--overlay" : ui.sidebarCollapsed ? "shell--collapsed" : "", overlay && drawerOpen ? "shell--drawer" : "", narrow ? "shell--narrow" : ""].filter(Boolean).join(" ");
   return (
-    <div className={`shell ${ui.sidebarCollapsed ? "shell--collapsed" : ""}`} style={{ ["--sidebar-w" as string]: `${ui.sidebarWidth}px`, ["--panel-w" as string]: `${ui.panelWidth}px` }}>
-      {!ui.sidebarCollapsed && <Sidebar />}
+    <ShellContext.Provider value={shell}>
+    <div className={cls} style={{ ["--sidebar-w" as string]: `${ui.sidebarWidth}px`, ["--panel-w" as string]: `${panelWidth}px` }}>
+      <div className="sidebar-slot">
+        <Sidebar hidden={sidebarHidden} />
+      </div>
+      {overlay && <div className="drawer-scrim" aria-hidden onClick={() => setDrawer(false)} />}
       <main className="main">
         {status.state === "reconnecting" && (
           <div className="top-banner">
@@ -104,10 +128,11 @@ function Shell() {
         )}
         {ui.view === "project" && ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />}
       </main>
-      {ui.view !== "project" && ui.panelOpen && <RightPanel />}
+      {panelShown && <RightPanel />}
       {ui.view === "settings" && <SettingsPage />}
       <Toasts />
     </div>
+    </ShellContext.Provider>
   );
 }
 
@@ -182,7 +207,7 @@ export function Splash({ text }: { text: string }) {
   return (
     <Center>
       <div className="row" role="status">
-        <Spinner />
+        <GenieMark size={28} state="thinking" />
         <span>{text}</span>
       </div>
     </Center>

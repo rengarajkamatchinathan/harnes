@@ -34,7 +34,7 @@ use crate::config::{ConfigHub, project_root};
 use crate::error::BlockSource;
 use crate::runtime::conversation::ConversationStore;
 use crate::runtime::ports::{
-    AuthzDecision, AuthzRequest, SessionSettings, SettingsSource, ToolAuthorizer, saved_rule,
+    AuthzDecision, AuthzRequest, SessionSettings, SettingsSource, ToolAuthorizer, saved_rules,
 };
 
 #[derive(Default)]
@@ -587,49 +587,54 @@ impl ToolAuthorizer for PermissionAuthorizer {
             self.record(&req.session_id, AuditEvent::PermissionDecided, attrs);
             return Vec::new();
         };
-        let Some(sugg) = saved_rule(&ask, answer) else {
+        let suggestions = saved_rules(&ask, answer);
+        if suggestions.is_empty() {
             self.record(&req.session_id, AuditEvent::PermissionDecided, attrs);
             return Vec::new();
-        };
+        }
         let mut ev = self.evaluator(&req.session_id, &s, req.mode);
-        let target = match ev.remember(&sugg) {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!(error = %e, rule = %sugg.rule, "cannot save an invalid rule");
-                self.record(&req.session_id, AuditEvent::PermissionDecided, attrs);
-                return Vec::new();
-            }
-        };
-        let Ok(rule) = Rule::parse(&sugg.rule) else {
-            return Vec::new();
-        };
-        let origin = match target {
-            SaveTarget::Session => Origin::Session,
-            SaveTarget::Settings(scope) => {
-                let root = Self::root(&s);
-                match self
-                    .hub
-                    .add_permission_rule(root.as_deref(), scope, "allow", &sugg.rule)
-                {
-                    Ok(_) => match scope {
-                        ConfigScope::Local => Origin::Local,
-                        _ => Origin::User,
-                    },
-                    Err(e) => {
-                        tracing::warn!(error = %e, rule = %sugg.rule, "saving the rule failed; kept for this session");
-                        Origin::Session
+        let root = Self::root(&s);
+        let mut saved: Vec<(Origin, Rule)> = Vec::new();
+        for sugg in &suggestions {
+            let target = match ev.remember(sugg) {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(error = %e, rule = %sugg.rule, "cannot save an invalid rule");
+                    continue;
+                }
+            };
+            let Ok(rule) = Rule::parse(&sugg.rule) else {
+                continue;
+            };
+            let origin = match target {
+                SaveTarget::Session => Origin::Session,
+                SaveTarget::Settings(scope) => {
+                    match self
+                        .hub
+                        .add_permission_rule(root.as_deref(), scope, "allow", &sugg.rule)
+                    {
+                        Ok(_) => match scope {
+                            ConfigScope::Local => Origin::Local,
+                            _ => Origin::User,
+                        },
+                        Err(e) => {
+                            tracing::warn!(error = %e, rule = %sugg.rule, "saving the rule failed; kept for this session");
+                            Origin::Session
+                        }
                     }
                 }
-            }
-        };
+            };
+            saved.push((origin, rule));
+        }
+        let saved_text: Vec<String> = saved.iter().map(|(_, r)| r.to_string()).collect();
         self.record(
             &req.session_id,
             AuditEvent::PermissionDecided,
-            attrs.with("saved_rule", sugg.rule.clone()),
+            attrs.with("saved_rule", saved_text.join(", ")),
         );
         let mut g = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let st = g.entry(req.session_id.clone()).or_default();
-        st.remembered.push((origin, rule));
+        st.remembered.extend(saved);
         let others: Vec<(String, Request)> = st
             .pending
             .iter()
@@ -677,6 +682,42 @@ mod tests {
         // Removing a saved rule drops every session's in-memory copy.
         assert!(a.forget_rule(None, "Bash(npm test:*)", false));
         assert!(a.remembered("s1").is_empty() && a.remembered("s2").is_empty());
+    }
+
+    #[test]
+    fn always_saves_every_suggested_rule_in_the_picked_scope() {
+        use genie_protocol::ask::SaveSuggestion;
+        use genie_protocol::common::RuleScope;
+        let mut ask = Ask::new("a1", "s1", AskKind::Permission, "");
+        ask.save_suggestions = vec![
+            SaveSuggestion {
+                rule: "Bash(ps:*)".into(),
+                scope: RuleScope::Local,
+            },
+            SaveSuggestion {
+                rule: "Bash(egrep:*)".into(),
+                scope: RuleScope::Local,
+            },
+        ];
+        let mut ans = AskAnswer::decision(Decision::Always);
+        let got = saved_rules(&ask, &ans);
+        assert_eq!(
+            got.iter()
+                .map(|s| (s.rule.as_str(), s.scope))
+                .collect::<Vec<_>>(),
+            [
+                ("Bash(ps:*)", RuleScope::Local),
+                ("Bash(egrep:*)", RuleScope::Local)
+            ]
+        );
+        ans.scope = Some(RuleScope::Session);
+        assert!(
+            saved_rules(&ask, &ans)
+                .iter()
+                .all(|s| s.scope == RuleScope::Session)
+        );
+        ask.save_suggestions.clear();
+        assert!(saved_rules(&ask, &ans).is_empty());
     }
 
     #[test]

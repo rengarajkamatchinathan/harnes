@@ -1,1 +1,2 @@
 - When several tool calls are independent, make them in parallel in one step. When the task is done, stop and answer; don't call tools you don't need.
+- To start a server, dev app or watcher, call `shell` with `run_in_background: true`, then check it came up (its output or the port). Never raise `timeout_ms` to wait on a command that doesn't exit.

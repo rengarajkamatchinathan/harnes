@@ -49,7 +49,10 @@ body {
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-instant) var(--ease);
+}
+.g-btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .g-btn:disabled {
   opacity: 0.5;
@@ -82,7 +85,7 @@ body {
   color: oklch(1 0 0);
 }
 .g-btn--sm {
-  height: calc(var(--control-h) - 6px);
+  height: calc(var(--control-h) - 4px);
   padding: 0 var(--space-2);
   font-size: var(--text-xs);
 }
@@ -91,7 +94,10 @@ body {
   padding: 0;
 }
 .g-btn--icon.g-btn--sm {
-  width: calc(var(--control-h) - 6px);
+  width: calc(var(--control-h) - 4px);
+}
+.g-btn--icon {
+  border-radius: var(--radius-md);
 }
 .g-btn-group {
   display: inline-flex;
@@ -133,6 +139,56 @@ body {
 .g-input,
 .g-select {
   height: var(--control-h);
+}
+.g-input,
+.g-textarea,
+.g-select {
+  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.g-input:focus,
+.g-textarea:focus {
+  outline: none;
+  border-color: var(--gray-8);
+  box-shadow: 0 0 0 3px oklch(0.6 0 0 / 0.16);
+}
+/* Select trigger: looks like an input, opens a custom list. */
+.g-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  text-align: left;
+  cursor: pointer;
+}
+.g-select:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.g-select[data-state="open"] {
+  border-color: var(--gray-8);
+}
+.g-select:disabled {
+  cursor: not-allowed;
+}
+.g-select__value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.g-select__chev {
+  display: inline-grid;
+  color: var(--text-muted);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.g-select[data-state="open"] .g-select__chev {
+  transform: rotate(180deg);
+}
+.g-select__list {
+  min-width: var(--radix-select-trigger-width);
+  max-height: min(360px, var(--radix-select-content-available-height));
+  overflow: auto;
 }
 .g-textarea {
   padding: var(--space-2) var(--space-3);
@@ -271,7 +327,8 @@ body {
   height: 14px;
   border-radius: 50%;
   background: oklch(1 0 0);
-  transition: transform var(--dur-fast) var(--ease);
+  transition: transform var(--dur-base) var(--ease-out);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
 }
 .g-switch__track[aria-checked="true"]::after {
   transform: translateX(14px);
@@ -356,8 +413,8 @@ body {
   background: var(--overlay);
   display: grid;
   place-items: center;
-  z-index: 100;
-  animation: g-fade var(--dur-base) var(--ease);
+  z-index: var(--z-dialog);
+  animation: g-fade var(--dur-base) var(--ease-out);
 }
 .g-dialog {
   width: min(520px, calc(100vw - 32px));
@@ -366,8 +423,9 @@ body {
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-pop);
   padding: var(--space-5);
+  animation: g-pop-in var(--dur-base) var(--ease-out);
 }
 .g-dialog__title {
   margin: 0 0 var(--space-3);
@@ -382,6 +440,22 @@ body {
 @keyframes g-fade {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+@keyframes g-pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes g-pop-down {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes g-pop-up {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes g-pop-out {
+  from { opacity: 1; }
+  to { opacity: 0; transform: scale(0.98); }
 }
 
 /* ---------- Tabs ---------- */
@@ -434,55 +508,116 @@ body {
   box-shadow: var(--shadow);
 }
 
-/* ---------- Menu ---------- */
+/* ---------- Menu / select list / tooltip (Radix; portalled to <body>) ---------- */
 .g-menu {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
 }
 .g-menu__list {
-  position: absolute;
-  z-index: 50;
-  min-width: 180px;
-  margin: 4px 0 0;
-  padding: var(--space-1);
-  list-style: none;
+  z-index: var(--z-popover);
+  min-width: 200px;
+  max-height: var(--radix-dropdown-menu-content-available-height, 70vh);
+  overflow: auto;
+  padding: 4px;
   background: var(--surface-raised);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  font-size: var(--text-sm);
+  color: var(--text);
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-select-content-transform-origin));
+  outline: none;
 }
-.g-menu__list--up {
-  bottom: 100%;
-  margin: 0 0 4px;
-}
-.g-menu__list--right {
-  right: 0;
-}
+.g-menu__list[data-state="open"][data-side="bottom"] { animation: g-pop-down var(--dur-fast) var(--ease-out); }
+.g-menu__list[data-state="open"][data-side="top"] { animation: g-pop-up var(--dur-fast) var(--ease-out); }
+.g-menu__list[data-state="closed"] { animation: g-pop-out var(--dur-instant) var(--ease-in); }
 .g-menu__item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 10px;
   width: 100%;
-  padding: 6px var(--space-2);
+  min-height: 32px;
+  padding: 6px 10px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   background: none;
   color: var(--text);
   font: inherit;
   font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
+  outline: none;
+  user-select: none;
 }
-.g-menu__item:hover:not(:disabled),
-.g-menu__item:focus-visible {
+.g-menu__item > .g-icon { color: var(--text-muted); }
+.g-menu__item[data-highlighted] {
   background: var(--surface-hover);
 }
-.g-menu__item:disabled {
+.g-menu__item[data-disabled] {
   color: var(--text-faint);
   cursor: not-allowed;
 }
-.g-menu__item--danger {
+.g-menu__item[data-disabled] > .g-icon { color: var(--text-faint); }
+.g-menu__item--danger,
+.g-menu__item--danger > .g-icon {
   color: var(--danger);
+}
+.g-menu__text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.g-menu__label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.g-menu__hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.g-menu__check {
+  display: inline-grid;
+  margin-left: auto;
+  color: var(--text);
+}
+.g-select__item { padding-right: 10px; }
+.g-menu__label {
+  padding: 6px 10px 4px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  user-select: none;
+}
+.g-menu__sep {
+  height: 1px;
+  margin: 4px -4px;
+  background: var(--border-subtle);
+}
+
+.g-tooltip {
+  z-index: var(--z-popover);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  box-shadow: var(--shadow);
+  user-select: none;
+  transform-origin: var(--radix-tooltip-content-transform-origin);
+  animation: g-fade var(--dur-fast) var(--ease-out);
+}
+.g-tooltip__kbd {
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Spinner / ring ---------- */

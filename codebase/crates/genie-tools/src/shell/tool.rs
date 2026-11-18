@@ -19,7 +19,7 @@ use tokio::time::Instant;
 
 use super::select::{Requested, ShellChoice, ShellKind};
 use super::{Inner, JobEntry, JobFinished, JobStarted, NAME, lock, permission_resource};
-use crate::output::line_count;
+use crate::output::{line_count, strip_ansi};
 use crate::registry::{parse_input, schema_of};
 use crate::tool::{
     Availability, PermissionRequest, SpillStore, Tool, ToolCtx, ToolEnv, ToolError, ToolKind,
@@ -41,10 +41,12 @@ struct Input {
     #[serde(default)]
     description: Option<String>,
     /// Milliseconds before a still-running command moves to the background (default
-    /// 120000, max 600000).
+    /// 120000, max 600000). Not for servers or watchers: use `run_in_background`.
     #[serde(default)]
     timeout_ms: Option<u64>,
-    /// Start in the background right away; you will be notified when it finishes.
+    /// Start in the background right away; you will be notified when it finishes. Use it
+    /// for anything that doesn't exit on its own: dev servers, `npm/bun run dev`,
+    /// `tauri dev`, watchers, `docker compose up`.
     #[serde(default)]
     run_in_background: Option<bool>,
     /// `bash` (Git Bash on Windows) or `powershell`. Default: the session's shell.
@@ -84,7 +86,9 @@ impl Tool for ShellTool {
              stdout and stderr combined; long output is cut to its head and tail with a ref \
              to read the rest. Commands still running after `timeout_ms` (default 2 min, \
              max 10 min) move to the background: you'll be notified when they finish, \
-             don't poll. Use `run_in_background` for servers and watchers. Prefer the \
+             don't poll. Anything that doesn't exit on its own (dev servers, `npm/bun run \
+             dev`, `tauri dev`, watchers) must use `run_in_background: true`, never a long \
+             `timeout_ms`: the call blocks until the timeout. Prefer the \
              dedicated read/search/edit tools over shell equivalents."
         ))
     }
@@ -181,16 +185,41 @@ impl Tool for ShellTool {
             call_id: ctx.call_id.clone(),
         };
         if input.run_in_background == Some(true) {
-            return self.background(child, out, job, None);
+            return self.background(child, out, job, Moved::Requested);
         }
 
         let timeout = input
             .timeout_ms
             .map_or(cfg.default_timeout, Duration::from_millis)
             .clamp(Duration::from_millis(100), cfg.max_timeout);
-        let outcome = child
-            .collect(&mut out, Some(Instant::now() + timeout), &ctx.cancel)
-            .await;
+        // Wait in short slices so a running command can leave the foreground early
+        // (ticket 43): the user asked (`ctx.detach`), or it started listening on a port.
+        let deadline = Instant::now() + timeout;
+        let can_move = cfg.jobs.is_some();
+        let probe_every = cfg.server_probe.filter(|_| can_move);
+        let mut next_probe = probe_every.map(|p| Instant::now() + p);
+        let outcome = loop {
+            let slice_end = (Instant::now() + SLICE).min(deadline);
+            let r = child.collect(&mut out, Some(slice_end), &ctx.cancel).await;
+            if !matches!(r, Ok(RunOutcome::TimedOut)) || Instant::now() >= deadline {
+                break r;
+            }
+            if can_move && ctx.detach.is_cancelled() {
+                return self.background(child, out, job, Moved::ByUser);
+            }
+            if let (Some(every), Some(at)) = (probe_every, next_probe)
+                && Instant::now() >= at
+            {
+                let probe = child.probe();
+                let ports = tokio::task::spawn_blocking(move || probe.listening_ports())
+                    .await
+                    .unwrap_or_default();
+                if !ports.is_empty() {
+                    return self.background(child, out, job, Moved::Listening(ports));
+                }
+                next_probe = Some(Instant::now() + every);
+            }
+        };
         match outcome {
             Err(e) => {
                 let _ = child.kill_tree();
@@ -206,7 +235,7 @@ impl Tool for ShellTool {
             }
             Ok(RunOutcome::TimedOut) => {
                 if cfg.jobs.is_some() {
-                    self.background(child, out, job, Some(timeout))
+                    self.background(child, out, job, Moved::TimedOut(timeout))
                 } else {
                     let _ = child.kill_tree();
                     let _ = child.wait().await;
@@ -242,6 +271,21 @@ impl Tool for ShellTool {
     }
 }
 
+/// How long one foreground wait slice lasts before checking `detach` and the ports.
+const SLICE: Duration = Duration::from_millis(250);
+
+/// Why a running command left the foreground.
+enum Moved {
+    /// `run_in_background: true`.
+    Requested,
+    /// Still running at `timeout_ms`.
+    TimedOut(Duration),
+    /// The user pressed "Move to background" (`session.background_tool`).
+    ByUser,
+    /// Its process tree started listening on these TCP ports.
+    Listening(Vec<u16>),
+}
+
 struct SideFiles {
     out: PathBuf,
     cwd: PathBuf,
@@ -271,7 +315,7 @@ impl ShellTool {
         mut child: PipeChild,
         mut out: OutputCollector,
         job: JobCtx,
-        after: Option<Duration>,
+        why: Moved,
     ) -> Result<ToolOutput, ToolError> {
         let inner = self.inner.clone();
         let Some(port) = inner.cfg.jobs.clone() else {
@@ -300,13 +344,30 @@ impl ShellTool {
             started: SystemTime::now(),
         });
         let so_far = out.summary();
-        let mut msg = match after {
-            Some(t) => format!(
+        let mut msg = match why {
+            Moved::TimedOut(t) => format!(
                 "The command is still running after {}s and moved to the background as job \
                  {id}.",
                 t.as_secs()
             ),
-            None => format!("Started in the background as job {id}."),
+            Moved::Requested => format!("Started in the background as job {id}."),
+            Moved::ByUser => format!(
+                "The user moved the still-running command to the background as job {id}. It \
+                 keeps running."
+            ),
+            Moved::Listening(ports) => {
+                let list = ports
+                    .iter()
+                    .map(u16::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let s = if ports.len() == 1 { "" } else { "s" };
+                format!(
+                    "The command is a server: it is listening on port{s} {list}. It keeps \
+                     running in the background as job {id}. Next time start servers with \
+                     `run_in_background: true`."
+                )
+            }
         };
         msg.push_str(" You'll be notified when it finishes; don't poll or sleep waiting for it.");
         if so_far.total_bytes > 0 {
@@ -316,7 +377,10 @@ impl ShellTool {
             } else {
                 tail
             };
-            msg.push_str(&format!("\nOutput so far (last lines):\n{shown}"));
+            msg.push_str(&format!(
+                "\nOutput so far (last lines):\n{}",
+                strip_ansi(&shown)
+            ));
         }
         let task_id = id.clone();
         inner.cfg.tasks.clone().spawn(async move {
@@ -483,9 +547,11 @@ async fn render(
     } else {
         match tokio::fs::read(&job.files.out).await {
             Ok(b) => String::from_utf8_lossy(&b).into_owned(),
-            Err(_) => return (summary.text(), None),
+            Err(_) => return (strip_ansi(&summary.text()).into_owned(), None),
         }
     };
+    // Colour codes are noise for the model and the transcript (ticket 44).
+    let full = strip_ansi(&full).into_owned();
     let total_lines = line_count(&full);
     let fits = summary.omitted_bytes == 0
         && full.len() <= cfg.head_bytes + cfg.tail_bytes

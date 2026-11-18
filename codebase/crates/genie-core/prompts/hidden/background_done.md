@@ -1,1 +1,3 @@
-<system-update>Background command {id} finished with exit code {code}. Output: {ref}</system-update>
+<system-update>Background command {id} (`{command}`) finished: {status}.{if ref} Full output: {ref}{/if}{if tail}
+Last lines of its output:
+{tail}{/if}</system-update>

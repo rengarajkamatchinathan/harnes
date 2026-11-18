@@ -146,6 +146,7 @@ impl Rig {
             call_id: format!("call-{tool}"),
             tool_name: tool.into(),
             cancel: CancellationToken::new(),
+            detach: CancellationToken::new(),
             permissions: self.gate.clone(),
             events: self.events.clone(),
         }
@@ -758,6 +759,7 @@ async fn real_chrome_smoke() {
         call_id: "c".into(),
         tool_name: tool.into(),
         cancel: CancellationToken::new(),
+        detach: CancellationToken::new(),
         permissions: gate.clone(),
         events: events.clone(),
     };

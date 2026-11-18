@@ -158,6 +158,10 @@ pub struct Message {
     /// Assistant messages: estimated cost of that step (D27).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<Cost>,
+    /// User-role messages Genie wrote (`synthetic`: a background job finished, a resume
+    /// note …), so clients show them as notices, not as the user's words. Absent = the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<crate::event::MessageSource>,
 }
 
 /// One row in the session list (02 §6.2, workspace feed).

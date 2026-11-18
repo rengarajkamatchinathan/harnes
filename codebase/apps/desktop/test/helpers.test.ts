@@ -3,6 +3,7 @@ import type { SessionSummary } from "@genie/protocol";
 import { BlockSplitter, renderSettled, renderTail, splitAll, withCitations } from "../src/markdown/markdown";
 import { coerce, controlFor, keySchema, sectionOf, uiKeys, matches } from "../src/ui/settings/schema";
 import { groupReads, headTail, summarizeTool } from "../src/ui/chat/toolInfo";
+import { describeRules, permissionHeading } from "../src/ui/chat/AskCard";
 import { keyAction } from "../src/ui/chat/Composer";
 import { groupByDate } from "../src/ui/Sidebar";
 import { formFields } from "../src/ui/chat/AskCard";
@@ -219,5 +220,24 @@ describe("streaming table head", () => {
     expect(completeTableHead("| a | b |\n|---|---|\n| 1 | 2 |")).toBe("| a | b |\n|---|---|\n| 1 | 2 |");
     expect(completeTableHead("plain text")).toBe("plain text");
     expect(renderTail("| Step | Cost |")).toContain("<table");
+  });
+});
+
+describe("permission card text", () => {
+  it("describes what an always saves in plain words", () => {
+    expect(describeRules(["Bash(ps:*)", "Bash(egrep:*)"])).toBe("don’t ask again for “ps” and “egrep” commands");
+    expect(describeRules(["Bash(npm run build)"])).toBe("don’t ask again for “npm run build”");
+    expect(describeRules(["Read(//etc/**)"])).toBe("allow reading “/etc/”");
+    expect(describeRules(["Edit(/src/**)"])).toBe("allow edits in “src/”");
+    expect(describeRules(["Edit(/**)"])).toBe("allow all edits");
+    expect(describeRules(["WebFetch(domain:docs.rs)"])).toBe("allow fetching from “docs.rs”");
+    expect(describeRules(["mcp__github__create_issue"])).toBe("always allow “create_issue”");
+    expect(describeRules(["Bash(ls:*)", "Read(//etc/**)"])).toBeNull();
+  });
+  it("titles asks by tool", () => {
+    const base = { id: "a", session_id: "s", kind: "permission" as const, created_at: "" };
+    expect(permissionHeading({ ...base, tool: "shell", preview: { type: "command", command: "ls", cwd: "/a/AIO" } })).toMatchObject({ title: "Run a command", sub: "in AIO" });
+    expect(permissionHeading({ ...base, tool: "edit", preview: { type: "diff", path: "/a/src/x.ts", unified: "" } })).toMatchObject({ title: "Edit x.ts", sub: "/a/src" });
+    expect(permissionHeading({ ...base, tool: "mcp__github__create_issue" })).toMatchObject({ title: "Use create_issue", sub: "from github" });
   });
 });

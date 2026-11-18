@@ -942,6 +942,13 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
                 interrupted: h.interrupt(),
             })
         }),
+        n if n == m::SessionBackgroundTool::NAME => params::<m::SessionBackgroundTool>(&r)
+            .and_then(|p| {
+                let h = leased_handle(state, conn, &p.session_id)?;
+                to_result(&sp::BackgroundToolResult {
+                    backgrounded: h.background_tool(&p.call_id),
+                })
+            }),
         n if n == m::SessionResume::NAME => params::<m::SessionResume>(&r).and_then(|p| {
             let h = leased_handle(state, conn, &p.session_id)?;
             h.resume().map_err(|e| e.to_rpc())?;

@@ -180,7 +180,9 @@ pub fn transcript(session_id: &str, path: &[Message]) -> Vec<String> {
     let mut out = vec![];
     let mut refs = vec![];
     for msg in path {
+        let synthetic = msg.source == Some(genie_protocol::event::MessageSource::Synthetic);
         let label = match msg.role {
+            Role::User if synthetic => "genie (notice)",
             Role::User => "you",
             Role::Assistant => "genie",
             Role::System => "system",
@@ -239,6 +241,7 @@ mod tests {
                 turn_id: None,
                 usage: None,
                 cost: None,
+                source: None,
             },
             Message {
                 id: "m2".into(),
@@ -264,6 +267,7 @@ mod tests {
                 turn_id: None,
                 usage: None,
                 cost: None,
+                source: None,
             },
         ];
         let t = transcript("ses_9", &path);

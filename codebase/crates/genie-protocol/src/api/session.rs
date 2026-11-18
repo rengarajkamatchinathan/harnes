@@ -224,6 +224,20 @@ pub struct InterruptResult {
     pub interrupted: bool,
 }
 
+/// Move a running tool call out of the foreground (ticket 43). Only `shell` acts on it:
+/// the command keeps running as a background job and the turn continues.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BackgroundToolParams {
+    pub session_id: String,
+    pub call_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BackgroundToolResult {
+    /// False when that call isn't running in the current turn.
+    pub backgrounded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ForkParams {
     pub session_id: String,

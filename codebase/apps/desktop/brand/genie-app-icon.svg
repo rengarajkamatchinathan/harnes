@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="1024" height="1024">
+  <title>Genie</title>
+  <rect x="0" y="0" width="200" height="200" rx="45" fill="#111827"/>
+  <g transform="translate(100 100) scale(.66) translate(-100 -100)">
+    <g fill="none" stroke="#F9FAFB" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><path d="M70 50 C55 50 58 62 58 78 C58 92 52 98 44 100 C52 102 58 108 58 122 C58 138 55 150 70 150"/><path d="M130 50 C145 50 142 62 142 78 C142 92 148 98 156 100 C148 102 142 108 142 122 C142 138 145 150 130 150"/></g>
+    <path fill="#A78BFA" d="M100 68 C104 90 110 96 132 100 C110 104 104 110 100 132 C96 110 90 104 68 100 C90 96 96 90 100 68 Z"/>
+  </g>
+</svg>

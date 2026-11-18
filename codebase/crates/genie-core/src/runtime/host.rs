@@ -94,6 +94,48 @@ impl EngineJobs {
     }
 }
 
+/// Lines of a finished job's output quoted in its notice; the rest is behind the ref.
+const DONE_TAIL_LINES: usize = 20;
+const DONE_LINE_CHARS: usize = 300;
+
+/// The `background_done` notice (ticket 44): what ran, how it ended, the last lines of
+/// its output and a ref to the full output. Never the whole log: a dev server's output
+/// can run to hundreds of lines, and the notice is shown in the chat.
+pub(crate) fn background_done_text(job: &JobFinished) -> String {
+    let status = match (job.killed, job.exit_code) {
+        (true, _) => "stopped by Genie".to_string(),
+        (false, Some(c)) => format!("exit code {c}"),
+        (false, None) => "terminated by a signal".to_string(),
+    };
+    let clip = |s: &str, n: usize| match s.char_indices().nth(n) {
+        Some((i, _)) => format!("{}…", &s[..i]),
+        None => s.to_string(),
+    };
+    let command = clip(job.command.lines().next().unwrap_or(""), 200);
+    let lines: Vec<&str> = job
+        .output
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    let tail = lines[lines.len().saturating_sub(DONE_TAIL_LINES)..]
+        .iter()
+        .map(|l| clip(l, DONE_LINE_CHARS))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut vars: Vec<(&str, &str)> =
+        vec![("id", &job.id), ("command", &command), ("status", &status)];
+    let mut flags = vec![];
+    if let Some(r) = job.output_ref.as_deref() {
+        vars.push(("ref", r));
+        flags.push("ref");
+    }
+    if !tail.is_empty() {
+        vars.push(("tail", &tail));
+        flags.push("tail");
+    }
+    prompts::render(fragments::BACKGROUND_DONE.trim_end(), &vars, &flags)
+}
+
 impl BackgroundJobs for EngineJobs {
     fn started(&self, job: &JobStarted) {
         if let Some(e) = self.engine.get() {
@@ -140,18 +182,7 @@ impl BackgroundJobs for EngineJobs {
                 tracing::warn!(error = %e, job = %job.id, "background_job row not updated");
             }
         }
-        let text = prompts::render(
-            fragments::BACKGROUND_DONE.trim_end(),
-            &[
-                ("id", &job.id),
-                ("code", &job.code_text()),
-                (
-                    "ref",
-                    job.output_ref.as_deref().unwrap_or(job.output.as_str()),
-                ),
-            ],
-            &[],
-        );
+        let text = background_done_text(&job);
         let Some(engine) = self.engine.get() else {
             return;
         };
@@ -163,5 +194,51 @@ impl BackgroundJobs for EngineJobs {
             }
             Err(d) => tracing::warn!(incident_id = %d.incident_id, "background_done: no session"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(
+        output: String,
+        exit_code: Option<i32>,
+        killed: bool,
+        output_ref: Option<&str>,
+    ) -> JobFinished {
+        JobFinished {
+            id: "bg_1".into(),
+            session_id: "ses".into(),
+            command: "cd app && bun run dev:app\necho second line".into(),
+            exit_code,
+            killed,
+            output,
+            output_ref: output_ref.map(str::to_string),
+            ended: std::time::SystemTime::now(),
+        }
+    }
+
+    #[test]
+    fn background_done_quotes_only_the_last_lines() {
+        let output: String = (1..=300).map(|i| format!("log line {i}\n")).collect();
+        let text = background_done_text(&job(output, Some(0), false, Some("blob_x")));
+        assert!(text.starts_with(
+            "<system-update>Background command bg_1 (`cd app && bun run dev:app`) finished: \
+             exit code 0. Full output: blob_x"
+        ));
+        assert!(text.contains("log line 281\n"), "{text}");
+        assert!(text.contains("log line 300</system-update>"), "{text}");
+        assert!(!text.contains("log line 280\n"), "{text}");
+    }
+
+    #[test]
+    fn background_done_without_output_or_ref() {
+        let text = background_done_text(&job(String::new(), None, true, None));
+        assert_eq!(
+            text,
+            "<system-update>Background command bg_1 (`cd app && bun run dev:app`) finished: \
+             stopped by Genie.</system-update>"
+        );
     }
 }

@@ -126,6 +126,20 @@ export interface AuthUrlResult {
 
 export type AutoResolver = ("rule" | "hook" | "policy" | "unknown") | "system";
 
+/**
+ * Move a running tool call out of the foreground (ticket 43). Only `shell` acts on it:
+ * the command keeps running as a background job and the turn continues.
+ */
+export interface BackgroundToolParams {
+  call_id: string;
+  session_id: string;
+}
+
+export interface BackgroundToolResult {
+  /** False when that call isn't running in the current turn. */
+  backgrounded: boolean;
+}
+
 export interface BlobGetParams {
   blob_id: string;
   len: number;
@@ -930,6 +944,11 @@ export interface Message {
   parent_id?: string | null;
   parts: Part[];
   role: Role;
+  /**
+   * User-role messages Genie wrote (`synthetic`: a background job finished, a resume
+   * note …), so clients show them as notices, not as the user's words. Absent = the user.
+   */
+  source?: MessageSource | null;
   turn_id?: string | null;
   /** Assistant messages: the tokens of the step that produced this message. */
   usage?: Usage | null;

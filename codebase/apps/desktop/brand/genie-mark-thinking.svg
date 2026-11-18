@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 30 140 140" width="140" height="140">
+  <title>Genie</title>
+  <style>
+    g, path { transform-box: fill-box; transform-origin: center; }
+    .l { animation: l .8s ease-in-out infinite; } .r { animation: r .8s ease-in-out infinite; }
+    .s { animation: spin 1.2s linear infinite; }
+    @keyframes l { 50% { transform: translateX(-7px); } }
+    @keyframes r { 50% { transform: translateX(7px); } }
+    @keyframes star { 0%,100% { transform: scale(.75) rotate(0deg); } 50% { transform: scale(1.15) rotate(90deg); } }
+    @keyframes spin { 0% { transform: rotate(0deg) scale(.9); } 50% { transform: rotate(180deg) scale(1.15); } 100% { transform: rotate(360deg) scale(.9); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+  <g fill="none" stroke="#111827" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path class="l" d="M70 50 C55 50 58 62 58 78 C58 92 52 98 44 100 C52 102 58 108 58 122 C58 138 55 150 70 150"/><path class="r" d="M130 50 C145 50 142 62 142 78 C142 92 148 98 156 100 C148 102 142 108 142 122 C142 138 145 150 130 150"/></g>
+  <path class="s" fill="#7C3AED" d="M100 74 C103 92 108 97 126 100 C108 103 103 108 100 126 C97 108 92 103 74 100 C92 97 97 92 100 74 Z"/>
+</svg>

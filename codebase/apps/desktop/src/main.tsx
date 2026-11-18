@@ -6,6 +6,7 @@ import "katex/dist/katex.min.css";
 import "@genie/ui/tokens.css";
 import "@genie/ui/ui.css";
 import "./app.css";
+import { UiProvider } from "@genie/ui";
 import { detectPlatform } from "./platform";
 import { App } from "./state/app";
 import { AppContext } from "./ui/context";
@@ -19,7 +20,9 @@ async function boot() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <AppContext.Provider value={app}>
-        <Root />
+        <UiProvider>
+          <Root />
+        </UiProvider>
       </AppContext.Provider>
     </StrictMode>,
   );

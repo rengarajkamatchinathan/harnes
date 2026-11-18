@@ -177,17 +177,21 @@ pub trait ToolAuthorizer: Send + Sync {
     }
 }
 
-/// The rule an `always` answer saves: the first save suggestion, in the scope the user
-/// picked (default: the suggestion's own scope). `None` when the ask had no suggestion.
-pub fn saved_rule(ask: &Ask, answer: &AskAnswer) -> Option<SaveSuggestion> {
-    let s = ask.save_suggestions.first()?;
-    Some(SaveSuggestion {
-        rule: s.rule.clone(),
-        scope: answer
-            .scope
-            .filter(|s| *s != genie_protocol::common::RuleScope::Unknown)
-            .unwrap_or(s.scope),
-    })
+/// The rules an `always` answer saves: **every** save suggestion (a compound command needs
+/// one rule per sub-command that asked, or the same command asks again next time), in the
+/// scope the user picked (default: each suggestion's own scope). Empty when the ask had no
+/// suggestion.
+pub fn saved_rules(ask: &Ask, answer: &AskAnswer) -> Vec<SaveSuggestion> {
+    let picked = answer
+        .scope
+        .filter(|s| *s != genie_protocol::common::RuleScope::Unknown);
+    ask.save_suggestions
+        .iter()
+        .map(|s| SaveSuggestion {
+            rule: s.rule.clone(),
+            scope: picked.unwrap_or(s.scope),
+        })
+        .collect()
 }
 
 /// A tool contributed at turn start by a dynamic source (MCP servers, extensions).

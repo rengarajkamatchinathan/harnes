@@ -19,6 +19,7 @@
 //! written against its documented semantics (KB ch.16), not copied.
 
 pub mod pipe;
+pub mod ports;
 #[cfg(feature = "pty")]
 pub mod pty;
 
@@ -93,6 +94,17 @@ impl ProcessTree {
         &mut self.child
     }
 
+    /// A handle for [`ports::TreeProbe::listening_ports`]. On Windows it snapshots the
+    /// job's process ids, so take a fresh one for each check.
+    pub fn probe(&self) -> ports::TreeProbe {
+        ports::TreeProbe {
+            #[cfg(unix)]
+            pgid: self.pgid,
+            #[cfg(windows)]
+            pids: self.job.process_ids(),
+        }
+    }
+
     /// Kill the child and all its descendants. Idempotent.
     pub fn kill_tree(&mut self) -> io::Result<()> {
         if self.killed {
@@ -165,8 +177,9 @@ mod windows {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
+        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+        TerminateJobObject,
     };
 
     pub const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
@@ -211,6 +224,35 @@ mod windows {
                 return Err(io::Error::last_os_error());
             }
             Ok(())
+        }
+
+        /// The ids of the processes in the job (up to 1024). Empty on error.
+        pub fn process_ids(&self) -> Vec<u32> {
+            // JOBOBJECT_BASIC_PROCESS_ID_LIST: two u32 counts, then ULONG_PTR ids.
+            const MAX: usize = 1024;
+            let header = 8usize.div_ceil(std::mem::size_of::<usize>());
+            let mut buf = vec![0usize; header + MAX];
+            let bytes = u32::try_from(std::mem::size_of_val(buf.as_slice())).unwrap_or(u32::MAX);
+            // SAFETY: the buffer is writable for `bytes` bytes and usize-aligned, as the
+            // struct requires; the call writes at most that much.
+            let ok = unsafe {
+                QueryInformationJobObject(
+                    self.0,
+                    JobObjectBasicProcessIdList,
+                    buf.as_mut_ptr().cast(),
+                    bytes,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                return vec![];
+            }
+            // SAFETY: the first 8 bytes are the two u32 counts written by the call.
+            let listed = unsafe { *buf.as_ptr().cast::<u32>().add(1) } as usize;
+            buf[header..header + listed.min(MAX)]
+                .iter()
+                .filter_map(|&p| u32::try_from(p).ok())
+                .collect()
         }
 
         pub fn terminate(&self) -> io::Result<()> {

@@ -6,7 +6,7 @@ use genie_protocol::message::{self as wm, InputPart, PartKind};
 use genie_providers::model::{FinishReason, Part, Role, ToolOutput, Usage};
 use serde_json::Value;
 
-use crate::runtime::conversation::StoredMessage;
+use crate::runtime::conversation::{MsgKind, StoredMessage};
 
 /// Part ids are `{message_id}.p{ordinal}`, so streamed events and `session.get` agree.
 pub fn part_id(message_id: &str, ordinal: usize) -> String {
@@ -152,6 +152,8 @@ pub fn message(m: &StoredMessage) -> wm::Message {
         turn_id: m.turn_id.clone(),
         usage: m.usage.as_ref().map(usage),
         cost: m.cost_usd.map(|usd| genie_protocol::common::Cost { usd }),
+        source: matches!(m.kind, MsgKind::Synthetic | MsgKind::SystemUpdate)
+            .then_some(genie_protocol::event::MessageSource::Synthetic),
         id,
     }
 }

@@ -87,6 +87,7 @@ impl T {
             call_id: "call".into(),
             tool_name: name.into(),
             cancel: CancellationToken::new(),
+            detach: CancellationToken::new(),
             permissions: self.gate.clone(),
             events: Arc::new(NullSink),
         };

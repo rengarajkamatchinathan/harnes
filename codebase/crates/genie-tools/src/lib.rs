@@ -19,7 +19,7 @@ pub mod shell;
 pub mod tool;
 pub mod web;
 
-pub use output::{Limited, MemorySpill, OutputLimits, apply_limits};
+pub use output::{Limited, MemorySpill, OutputLimits, apply_limits, strip_ansi};
 pub use registry::{ToolRegistry, ToolSpec, parse_input, schema_of};
 pub use tool::{
     AllowAll, Availability, BlockSource, EventSink, Features, MemoryEntry, MemoryPort, NullSink,
@@ -89,6 +89,7 @@ mod tests {
             call_id: "call".into(),
             tool_name: name.into(),
             cancel: CancellationToken::new(),
+            detach: CancellationToken::new(),
             permissions: Arc::new(AllowAll),
             events,
         }

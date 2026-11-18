@@ -221,11 +221,21 @@ mod tests {
     #[test]
     fn azure_deployment_of_newer_model_borrows_family_limits() {
         let c = crate::Catalog::bundled();
-        let e = azure_deployment(&c, "azure", "gpt-5.2-atg", "gpt-5.2", Protocol::OpenaiResponses);
+        let e = azure_deployment(
+            &c,
+            "azure",
+            "gpt-5.2-atg",
+            "gpt-5.2",
+            Protocol::OpenaiResponses,
+        );
         assert_eq!(e.wire_model_id, "gpt-5.2-atg");
         assert_eq!(e.display_name, "gpt-5.2-atg (gpt-5.2)");
         assert!(e.limited_info);
         assert!(e.pricing.is_none());
-        assert!(e.context_window > DEFAULT_CONTEXT, "inherits a gpt-5.x window, got {}", e.context_window);
+        assert!(
+            e.context_window > DEFAULT_CONTEXT,
+            "inherits a gpt-5.x window, got {}",
+            e.context_window
+        );
     }
 }

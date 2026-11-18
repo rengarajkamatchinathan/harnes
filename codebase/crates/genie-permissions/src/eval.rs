@@ -12,7 +12,9 @@ use genie_protocol::common::{ConfigScope, Mode, RuleScope, SessionKind};
 
 use crate::path::{NormPath, glob_match, is_absolute, normalize, wildcard};
 use crate::rule::{BrowserSpec, Matcher, Rule, RuleError, domain_matches, normalize_command};
-use crate::shell::{BuiltinReadOnly, ReadOnlyClassifier, ShellDialect, suggest_rule};
+use crate::shell::{
+    BuiltinReadOnly, ReadOnlyClassifier, ShellDialect, is_cd, path_operands, suggest_rule,
+};
 
 /// Rule class. Evaluation is by class, never by file order (06 §5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -391,8 +393,13 @@ pub fn effective_mode(kind: SessionKind, requested: Mode, policy: ModePolicy) ->
 }
 
 enum Target<'a> {
-    Cmd(ShellDialect, String),
-    Path { edit: bool, path: NormPath },
+    /// A sub-command: dialect, normalised text (for rules), raw text (for operands) and the
+    /// directory it runs in (after any earlier `cd` in the same command).
+    Cmd(ShellDialect, String, &'a str, Option<NormPath>),
+    Path {
+        edit: bool,
+        path: NormPath,
+    },
     Fetch(&'a str),
     Search,
     Mcp(&'a str, &'a str),
@@ -565,10 +572,10 @@ impl Evaluator {
             let scope = default_save_scope(self.ctx.session_kind);
             let mut save_suggestions: Vec<SaveSuggestion> = Vec::new();
             for t in missing {
-                if let Some(rule) = self.suggest(t)
-                    && !save_suggestions.iter().any(|s| s.rule == rule)
-                {
-                    save_suggestions.push(SaveSuggestion { rule, scope });
+                for rule in self.suggest(t) {
+                    if !save_suggestions.iter().any(|s| s.rule == rule) {
+                        save_suggestions.push(SaveSuggestion { rule, scope });
+                    }
                 }
             }
             return Verdict::Ask {
@@ -611,15 +618,35 @@ impl Evaluator {
                 dialect,
                 command,
                 parts,
-                ..
-            } => match parts {
-                Some(p) if !p.is_empty() => p
-                    .iter()
-                    .map(|c| Target::Cmd(*dialect, normalize_command(c)))
-                    .collect(),
-                // Unparseable: deny/ask rules still see the raw text.
-                _ => vec![Target::Cmd(*dialect, normalize_command(command))],
-            },
+                cwd,
+            } => {
+                let mut cur = cwd
+                    .as_deref()
+                    .or(self.ctx.workspace_roots.first().map(String::as_str))
+                    .map(|c| self.norm(c));
+                match parts {
+                    Some(p) if !p.is_empty() => p
+                        .iter()
+                        .map(|c| {
+                            let t = Target::Cmd(*dialect, normalize_command(c), c, cur.clone());
+                            // Later parts run where a `cd` went (`cd x && cat y`).
+                            if is_cd(*dialect, c)
+                                && let Some(dest) = path_operands(*dialect, c).first()
+                            {
+                                cur = Some(self.resolve_operand(dest, cur.as_ref()));
+                            }
+                            t
+                        })
+                        .collect(),
+                    // Unparseable: deny/ask rules still see the raw text.
+                    _ => vec![Target::Cmd(
+                        *dialect,
+                        normalize_command(command),
+                        command,
+                        cur,
+                    )],
+                }
+            }
             Action::Read { path } => vec![Target::Path {
                 edit: false,
                 path: self.norm(path),
@@ -654,7 +681,7 @@ impl Evaluator {
 
     fn matches(&self, rule: &Rule, t: &Target<'_>) -> bool {
         match (&rule.matcher, t) {
-            (Matcher::Shell { posix, pattern }, Target::Cmd(d, cmd)) => {
+            (Matcher::Shell { posix, pattern }, Target::Cmd(d, cmd, ..)) => {
                 *posix == (*d == ShellDialect::Posix)
                     && pattern
                         .as_ref()
@@ -719,6 +746,59 @@ impl Evaluator {
         }
     }
 
+    /// A command operand as an absolute path: `~` is the home directory, relative paths
+    /// resolve against the directory the command runs in. Anything that can't be resolved
+    /// (`~user`, no home, no cwd) becomes `/`, which is outside every workspace.
+    fn resolve_operand(&self, op: &str, cwd: Option<&NormPath>) -> NormPath {
+        let ci = self.ctx.case_insensitive_paths;
+        let outside = || NormPath::new("/", ci);
+        if let Some(rest) = op.strip_prefix('~') {
+            if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
+                return outside();
+            }
+            return match &self.ctx.home {
+                Some(h) => NormPath::new(h, ci).join(rest.trim_start_matches(['/', '\\']), ci),
+                None => outside(),
+            };
+        }
+        if is_absolute(op) {
+            return NormPath::new(op, ci);
+        }
+        match cwd {
+            Some(c) => c.join(op, ci),
+            None => outside(),
+        }
+    }
+
+    /// Path operands of a read-only command that keep it from running without a prompt:
+    /// outside the workspace + additional directories (and not covered by a `Read` allow
+    /// rule), or matched by a `Read` deny rule. `true` = blocked by a deny rule.
+    fn operand_problems(
+        &self,
+        d: ShellDialect,
+        raw: &str,
+        cwd: Option<&NormPath>,
+    ) -> Vec<(NormPath, bool)> {
+        path_operands(d, raw)
+            .iter()
+            .filter_map(|op| {
+                let path = self.resolve_operand(op, cwd);
+                let t = Target::Path {
+                    edit: false,
+                    path: path.clone(),
+                };
+                if self.find(RuleClass::Deny, &t, |_| true).is_some() {
+                    return Some((path, true));
+                }
+                let ok = self.in_workspace(&path)
+                    || self
+                        .find(RuleClass::Allow, &t, |o| o != Origin::Policy)
+                        .is_some();
+                (!ok).then_some((path, false))
+            })
+            .collect()
+    }
+
     fn in_workspace(&self, p: &NormPath) -> bool {
         self.ctx
             .workspace_roots
@@ -756,10 +836,9 @@ impl Evaluator {
             });
         }
         match t {
-            Target::Cmd(d, c) => self
-                .classifier
-                .is_read_only(*d, c)
-                .then_some(AllowedBy::ReadOnly),
+            Target::Cmd(d, c, raw, cwd) => (self.classifier.is_read_only(*d, c)
+                && self.operand_problems(*d, raw, cwd.as_ref()).is_empty())
+            .then_some(AllowedBy::ReadOnly),
             Target::Path { edit: false, path } => {
                 self.in_workspace(path).then_some(AllowedBy::ReadOnly)
             }
@@ -781,7 +860,7 @@ impl Evaluator {
 
     fn taint_applies(&self, t: &Target<'_>, action: &Action, taint: &Taint) -> bool {
         match t {
-            Target::Cmd(d, c) => !self.classifier.is_read_only(*d, c),
+            Target::Cmd(d, c, ..) => !self.classifier.is_read_only(*d, c),
             Target::Path { edit: true, path } => !self.in_workspace(path),
             Target::Path { edit: false, .. } | Target::Search | Target::Other(..) => false,
             Target::Mcp(..) => !matches!(
@@ -807,9 +886,30 @@ impl Evaluator {
         }
     }
 
-    fn suggest(&self, t: &Target<'_>) -> Option<String> {
-        Some(match t {
-            Target::Cmd(d, c) => return suggest_rule(*d, c),
+    /// The rules an "always" saves so that `t` passes next time. A read-only command that
+    /// only asked because of a path outside the workspace gets `Read(//dir/**)` for that
+    /// directory instead of a blanket `Bash(cd:*)` / `Bash(cat:*)`.
+    fn suggest(&self, t: &Target<'_>) -> Vec<String> {
+        match t {
+            Target::Cmd(d, c, raw, cwd) => {
+                if self.classifier.is_read_only(*d, c) {
+                    let problems = self.operand_problems(*d, raw, cwd.as_ref());
+                    if !problems.is_empty() {
+                        let dir_operands = is_cd(*d, raw) || lists_dirs(*d, c);
+                        return problems
+                            .into_iter()
+                            // Never offer a rule for a path a deny rule covers, or for `/`.
+                            .filter(|(_, denied)| !denied)
+                            .filter_map(|(p, _)| {
+                                let dir = if dir_operands { p } else { p.parent() };
+                                let abs = dir.as_str().trim_matches('/');
+                                (!abs.is_empty()).then(|| format!("Read(//{abs}/**)"))
+                            })
+                            .collect();
+                    }
+                }
+                suggest_rule(*d, c).into_iter().collect()
+            }
             Target::Path { edit, path } => {
                 let tool = if *edit { "Edit" } else { "Read" };
                 let dir = path.parent();
@@ -819,7 +919,7 @@ impl Evaluator {
                     .iter()
                     .map(|r| self.norm(r))
                     .find(|r| dir.starts_with(r));
-                match root {
+                vec![match root {
                     Some(r) => {
                         let rel = dir.as_str()[r.as_str().trim_end_matches('/').len()..]
                             .trim_start_matches('/');
@@ -837,14 +937,27 @@ impl Evaluator {
                             format!("{tool}(//{abs}/**)")
                         }
                     }
-                }
+                }]
             }
-            Target::Fetch(host) => format!("WebFetch(domain:{})", host.to_ascii_lowercase()),
-            Target::Search => "WebSearch".to_string(),
-            Target::Mcp(s, t) => format!("mcp__{s}__{t}"),
-            Target::Browser(site, _) => format!("Browser(site:{})", site.to_ascii_lowercase()),
-            Target::Other(t, _, _) => (*t).to_string(),
-        })
+            Target::Fetch(host) => vec![format!("WebFetch(domain:{})", host.to_ascii_lowercase())],
+            Target::Search => vec!["WebSearch".to_string()],
+            Target::Mcp(s, t) => vec![format!("mcp__{s}__{t}")],
+            Target::Browser(site, _) => {
+                vec![format!("Browser(site:{})", site.to_ascii_lowercase())]
+            }
+            Target::Other(t, _, _) => vec![(*t).to_string()],
+        }
+    }
+}
+
+/// Commands whose operands are usually directories (`ls dir`, `find dir`).
+fn lists_dirs(d: ShellDialect, cmd: &str) -> bool {
+    let first = cmd.split(' ').next().unwrap_or("").to_ascii_lowercase();
+    match d {
+        ShellDialect::Posix => matches!(first.as_str(), "ls" | "tree" | "du" | "df" | "find"),
+        ShellDialect::PowerShell => {
+            matches!(first.as_str(), "get-childitem" | "gci" | "dir" | "ls")
+        }
     }
 }
 

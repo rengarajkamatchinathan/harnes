@@ -70,7 +70,7 @@ const DEFAULT_UI: UiState = {
   panelOpen: false,
   panelTab: "artifact",
   panelWidth: 420,
-  sidebarWidth: 272,
+  sidebarWidth: 280,
   incognito: false,
   appearance: DEFAULT_APPEARANCE,
   firstRunDone: false,

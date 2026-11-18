@@ -1,14 +1,16 @@
 // Left sidebar (05 §2.1, §3.1, D54): title-bar strip (sidebar toggle, back/forward, Chat/Code
 // switch), nav rows (New, Search, Projects, Customize), foldable Pinned/Chats sections (Chat) or
 // sessions grouped by repo (Code), row actions, ⌘K search palette, profile footer.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { SessionSummary } from "@genie/protocol";
 import { Badge, Button, Dialog, Icon, IconButton, Input, Menu, Select, Switch, type MenuItem } from "@genie/ui";
 import { t } from "../i18n";
 import type { App } from "../state/app";
 import { useApp } from "./context";
+import { GenieMark } from "./GenieMark";
 import { NewCodeSession } from "./code/NewCodeSession";
+import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useShell } from "./shell";
 
 export type DateGroup = "pinned" | "today" | "yesterday" | "week" | "older";
 
@@ -33,13 +35,23 @@ export function groupByDate(items: SessionSummary[], now: Date = new Date()): [D
 
 const STATUS_TONE: Record<string, string> = { running: "dot--running", awaiting_ask: "dot--ask", paused: "dot--ask", interrupted: "dot--interrupted", compacting: "dot--running", interrupting: "dot--running" };
 
-/** Sidebar toggle, back/forward and the Chat/Code switch, in the window's title-bar strip. */
+/** Is any session doing work right now? Drives the title-bar mark's "thinking" state. */
+const WORKING = new Set(["running", "compacting", "interrupting"]);
+
+/** Genie mark, sidebar toggle, back/forward and the Chat/Code switch, in the window's title-bar strip. */
 export function TitlebarControls() {
   const app = useApp();
   const { ui } = app;
+  const shell = useShell();
+  const working = [...app.sessions.values()].some((s) => WORKING.has(s.status));
+  // Inline sidebar: collapse/expand (persisted). Overlay layout: open/close the drawer.
+  const toggle = () => (shell.overlay ? shell.setDrawer(!shell.drawerOpen) : app.setUi({ sidebarCollapsed: !ui.sidebarCollapsed }));
   return (
     <div className="titlebar__controls">
-      <IconButton icon="sidebar" size="sm" label={t("sidebar.toggle")} onClick={() => app.setUi({ sidebarCollapsed: !ui.sidebarCollapsed })} />
+      <span className="titlebar__mark" title="Genie" data-tauri-drag-region>
+        <GenieMark size={20} state={working ? "thinking" : "idle"} />
+      </span>
+      <IconButton icon="sidebar" size="sm" label={t("sidebar.toggle")} shortcut={isMac() ? "⌘." : "Ctrl+."} onClick={toggle} />
       <IconButton icon="chevronLeft" size="sm" label={t("sidebar.back")} disabled={!app.canGoBack} onClick={() => app.goBack()} />
       <IconButton icon="chevronRight" size="sm" label={t("sidebar.forward")} disabled={!app.canGoForward} onClick={() => app.goForward()} />
       <div className="modeswitch" role="group" aria-label="Mode">
@@ -72,11 +84,11 @@ function Section({ id, title, children, action }: { id: string; title: string; c
       <div className="sidebar__heading">
         <button className="sidebar__fold" aria-expanded={!folded} onClick={toggle}>
           <span className="sidebar__heading-text">{title}</span>
-          <Icon name={folded ? "chevronRight" : "chevronDown"} size={12} />
+          <Icon name="chevronDown" size={12} />
         </button>
         {action}
       </div>
-      {!folded && children}
+      {!folded && <div className="sidebar__section-body">{children}</div>}
     </section>
   );
 }
@@ -87,9 +99,54 @@ export function initials(name: string) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
-export function Sidebar() {
+const isMac = () => typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+
+/** Drag the sidebar's right edge to resize it; double-click resets; arrow keys step by 16 px. */
+function SidebarResize() {
+  const app = useApp();
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  const clamp = (w: number) => Math.round(Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, w)));
+  const shellEl = () => document.querySelector<HTMLElement>(".shell");
+  return (
+    <div
+      className="sidebar__resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t("sidebar.resize")}
+      aria-valuemin={SIDEBAR_MIN}
+      aria-valuemax={SIDEBAR_MAX}
+      aria-valuenow={app.ui.sidebarWidth}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft") app.setUi({ sidebarWidth: clamp(app.ui.sidebarWidth - 16) });
+        if (e.key === "ArrowRight") app.setUi({ sidebarWidth: clamp(app.ui.sidebarWidth + 16) });
+      }}
+      onDoubleClick={() => app.setUi({ sidebarWidth: SIDEBAR_DEFAULT })}
+      onPointerDown={(e) => {
+        drag.current = { x: e.clientX, w: app.ui.sidebarWidth };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        shellEl()?.classList.add("shell--resizing");
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return;
+        // Live-update the CSS variable; commit to state (and state.json) on release.
+        shellEl()?.style.setProperty("--sidebar-w", `${clamp(drag.current.w + e.clientX - drag.current.x)}px`);
+      }}
+      onPointerUp={(e) => {
+        if (!drag.current) return;
+        const w = clamp(drag.current.w + e.clientX - drag.current.x);
+        drag.current = null;
+        shellEl()?.classList.remove("shell--resizing");
+        app.setUi({ sidebarWidth: w });
+      }}
+    />
+  );
+}
+
+export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const app = useApp();
   const { ui } = app;
+  const shell = useShell();
   const [search, setSearch] = useState(false);
   const [newCode, setNewCode] = useState<string | null>(null);
   const [newProject, setNewProject] = useState(false);
@@ -101,6 +158,10 @@ export function Sidebar() {
       if (e.key === "k") {
         e.preventDefault();
         setSearch(true);
+      } else if (e.key === ".") {
+        e.preventDefault();
+        if (shell.overlay) shell.setDrawer(!shell.drawerOpen);
+        else app.setUi({ sidebarCollapsed: !app.ui.sidebarCollapsed });
       } else if (e.key === "n") {
         e.preventDefault();
         app.setUi({ activeSession: null, view: "main", activeProject: null });
@@ -108,7 +169,7 @@ export function Sidebar() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [app]);
+  }, [app, shell]);
 
   const items = useMemo(() => [...app.sessions.values()].filter((s) => s.kind === ui.mode && !s.archived), [app.sessions, ui.mode]);
   const isNew = ui.view === "main" && !ui.activeSession;
@@ -116,7 +177,7 @@ export function Sidebar() {
   const name = app.userName || t("sidebar.you");
 
   return (
-    <nav className="sidebar" aria-label="Sidebar">
+    <nav className="sidebar" aria-label="Sidebar" inert={hidden} aria-hidden={hidden || undefined}>
       <div className="titlebar" data-tauri-drag-region>
         <TitlebarControls />
       </div>
@@ -162,6 +223,7 @@ export function Sidebar() {
         <IconButton icon="settings" size="sm" label={t("sidebar.settings")} onClick={() => app.setUi({ view: "settings" })} />
       </div>
 
+      {!shell.overlay && <SidebarResize />}
       {search && <SearchDialog onClose={() => setSearch(false)} />}
       {newCode !== null && <NewCodeSession initialPath={newCode || undefined} onClose={() => setNewCode(null)} />}
       {newProject && <NewProject onClose={() => setNewProject(false)} />}

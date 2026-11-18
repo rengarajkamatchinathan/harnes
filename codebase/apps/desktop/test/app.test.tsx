@@ -53,8 +53,12 @@ describe("app over the mock platform", () => {
         <AskCard ask={ask} onAnswer={async () => {}} />
       </AppContext.Provider>,
     );
-    expect(html).toContain("Allow once");
-    expect(html).toContain("ls -la");
+    expect(html).toContain("Run a command");
+    expect(html).toContain("Do you want to proceed?");
+    expect(html).toContain("ps aux");
+    // Both rules the command needs are named in the "always" choice.
+    expect(html).toMatch(/don\u2019t ask again for \u201Cps\u201D and \u201Cegrep\u201D commands/);
+    expect(html).toContain("No, and tell Genie what to do differently");
 
     await s.answer(ask, { decision: "once" });
     await until(() => s.model.status === "idle" && s.model.asks.size === 0);

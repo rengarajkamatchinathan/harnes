@@ -399,6 +399,28 @@ impl Note {
 }
 simple_tool!(Note, "note", ToolKind::Mutating);
 
+/// `note` as an external tool (MCP-like): external calls still run in parallel, so their
+/// approval asks can be pending together.
+struct NoteExt;
+impl NoteExt {
+    async fn run(&self, t: String, ctx: ToolCtx) -> Result<ToolOutput, ToolError> {
+        Note.run(t, ctx).await
+    }
+}
+simple_tool!(NoteExt, "note", ToolKind::External);
+
+/// Mutating tool that logs when it starts and ends (ticket 45).
+struct Slow(Arc<std::sync::Mutex<Vec<String>>>);
+impl Slow {
+    async fn run(&self, t: String, _ctx: ToolCtx) -> Result<ToolOutput, ToolError> {
+        self.0.lock().unwrap().push(format!("start {t}"));
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        self.0.lock().unwrap().push(format!("end {t}"));
+        Ok(ToolOutput::Text(format!("did {t}")))
+    }
+}
+simple_tool!(Slow, "slow", ToolKind::Mutating);
+
 struct Gate(Arc<Notify>);
 impl Gate {
     async fn run(&self, _t: String, _ctx: ToolCtx) -> Result<ToolOutput, ToolError> {
@@ -417,6 +439,16 @@ impl Big {
     }
 }
 simple_tool!(Big, "big", ToolKind::ReadOnly);
+
+struct Mid;
+impl Mid {
+    async fn run(&self, _t: String, _ctx: ToolCtx) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::Text(
+            (1..=150).map(|i| format!("row {i}\n")).collect(),
+        ))
+    }
+}
+simple_tool!(Mid, "mid", ToolKind::ReadOnly);
 
 // ------------------------------------------------------------------ tests
 
@@ -600,6 +632,126 @@ async fn mutating_tool_asks_and_a_declined_call_reaches_the_model_as_feedback() 
         "The user declined this tool call and said: not that one"
     );
     assert_eq!(second["is_error"], true);
+}
+
+/// Ticket 45: a step's mutating calls run one at a time, in the model's order.
+#[tokio::test]
+async fn mutating_calls_in_one_step_run_one_at_a_time_in_order() {
+    let log = Arc::new(std::sync::Mutex::new(vec![]));
+    let mut h = harness(
+        vec![
+            reply(
+                &[
+                    tool_block(0, "toolu_a", "slow", json!({"text": "a"})),
+                    tool_block(1, "toolu_b", "slow", json!({"text": "b"})),
+                    tool_block(2, "toolu_c", "slow", json!({"text": "c"})),
+                ],
+                "tool_use",
+            ),
+            text(&["done"]),
+        ],
+        |_| {},
+        vec![Arc::new(Slow(log.clone()))],
+        None,
+    );
+    h.s.prompt("do three things", Delivery::Steer).unwrap();
+    let ev = h.settle().await;
+    assert_eq!(settled(&ev).status, TurnStatus::Completed);
+    assert_eq!(
+        *log.lock().unwrap(),
+        ["start a", "end a", "start b", "end b", "start c", "end c"]
+    );
+}
+
+/// Ticket 45: declining one mutating call skips the dependent ones after it in the
+/// same step, instead of asking for each.
+#[tokio::test]
+async fn a_declined_call_skips_the_mutating_calls_after_it() {
+    let mut h = harness(
+        vec![
+            reply(
+                &[
+                    tool_block(0, "toolu_a", "note", json!({"text": "x"})),
+                    tool_block(1, "toolu_b", "note", json!({"text": "y"})),
+                ],
+                "tool_use",
+            ),
+            text(&["ok"]),
+        ],
+        |_| {},
+        vec![Arc::new(Note)],
+        None,
+    );
+    let _attached = h.s.attach();
+    h.s.prompt("save notes", Delivery::Steer).unwrap();
+    let ev = h
+        .until(|e| matches!(e, SessionEvent::PermissionAsked(_)))
+        .await;
+    let SessionEvent::PermissionAsked(a) = ev.last().unwrap() else {
+        unreachable!()
+    };
+    let mut ans = AskAnswer::decision(Decision::Reject);
+    ans.message = Some("use another port".into());
+    h.s.answer_ask(&a.ask.id, serde_json::to_value(ans).unwrap())
+        .unwrap();
+    let ev = h.settle().await;
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, SessionEvent::PermissionAsked(_))),
+        "the second call does not ask"
+    );
+    let outcomes: Vec<ToolOutcome> = ev
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::ToolEnded(t) => Some(t.outcome),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(outcomes, [ToolOutcome::Declined, ToolOutcome::Error]);
+    let next = serde_json::to_string(&h.bodies()[1]["messages"]).unwrap();
+    assert!(next.contains("use another port"), "{next}");
+    assert!(
+        next.contains("Not run: the user declined an earlier tool call"),
+        "{next}"
+    );
+}
+
+#[tokio::test]
+async fn a_plain_deny_ends_the_turn_and_waits_for_the_user() {
+    let mut h = harness(
+        vec![
+            reply(
+                &[tool_block(0, "toolu_a", "note", json!({"text": "x"}))],
+                "tool_use",
+            ),
+            text(&["I'll try something else"]),
+        ],
+        |_| {},
+        vec![Arc::new(Note)],
+        None,
+    );
+    let _attached = h.s.attach();
+    h.s.prompt("save notes", Delivery::Steer).unwrap();
+    let ev = h
+        .until(|e| matches!(e, SessionEvent::PermissionAsked(_)))
+        .await;
+    let SessionEvent::PermissionAsked(a) = ev.last().unwrap() else {
+        unreachable!()
+    };
+    h.s.answer_ask(
+        &a.ask.id,
+        serde_json::to_value(AskAnswer::decision(Decision::Reject)).unwrap(),
+    )
+    .unwrap();
+    let ev = h.settle().await;
+    assert_eq!(settled(&ev).status, TurnStatus::Completed);
+    // The model is not called again after the deny (Claude's "No").
+    assert_eq!(h.bodies().len(), 1);
+    assert_eq!(
+        h.path().last().map(|(r, _)| *r),
+        Some(Role::Tool),
+        "the declined result is kept for the next turn"
+    );
 }
 
 #[tokio::test]
@@ -844,6 +996,85 @@ async fn auto_compaction_at_the_threshold_keeps_the_newest_message() {
         "the newest message is kept verbatim"
     );
     assert!(!step.contains("lorem ipsum"));
+}
+
+/// Ticket 42: a compaction mid-turn, after tool output larger than the tail budget,
+/// must not summarise away the request the turn is working on.
+#[tokio::test]
+async fn mid_turn_compaction_keeps_the_users_request() {
+    let mut h = harness(
+        vec![
+            text(&["first answer"]),
+            reply_in(
+                &[tool_block(0, "toolu_mid", "mid", json!({"text": "x"}))],
+                "tool_use",
+                1_000,
+            ),
+            summary_reply(),
+            text(&["started"]),
+        ],
+        |c| {
+            c.compaction_buffer = Some(9_000);
+            c.compaction_tail_tokens = 10;
+        },
+        vec![Arc::new(Mid)],
+        Some(10_000),
+    );
+    h.s.prompt("first question", Delivery::Queue).unwrap();
+    h.settle().await;
+    h.s.prompt("start the app", Delivery::Queue).unwrap();
+    let ev = h.settle().await;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SessionEvent::SessionCompacted(c) if c.trigger == "auto")),
+        "the step after the tool result compacts"
+    );
+    assert_eq!(settled(&ev).status, TurnStatus::Completed);
+    let bodies = h.bodies();
+    let step = serde_json::to_string(&bodies[3]["messages"]).unwrap();
+    assert!(step.contains("SUMMARY-MARKER"));
+    assert!(
+        step.contains("start the app"),
+        "the request is kept verbatim"
+    );
+    assert!(step.contains("toolu_mid"), "with the work done for it");
+    assert!(!step.contains("first answer"));
+}
+
+/// Ticket 42: when the turn's tail is too big to keep, the summary is told the request.
+#[tokio::test]
+async fn oversized_turn_tail_quotes_the_request_in_the_summary_prompt() {
+    let mut h = harness(
+        vec![
+            text(&["first answer"]),
+            reply_in(
+                &[tool_block(0, "toolu_big", "big", json!({"text": "x"}))],
+                "tool_use",
+                1_000,
+            ),
+            summary_reply(),
+            text(&["started"]),
+        ],
+        |c| {
+            c.compaction_buffer = Some(9_000);
+            c.compaction_tail_tokens = 10;
+        },
+        vec![Arc::new(Big)],
+        Some(10_000),
+    );
+    h.s.prompt("first question", Delivery::Queue).unwrap();
+    h.settle().await;
+    h.s.prompt("start the app", Delivery::Queue).unwrap();
+    let ev = h.settle().await;
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SessionEvent::SessionCompacted(_)))
+    );
+    let bodies = h.bodies();
+    let sreq = &bodies[2];
+    let last = sreq["messages"].as_array().unwrap().last().unwrap().clone();
+    let prompt = last["content"][0]["text"].as_str().unwrap();
+    assert!(prompt.contains("<newest_message>\nstart the app\n</newest_message>"));
 }
 
 #[tokio::test]
@@ -1262,7 +1493,7 @@ mod wiring {
                 text(&["ok"]),
             ],
             |_| {},
-            vec![Arc::new(Note)],
+            vec![Arc::new(NoteExt)],
             None,
             settings.clone(),
             |b, _, _| {
@@ -1301,6 +1532,68 @@ mod wiring {
         assert_eq!(resolved[1].ask_id, asks[1].id);
         assert_eq!(resolved[1].by, ResolvedBy::Auto(AutoResolver::Rule));
         assert!(ended(&ev).iter().all(|e| e.outcome == ToolOutcome::Ok));
+        let local = std::fs::read_to_string(ws.join(".genie/settings.local.json")).unwrap();
+        assert!(local.contains("\"note\""), "{local}");
+    }
+
+    /// Ticket 45: with mutating calls in order, "Always" saves the rule and the next call
+    /// in the step runs under it without asking.
+    #[tokio::test]
+    async fn always_saves_the_rule_and_the_next_mutating_call_needs_no_ask() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = d.path().join("proj");
+        std::fs::create_dir_all(&ws).unwrap();
+        let h = hub(d.path());
+        h.trust_set(
+            &ws.display().to_string(),
+            genie_protocol::api::config::TrustDecision::Trust,
+        )
+        .unwrap();
+        let settings = code_settings(&ws);
+        let mut t = harness_with(
+            vec![
+                reply(
+                    &[
+                        tool_block(0, "toolu_a", "note", json!({"text": "x"})),
+                        tool_block(1, "toolu_b", "note", json!({"text": "y"})),
+                    ],
+                    "tool_use",
+                ),
+                text(&["ok"]),
+            ],
+            |_| {},
+            vec![Arc::new(Note)],
+            None,
+            settings.clone(),
+            |b, _, _| {
+                b.authorizer(Arc::new(PermissionAuthorizer::new(
+                    h.clone(),
+                    settings.clone(),
+                )))
+            },
+        );
+        let _attached = t.s.attach();
+        t.s.prompt("save", Delivery::Steer).unwrap();
+        // Mutating calls run one at a time (ticket 45): only the first one asks.
+        let ev = t
+            .until(|e| matches!(e, SessionEvent::PermissionAsked(_)))
+            .await;
+        let SessionEvent::PermissionAsked(first) = ev.last().unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(first.ask.save_suggestions[0].rule, "note");
+        let mut ans = AskAnswer::decision(Decision::Always);
+        ans.scope = Some(RuleScope::Local);
+        t.s.answer_ask(&first.ask.id, serde_json::to_value(ans).unwrap())
+            .unwrap();
+        let ev = t.settle().await;
+        assert!(
+            !ev.iter()
+                .any(|e| matches!(e, SessionEvent::PermissionAsked(_))),
+            "the saved rule covers the second call"
+        );
+        assert!(ended(&ev).iter().all(|e| e.outcome == ToolOutcome::Ok));
+        assert_eq!(ended(&ev).len(), 2);
         let local = std::fs::read_to_string(ws.join(".genie/settings.local.json")).unwrap();
         assert!(local.contains("\"note\""), "{local}");
     }

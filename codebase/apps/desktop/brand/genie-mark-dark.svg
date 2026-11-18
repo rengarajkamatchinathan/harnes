@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 30 140 140" width="140" height="140">
+  <title>Genie</title>
+  <g fill="none" stroke="#F9FAFB" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M70 50 C55 50 58 62 58 78 C58 92 52 98 44 100 C52 102 58 108 58 122 C58 138 55 150 70 150"/><path d="M130 50 C145 50 142 62 142 78 C142 92 148 98 156 100 C148 102 142 108 142 122 C142 138 145 150 130 150"/></g>
+  <path fill="#A78BFA" d="M100 74 C103 92 108 97 126 100 C108 103 103 108 100 126 C97 108 92 103 74 100 C92 97 97 92 100 74 Z"/>
+</svg>
