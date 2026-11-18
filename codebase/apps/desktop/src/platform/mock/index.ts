@@ -89,9 +89,14 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
   const config: Record<string, unknown> = { model: "mock/genie-small", theme: "system", "memory.enabled": true };
   const projects = [{ project_id: "prj_demo", name: "Demo project", instructions: "", starred: true }];
   const memory = [{ memory_id: "mem_1", scope: "user", text: "Prefers TypeScript examples.", updated_at: now() }];
-  const providers = [
+  const providers: { id: string; kind: string; status: string; credentials: { credential_id: string; kind: string; label: string; active: boolean; hint: string }[]; endpoint?: string }[] = [
     { id: "mock", kind: "openai_chat", status: "ready", credentials: [{ credential_id: "cred_1", kind: "key", label: "Mock key", active: true, hint: "abcd" }] },
     { id: "anthropic", kind: "anthropic", status: "needs_auth", credentials: [] },
+    { id: "openai", kind: "openai", status: "needs_auth", credentials: [] },
+    { id: "google", kind: "google", status: "needs_auth", credentials: [] },
+    { id: "azure-foundry", kind: "azure-foundry", status: "needs_auth", credentials: [] },
+    { id: "openrouter", kind: "openrouter", status: "needs_auth", credentials: [] },
+    { id: "ollama", kind: "ollama", status: "ready", credentials: [], endpoint: "http://localhost:11434" },
   ];
   const blobs = new Map<string, string>();
   const terms = new Map<string, MockTerm>();
@@ -301,7 +306,12 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       const s = session(p.session_id);
       const id = uid("msg");
       const parts = p.parts as InputPart[];
-      const text = parts.map((x) => (x.type === "text" ? x.text : "")).join("");
+      // `client` built-ins never reach the model (06 §9.1, SA-48).
+      const first = parts[0];
+      const typed = first?.type === "command" ? first.name : first?.type === "text" ? /^\/(\S+)/.exec(first.text.trimStart())?.[1] : undefined;
+      const builtin = typed ? MOCK_BUILTINS.find((b) => b.name === typed || b.aliases?.includes(typed)) : undefined;
+      if (builtin && builtin.route === "client") throw err("command_not_prompt", `/${builtin.name} is a client command; run it in the client`, -32014);
+      const text = parts.map((x) => (x.type === "text" ? x.text : x.type === "command" ? `/${x.name} ${x.args}`.trim() : "")).join("");
       s.messages.push({ id, role: "user", parts: [{ type: "text", id: uid("prt"), text }], created_at: now(), parent_id: null });
       publish(s, { type: "message.admitted", message_id: id, delivery: p.delivery, parts, role: "user", source: "user", parent_id: p.parent_id ?? null });
       if (!s.running) runTurn(s, text, id);
@@ -356,7 +366,10 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       return { project_id };
     },
     "model.list": () => ({
+      // Like the daemon: the catalog lists every provider's models, connected or not.
       models: [
+        { id: "anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic", context_window: 200000, effort_levels: ["low", "medium", "high"] },
+        { id: "openai/gpt-5.2", name: "GPT-5.2", provider: "openai", context_window: 400000, effort_levels: ["low", "medium", "high"] },
         { id: "mock/genie-small", name: "Genie Small", provider: "mock", context_window: 128000, effort_levels: [] },
         { id: "mock/genie-large", name: "Genie Large", provider: "mock", context_window: 200000, effort_levels: ["low", "medium", "high"] },
       ],
@@ -383,6 +396,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
           theme: { $ref: "#/$defs/Theme" },
           memory: { $ref: "#/$defs/Toggle" },
           telemetry: { type: "object", properties: { crashReports: { type: "boolean" }, usage: { type: "boolean" } } },
+          providers: { type: "object", additionalProperties: true },
         },
         $defs: { Theme: { type: "string", enum: ["system", "light", "dark"] }, Toggle: { type: "object", properties: { enabled: { type: "boolean" } } } },
       },
@@ -393,6 +407,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
           "memory.enabled": { title: "Memory", scopes_allowed: ["user"], restart_required: false, advanced: false },
           "telemetry.crashReports": { title: "Crash reports", scopes_allowed: ["user"], restart_required: false, advanced: false },
           "telemetry.usage": { title: "Usage analytics", scopes_allowed: ["user"], restart_required: false, advanced: false },
+          providers: { title: "Providers", scopes_allowed: ["user"], restart_required: false, advanced: false },
         },
       },
     }),
@@ -409,7 +424,10 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     },
     "config.set": (p) => {
       if (p.key === "model" && typeof p.value !== "string") throw err("invalid_params", "model must be a string", -32602);
-      config[p.key] = p.value;
+      // `providers.<id>` writes land inside the `providers` object, as in the daemon.
+      const [top, ...rest] = String(p.key).split(".");
+      if (top === "providers" && rest.length) config.providers = { ...((config.providers as Record<string, unknown>) ?? {}), [rest.join(".")]: p.value };
+      else config[p.key] = p.value;
       return {};
     },
     "config.diagnostics": () => ({ problems: [] }),
@@ -430,6 +448,19 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       blobs.set(blob_id, btoa(`resource ${p.uri}`));
       return { blob_id, mime: "text/markdown" };
     },
+    "command.list": (p) => {
+      const kind = p.session_id ? session(p.session_id).info.kind : (p.kind ?? "chat");
+      return {
+        commands: [
+          ...MOCK_BUILTINS.filter((b) => kind === "code" || !b.codeOnly).map(({ codeOnly: _c, ...b }) => b),
+          { name: "review", description: "Review the current changes", args_hint: "[focus]", source: "user", route: "prompt", immediate: false },
+          { name: "pdf", description: "Read and fill PDFs", source: "skill", route: "prompt", immediate: false },
+          { name: "files:summarize", description: "Summarize a file", args_hint: "<path> [style]", source: "mcp_prompt", route: "prompt", immediate: false, server: "files" },
+        ],
+        diagnostics: [],
+      };
+    },
+    "session.compact": () => ({}),
     "skill.list": () => ({ skills: [{ id: "pdf", name: "PDF", description: "Read and fill PDFs", enabled: true, source: "builtin" }] }),
     "usage.query": () => ({ rows: [{ keys: ["mock"], usage: { input_tokens: 12000, output_tokens: 3400 }, cost: { usd: 0.12 } }] }),
     "daemon.status": () => ({ version: "0.1.0-mock", pid: 1, uptime_s: 42, socket: "mock", channel: "dev", clients: [], sessions_running: 0 }),
@@ -582,3 +613,26 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     log() {},
   };
 }
+
+/** The engine's built-ins (06 §9.1; `genie-skills` `BUILTINS`), for the mock `command.list`. */
+const MOCK_BUILTINS: { name: string; aliases?: string[]; description: string; args_hint?: string; source: "builtin"; route: "client" | "prompt"; immediate: boolean; codeOnly?: boolean }[] = [
+  { name: "help", description: "Show commands and keyboard shortcuts", source: "builtin", route: "client", immediate: false },
+  { name: "model", description: "Switch the model", args_hint: "[model]", source: "builtin", route: "client", immediate: false },
+  { name: "effort", description: "Change reasoning effort", args_hint: "[level]", source: "builtin", route: "client", immediate: false },
+  { name: "mcp", aliases: ["connectors"], description: "Manage connectors (MCP servers)", args_hint: "[enable|disable <server>]", source: "builtin", route: "client", immediate: true },
+  { name: "skills", description: "Browse and manage skills", source: "builtin", route: "client", immediate: true },
+  { name: "memory", description: "View and edit memory", source: "builtin", route: "client", immediate: true },
+  { name: "permissions", description: "Capabilities and permission rules", source: "builtin", route: "client", immediate: true },
+  { name: "cost", aliases: ["usage"], description: "Show usage and cost for this session", source: "builtin", route: "client", immediate: false },
+  { name: "context", description: "Show context window usage", source: "builtin", route: "client", immediate: false },
+  { name: "resume", description: "Open another chat or session", source: "builtin", route: "client", immediate: false },
+  { name: "export", description: "Export this conversation", args_hint: "[markdown|json]", source: "builtin", route: "client", immediate: false },
+  { name: "clear", description: "Start a new chat or session", source: "builtin", route: "client", immediate: false },
+  { name: "mode", description: "Change the permission mode", args_hint: "[default|accept-edits|plan|bypass]", source: "builtin", route: "client", immediate: false, codeOnly: true },
+  { name: "plan", description: "Switch to plan mode", args_hint: "[<description>]", source: "builtin", route: "client", immediate: false, codeOnly: true },
+  { name: "compact", description: "Summarise the conversation to free context", args_hint: "[focus]", source: "builtin", route: "client", immediate: false, codeOnly: true },
+  { name: "rewind", description: "Rewind files or conversation to a checkpoint", source: "builtin", route: "client", immediate: false, codeOnly: true },
+  { name: "worktree", description: "Start a new session in a worktree", source: "builtin", route: "client", immediate: false, codeOnly: true },
+  { name: "agents", description: "Pick an agent", source: "builtin", route: "client", immediate: false, codeOnly: true },
+  { name: "init", description: "Create GENIE.md for this project", source: "builtin", route: "prompt", immediate: false, codeOnly: true },
+];

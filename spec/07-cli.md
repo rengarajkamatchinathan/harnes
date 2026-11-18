@@ -87,6 +87,8 @@ genie --trust                        trust the folder for this run (D43)
 
 `/help`, `/model`, `/effort`, `/mode`, `/compact [focus]`, `/rewind`, `/worktree`, `/init` (create GENIE.md), `/memory`, `/skills`, `/agents`, `/mcp`, `/permissions`, `/cost`, `/context`, `/resume`, `/export`, `/clear` (new session), plus user commands (`~/.genie/commands`, `.genie/commands`), skills (`/skill-name`) and MCP prompts (`/server:prompt`) (D37, D30). The set beyond t21's built-ins follows Claude Code names for familiarity; each is a thin wrapper over a protocol method. These extra built-ins are part of SA-30.
 
+The CLI gets its slash menu from the engine's registry (`command.list`, 06 §9.1), the same list the desktop shows, and refreshes it on `commands.changed`. Its own key table (§1) is joined to that list by command name. `client`-route built-ins run in the footer as pickers, dialogs or a one-line result, never as a message. `prompt`-route commands are sent as `command` input parts. `/plan` and the aliases `/connectors` and `/usage` work here too (SA-46).
+
 ## 3. `genie chat`
 
 - `genie chat list` shows desktop chats (title, project, updated). `genie chat open <id>` prints the active branch path and subscribes.

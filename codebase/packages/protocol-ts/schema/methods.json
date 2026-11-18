@@ -1106,6 +1106,18 @@
     },
     {
       "direction": "request",
+      "ident": "CommandList",
+      "name": "command.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CommandListParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CommandListResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "DirectoryInstall",
       "name": "directory.install",
       "needs_lease": false,
@@ -1675,6 +1687,18 @@
       "needs_lease": false,
       "params": {
         "$ref": "#/$defs/ProviderStatusChanged"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "CommandsChangedNote",
+      "name": "commands.changed",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/CommandsChanged"
       },
       "result": {
         "type": "null"

@@ -104,6 +104,9 @@ pub fn input_parts(parts: &[InputPart]) -> Vec<Part> {
             )),
             InputPart::Skill { id } => Part::text(format!("[Skill {id} requested.]")),
             InputPart::FileRef { path } => Part::text(format!("[File reference: {path}]")),
+            InputPart::Command { name, args } => {
+                Part::text(format!("/{name} {args}").trim_end().to_string())
+            }
         })
         .collect()
 }

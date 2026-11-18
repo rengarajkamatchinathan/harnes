@@ -1125,6 +1125,149 @@
       ],
       "type": "object"
     },
+    "CommandInfo": {
+      "description": "One row of the `/` menu.",
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "args_hint": {
+          "description": "Argument hint: `[x]` optional, `<x>` required.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "immediate": {
+          "default": false,
+          "description": "A `client` command that runs as soon as it is picked, even during a turn.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Without the slash (`model`, `git:pr`, `github:review`).",
+          "type": "string"
+        },
+        "route": {
+          "$ref": "#/$defs/CommandRoute"
+        },
+        "server": {
+          "description": "MCP server of a `mcp_prompt`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/CommandSource"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "source",
+        "route"
+      ],
+      "type": "object"
+    },
+    "CommandListParams": {
+      "description": "`command.list`: by `session_id`, or by `kind` (+ `project_id` / `workspace_path`)\nbefore a session exists.",
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CommandListResult": {
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/CommandInfo"
+          },
+          "type": "array"
+        },
+        "diagnostics": {
+          "default": [],
+          "description": "Skipped files, name clashes with built-ins, unreachable MCP servers.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "commands"
+      ],
+      "type": "object"
+    },
+    "CommandRoute": {
+      "description": "What a client does with a command (06 §9.1).",
+      "oneOf": [
+        {
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "prompt",
+          "description": "Sent as a `command` input part; the reply streams.",
+          "type": "string"
+        },
+        {
+          "const": "client",
+          "description": "Opens the client's own UI or calls a method; never a model turn.",
+          "type": "string"
+        }
+      ]
+    },
+    "CommandSource": {
+      "description": "Where a command comes from; also its lookup order (built-ins win).",
+      "enum": [
+        "builtin",
+        "project",
+        "user",
+        "skill",
+        "mcp_prompt",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "CommandsChanged": {
+      "description": "`commands.changed`: call `command.list` again.",
+      "type": "object"
+    },
     "CommitThen": {
       "enum": [
         "push",
@@ -2807,6 +2950,27 @@
           "required": [
             "type",
             "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A `/` command with the `prompt` route (06 §9.1): `name` without the slash\n(`explore`, `git:pr`, `server:prompt`), `args` the rest of the line. The engine\nstores the expansion when the message is admitted.",
+          "properties": {
+            "args": {
+              "default": "",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
           ],
           "type": "object"
         }

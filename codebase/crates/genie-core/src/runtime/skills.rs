@@ -21,10 +21,15 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use genie_config::EffectivePolicy;
-use genie_protocol::api::mcp::SkillListResult;
+use genie_protocol::api::mcp::{
+    CommandInfo, CommandListResult, CommandRoute, CommandSource, SkillListResult,
+};
 use genie_protocol::common::SessionKind;
 use genie_protocol::message::InputPart;
-use genie_skills::command::{CommandFile, command_dirs};
+use genie_skills::command::{
+    BUILTINS, BuiltinModes, CommandFile, CommandScope, INIT_PROMPT, builtin, command_dirs,
+    is_builtin,
+};
 use genie_skills::tools::{self as st, SkillInput, SkillReadInput};
 use genie_skills::{
     InstalledSkill, Invoker, JsonStateFile, SkillCatalog, SkillPolicy, SkillRoots, load_commands,
@@ -48,6 +53,10 @@ pub struct SkillsHub {
     catalogs: Mutex<HashMap<Option<PathBuf>, Catalog>>,
     /// Skills loaded per session (id → rendered block), re-injected after compaction.
     loaded: Mutex<HashMap<String, BTreeMap<String, String>>>,
+    /// Bumped whenever the `/` menu may have changed (`commands.changed`, 06 §9.1).
+    changed: tokio::sync::watch::Sender<u64>,
+    /// Fingerprint of the command folders seen by the last [`SkillsHub::refresh`].
+    command_sig: Mutex<u64>,
 }
 
 /// Policy keys (08 §5.2) → [`SkillPolicy`].
@@ -80,7 +89,44 @@ impl SkillsHub {
             settings,
             catalogs: Mutex::new(HashMap::new()),
             loaded: Mutex::new(HashMap::new()),
+            changed: tokio::sync::watch::channel(0).0,
+            command_sig: Mutex::new(0),
         })
+    }
+
+    /// Notified when skills or commands may have changed (enable state, uploads, trust,
+    /// policy, files on disk); the daemon turns this into `commands.changed`.
+    pub fn subscribe_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.changed.subscribe()
+    }
+
+    fn bump(&self) {
+        self.changed.send_modify(|n| *n = n.wrapping_add(1));
+    }
+
+    /// Fingerprint of every command folder of every known root (paths, sizes, mtimes).
+    fn commands_fingerprint(&self) -> u64 {
+        use std::hash::Hasher;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut roots: Vec<Option<PathBuf>> = self
+            .catalogs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect();
+        roots.sort();
+        roots.dedup();
+        if !roots.contains(&None) {
+            roots.insert(0, None);
+        }
+        for root in roots {
+            let trusted = root.as_deref().is_some_and(|r| self.hub.trusted(r));
+            for (dir, _) in command_dirs(&self.home, root.as_deref(), trusted) {
+                hash_dir(&dir, 0, &mut h);
+            }
+        }
+        h.finish()
     }
 
     fn roots(&self, root: Option<&Path>) -> SkillRoots {
@@ -121,13 +167,29 @@ impl SkillsHub {
             c.set_policy(policy.clone());
             c.set_roots(roots);
         }
+        self.bump();
     }
 
-    /// Hot reload (timer): rescan catalogs whose fingerprint changed.
-    pub fn refresh(&self) {
+    /// Hot reload (timer): rescan catalogs whose fingerprint changed; notify when skills or
+    /// command files changed. Returns whether anything changed.
+    pub fn refresh(&self) -> bool {
+        let mut any = false;
         for (_, c) in self.all() {
-            c.lock().unwrap_or_else(|e| e.into_inner()).refresh();
+            any |= c.lock().unwrap_or_else(|e| e.into_inner()).refresh();
         }
+        let sig = self.commands_fingerprint();
+        {
+            let mut last = self.command_sig.lock().unwrap_or_else(|e| e.into_inner());
+            if *last != sig {
+                // The first fingerprint is a baseline, not a change.
+                any |= *last != 0;
+                *last = sig;
+            }
+        }
+        if any {
+            self.bump();
+        }
+        any
     }
 
     fn root_of(s: &SessionSettings) -> Option<PathBuf> {
@@ -197,6 +259,9 @@ impl SkillsHub {
                 res = c.set_enabled(id, enabled);
             }
         }
+        if res.is_ok() {
+            self.bump();
+        }
         res
     }
 
@@ -210,6 +275,7 @@ impl SkillsHub {
         for (_, c) in self.all() {
             c.lock().unwrap_or_else(|e| e.into_inner()).rescan();
         }
+        self.bump();
         Ok(r)
     }
 
@@ -227,6 +293,7 @@ impl SkillsHub {
         for (_, c) in self.all() {
             c.lock().unwrap_or_else(|e| e.into_inner()).rescan();
         }
+        self.bump();
     }
 
     /// User commands for the session's workspace (06 §9).
@@ -236,8 +303,116 @@ impl SkillsHub {
         load_commands(&command_dirs(&self.home, root.as_deref(), trusted)).0
     }
 
-    /// Resolve `InputPart::Skill` and `/command args` in a user message. Returns the parts
-    /// to send to the model.
+    /// The `/` menu without MCP prompts (06 §9.1, D58): built-ins for `kind`, Markdown
+    /// commands (project, then user), then enabled skills. A name that clashes with a
+    /// built-in or an earlier row is skipped with a diagnostic. `workspace` matters for
+    /// Code only (project commands and skills, trusted folders only).
+    pub fn command_list(&self, kind: SessionKind, workspace: Option<&Path>) -> CommandListResult {
+        let root = (kind == SessionKind::Code)
+            .then(|| workspace.map(project_root))
+            .flatten();
+        let mut out = CommandListResult::default();
+        for b in BUILTINS {
+            if b.modes == BuiltinModes::CodeOnly && kind != SessionKind::Code {
+                continue;
+            }
+            out.commands.push(CommandInfo {
+                name: b.name.to_string(),
+                aliases: b.aliases.iter().map(|a| a.to_string()).collect(),
+                description: b.description.to_string(),
+                args_hint: b.args_hint.map(str::to_string),
+                source: CommandSource::Builtin,
+                route: if b.prompt {
+                    CommandRoute::Prompt
+                } else {
+                    CommandRoute::Client
+                },
+                immediate: b.immediate,
+                server: None,
+            });
+        }
+        let trusted = root.as_deref().is_some_and(|r| self.hub.trusted(r));
+        let (mut files, diags) = load_commands(&command_dirs(&self.home, root.as_deref(), trusted));
+        out.diagnostics.extend(
+            diags
+                .into_iter()
+                .map(|d| format!("{}: {}", d.path.display(), d.message)),
+        );
+        // Project before user (06 §9.1 lookup order).
+        files.sort_by_key(|c| (c.scope != CommandScope::Project, c.name.clone()));
+        for c in files {
+            out.commands.push(CommandInfo {
+                name: c.name,
+                aliases: vec![],
+                description: c.description,
+                args_hint: c.argument_hint,
+                source: match c.scope {
+                    CommandScope::Project => CommandSource::Project,
+                    CommandScope::User => CommandSource::User,
+                },
+                route: CommandRoute::Prompt,
+                immediate: false,
+                server: None,
+            });
+        }
+        let skills = self
+            .catalog(root.as_deref())
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .user_invocable();
+        for (id, description) in skills {
+            if is_builtin(&id) || out.commands.iter().any(|c| c.name == id) {
+                out.diagnostics.push(format!(
+                    "skill {id}: hidden from the / menu, a command already uses that name"
+                ));
+                continue;
+            }
+            out.commands.push(CommandInfo {
+                name: id,
+                aliases: vec![],
+                description,
+                args_hint: None,
+                source: CommandSource::Skill,
+                route: CommandRoute::Prompt,
+                immediate: false,
+                server: None,
+            });
+        }
+        out
+    }
+
+    /// A Markdown command named `name` exists for the session.
+    pub fn has_command(&self, session_id: &str, name: &str) -> bool {
+        self.settings
+            .settings(session_id)
+            .is_some_and(|s| self.commands(&s).iter().any(|c| c.name == name))
+    }
+
+    /// [`Self::command_list`] for an existing session.
+    pub fn session_command_list(&self, session_id: &str) -> Option<CommandListResult> {
+        let s = self.settings.settings(session_id)?;
+        Some(self.command_list(s.kind, s.workspace.as_deref()))
+    }
+
+    /// Expand a Markdown command's text: body + `file_ref` parts; `` !`cmd` `` snippets are
+    /// replaced by a note until the shell runner is wired in.
+    fn push_expanded(cmd: &CommandFile, args: &str, out: &mut Vec<InputPart>) {
+        let ex = cmd.expand(args);
+        let body = if ex.shell.is_empty() {
+            ex.text.clone()
+        } else {
+            ex.without_shell("[shell snippet not run: command snippets need the shell tool]")
+        };
+        out.push(InputPart::text(body));
+        for f in ex.file_refs {
+            out.push(InputPart::FileRef { path: f });
+        }
+    }
+
+    /// Resolve `InputPart::Skill`, `InputPart::Command` and a leading `/command args` text
+    /// in a user message. Returns the parts to send to the model. MCP prompts are expanded
+    /// before this (async, [`crate::runtime::AgentRuntime::expand_mcp_commands`]); one
+    /// still here is kept as its typed text.
     pub fn resolve_input(&self, session_id: &str, parts: &[InputPart]) -> Vec<InputPart> {
         let Some(s) = self.settings.settings(session_id) else {
             return parts.to_vec();
@@ -251,24 +426,53 @@ impl SkillsHub {
                         "[Skill {id} could not be loaded: {e}]"
                     ))),
                 },
+                InputPart::Command { name, args } => {
+                    if let Some(b) = builtin(name) {
+                        if b.name == "init" {
+                            let mut text = INIT_PROMPT.to_string();
+                            if !args.trim().is_empty() {
+                                text.push_str("\n\n");
+                                text.push_str(args.trim());
+                            }
+                            out.push(InputPart::text(text));
+                        } else {
+                            // `client` built-ins are rejected at `session.prompt`.
+                            out.push(InputPart::text(
+                                format!("/{name} {args}").trim_end().to_string(),
+                            ));
+                        }
+                    } else if let Some(cmd) =
+                        self.commands(&s).into_iter().find(|c| &c.name == name)
+                    {
+                        Self::push_expanded(&cmd, args, &mut out);
+                    } else if !name.contains(':') {
+                        match self.load(session_id, name, Invoker::User) {
+                            Ok(text) => {
+                                out.push(InputPart::text(text));
+                                if !args.trim().is_empty() {
+                                    out.push(InputPart::text(args.trim().to_string()));
+                                }
+                            }
+                            Err(e) => out.push(InputPart::text(format!(
+                                "[/{name} could not be loaded: {e}]{}",
+                                if args.trim().is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("\n\n{}", args.trim())
+                                }
+                            ))),
+                        }
+                    } else {
+                        out.push(InputPart::text(
+                            format!("/{name} {args}").trim_end().to_string(),
+                        ));
+                    }
+                }
                 InputPart::Text { text } if i == 0 && text.starts_with('/') => {
                     let line = &text[1..];
                     let (name, args) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
                     match self.commands(&s).into_iter().find(|c| c.name == name) {
-                        Some(cmd) => {
-                            let ex = cmd.expand(args);
-                            let body = if ex.shell.is_empty() {
-                                ex.text.clone()
-                            } else {
-                                ex.without_shell(
-                                    "[shell snippet not run: command snippets need the shell tool]",
-                                )
-                            };
-                            out.push(InputPart::text(body));
-                            for f in ex.file_refs {
-                                out.push(InputPart::FileRef { path: f });
-                            }
-                        }
+                        Some(cmd) => Self::push_expanded(&cmd, args, &mut out),
                         None => out.push(p.clone()),
                     }
                 }
@@ -276,6 +480,30 @@ impl SkillsHub {
             }
         }
         out
+    }
+}
+
+/// Hash `*.md` paths, sizes and mtimes under a command folder (depth-limited like the loader).
+fn hash_dir(dir: &Path, depth: usize, h: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    if depth > 4 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = rd.filter_map(Result::ok).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let path = e.path();
+        let Ok(md) = e.metadata() else { continue };
+        if md.is_dir() {
+            hash_dir(&path, depth + 1, h);
+        } else if path.extension().is_some_and(|x| x == "md") {
+            path.hash(h);
+            md.len().hash(h);
+            md.modified().ok().hash(h);
+        }
     }
 }
 

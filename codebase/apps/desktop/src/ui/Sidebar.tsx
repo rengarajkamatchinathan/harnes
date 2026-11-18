@@ -170,6 +170,11 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const { ui } = app;
   const shell = useShell();
   const [search, setSearch] = useState(false);
+  // `/resume` from a composer (06 §9.1).
+  const searchRequest = app.searchRequest;
+  useEffect(() => {
+    if (searchRequest) setSearch(true);
+  }, [searchRequest]);
   const [newCode, setNewCode] = useState<string | null>(null);
   const [newProject, setNewProject] = useState(false);
 

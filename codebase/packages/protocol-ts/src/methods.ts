@@ -94,6 +94,7 @@ export interface Requests {
   "skill.set_enabled": { params: T.SkillSetEnabledParams; result: T.Empty };
   "skill.upload": { params: T.BlobIdParams; result: T.IdResult };
   "directory.list": { params: T.DirectoryListParams; result: T.DirectoryListResult };
+  "command.list": { params: T.CommandListParams; result: T.CommandListResult };
   "directory.install": { params: T.DirectoryInstallParams; result: T.DirectoryInstallResult };
   "project.list": { params: T.Empty; result: T.ProjectListResult };
   "project.create": { params: T.ProjectCreateParams; result: T.ProjectIdResult };
@@ -149,6 +150,7 @@ export interface Notifications {
   "mcp.status": T.McpStatusChanged;
   "catalog.updated": T.CatalogUpdated;
   "provider.status": T.ProviderStatusChanged;
+  "commands.changed": T.CommandsChanged;
   "notification": T.UserNotification;
   "terminal.exited": T.TerminalExited;
   "memory.changed": T.MemoryChanged;
@@ -252,6 +254,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "skill.set_enabled", direction: "request", needsLease: false },
   { name: "skill.upload", direction: "request", needsLease: false },
   { name: "directory.list", direction: "request", needsLease: false },
+  { name: "command.list", direction: "request", needsLease: false },
   { name: "directory.install", direction: "request", needsLease: false },
   { name: "project.list", direction: "request", needsLease: false },
   { name: "project.create", direction: "request", needsLease: false },
@@ -300,6 +303,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "mcp.status", direction: "notification", needsLease: false },
   { name: "catalog.updated", direction: "notification", needsLease: false },
   { name: "provider.status", direction: "notification", needsLease: false },
+  { name: "commands.changed", direction: "notification", needsLease: false },
   { name: "notification", direction: "notification", needsLease: false },
   { name: "terminal.exited", direction: "notification", needsLease: false },
   { name: "memory.changed", direction: "notification", needsLease: false },
@@ -363,6 +367,9 @@ export class GenieClient {
     preview: (params: T.CheckpointParams): Promise<T.CheckpointPreview> => this.t.request("checkpoint.preview", params) as Promise<T.CheckpointPreview>,
     rewind: (params: T.CheckpointParams): Promise<T.Empty> => this.t.request("checkpoint.rewind", params) as Promise<T.Empty>,
     undo: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("checkpoint.undo", params) as Promise<T.Empty>,
+  };
+  readonly command = {
+    list: (params: T.CommandListParams): Promise<T.CommandListResult> => this.t.request("command.list", params) as Promise<T.CommandListResult>,
   };
   readonly config = {
     diagnostics: (params: T.CwdParams): Promise<T.ConfigDiagnosticsResult> => this.t.request("config.diagnostics", params) as Promise<T.ConfigDiagnosticsResult>,

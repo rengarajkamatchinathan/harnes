@@ -179,3 +179,77 @@ pub struct DirectoryInstallResult {
     /// Commands, URLs and permissions the entry will use.
     pub manifest: Value,
 }
+
+// ---- slash commands (06 §9.1, D58)
+
+/// `command.list`: by `session_id`, or by `kind` (+ `project_id` / `workspace_path`)
+/// before a session exists.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CommandListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<crate::common::SessionKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
+}
+
+/// Where a command comes from; also its lookup order (built-ins win).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandSource {
+    Builtin,
+    Project,
+    User,
+    Skill,
+    McpPrompt,
+    #[serde(other)]
+    Unknown,
+}
+
+/// What a client does with a command (06 §9.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandRoute {
+    /// Sent as a `command` input part; the reply streams.
+    Prompt,
+    /// Opens the client's own UI or calls a method; never a model turn.
+    Client,
+    #[serde(other)]
+    Unknown,
+}
+
+/// One row of the `/` menu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CommandInfo {
+    /// Without the slash (`model`, `git:pr`, `github:review`).
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    pub description: String,
+    /// Argument hint: `[x]` optional, `<x>` required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args_hint: Option<String>,
+    pub source: CommandSource,
+    pub route: CommandRoute,
+    /// A `client` command that runs as soon as it is picked, even during a turn.
+    #[serde(default)]
+    pub immediate: bool,
+    /// MCP server of a `mcp_prompt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CommandListResult {
+    pub commands: Vec<CommandInfo>,
+    /// Skipped files, name clashes with built-ins, unreachable MCP servers.
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
+}
+
+/// `commands.changed`: call `command.list` again.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CommandsChanged {}

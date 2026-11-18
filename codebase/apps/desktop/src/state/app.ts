@@ -62,6 +62,8 @@ export interface UiState {
   sidebarGroupByDate: boolean;
   /** Chat list filter: everything, or only chats that are working or waiting on you. */
   sidebarShow: "all" | "active";
+  /** Slash commands used most recently first (the `/` menu's order, D58). */
+  recentCommands: string[];
 }
 
 const DEFAULT_UI: UiState = {
@@ -89,6 +91,7 @@ const DEFAULT_UI: UiState = {
   foldedSections: [],
   sidebarGroupByDate: false,
   sidebarShow: "all",
+  recentCommands: [],
 };
 
 /** Where the user is, for the title-bar back/forward buttons. */
@@ -123,8 +126,11 @@ export class App extends Emitter {
   pendingAsks = 0;
   clients: ClientRef[] = [];
   projects: ProjectInfo[] = [];
+  /** Every catalog model, including providers that aren't connected (Settings shows these). */
   models: ModelInfo[] = [];
   providers: ProviderInfo[] = [];
+  /** The `model` setting (default model for new sessions), if any. */
+  configModel: string | null = null;
   toasts: Toast[] = [];
 
   private open = new Map<string, SessionStore>();
@@ -134,6 +140,10 @@ export class App extends Emitter {
   private everReady = false;
   private toastId = 0;
   private configListeners = new Set<Listener<string[]>>();
+  /** Bumped on `commands.changed`; `/` menus reload `command.list` (06 §9.1). */
+  commandsVersion = 0;
+  /** Bumped by `/resume`: the sidebar opens its search dialog. */
+  searchRequest = 0;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly terminals: Terminals;
@@ -211,6 +221,12 @@ export class App extends Emitter {
     return true;
   }
 
+  /** Open the session switcher with search (`/resume`). */
+  openSearch() {
+    this.searchRequest++;
+    this.changed();
+  }
+
   selectSession(id: string | null) {
     const s = id ? this.sessions.get(id) : null;
     this.setUi({ activeSession: id, view: "main", ...(s && s.kind !== "unknown" ? { mode: s.kind } : {}) });
@@ -271,11 +287,30 @@ export class App extends Emitter {
   }
 
   async refreshLists() {
-    const [projects, models, providers] = await Promise.allSettled([this.client.project.list({}), this.client.model.list({}), this.client.provider.list({})]);
+    const [projects, models, providers, cfg] = await Promise.allSettled([this.client.project.list({}), this.client.model.list({}), this.client.provider.list({}), this.client.config.get({ keys: ["model"] })]);
     if (projects.status === "fulfilled") this.projects = projects.value.projects;
     if (models.status === "fulfilled") this.models = models.value.models;
     if (providers.status === "fulfilled") this.providers = providers.value.providers;
+    if (cfg.status === "fulfilled") this.configModel = typeof cfg.value.values.model === "string" && cfg.value.values.model ? cfg.value.values.model : null;
     this.changed();
+  }
+
+  /**
+   * Models a new turn can actually use: the catalog lists every provider's models, but only
+   * a provider that is Ready (credential present, endpoint set, not blocked) can serve one.
+   */
+  get usableModels(): ModelInfo[] {
+    const ready = new Set(this.providers.filter((p) => p.status === "ready").map((p) => p.id));
+    return this.models.filter((m) => ready.has(m.provider));
+  }
+
+  /** Model for new sessions: last picked, else the configured default, else the first usable; never one whose provider isn't connected. */
+  preferredModel(): string | null {
+    const usable = this.usableModels;
+    const ok = (id: string | null | undefined) => !!id && usable.some((m) => m.id === id);
+    if (ok(this.ui.model)) return this.ui.model!;
+    if (ok(this.configModel)) return this.configModel;
+    return usable[0]?.id ?? null;
   }
 
   private onNotification(method: string, params: unknown) {
@@ -323,8 +358,13 @@ export class App extends Emitter {
       case "policy.changed": {
         const keys = (params as { keys?: string[] }).keys ?? [];
         this.configListeners.forEach((f) => f(keys));
+        if (!keys.length || keys.some((k) => k === "model" || k.startsWith("providers"))) void this.refreshLists();
         return;
       }
+      case "commands.changed":
+        this.commandsVersion++;
+        this.changed();
+        return;
       case "catalog.updated":
       case "provider.status":
         void this.refreshLists();
@@ -397,17 +437,9 @@ export class App extends Emitter {
     void s?.close();
   }
 
-  /** Model for new sessions: last picked, else the configured default, else the first listed. */
+  /** Model for new sessions (see `preferredModel`). */
   async defaultModel(): Promise<string | null> {
-    if (this.ui.model) return this.ui.model;
-    try {
-      const r = await this.client.config.get({ keys: ["model"] });
-      const m = r.values.model;
-      if (typeof m === "string" && m) return m;
-    } catch {
-      /* fall through */
-    }
-    return this.models[0]?.id ?? null;
+    return this.preferredModel();
   }
 
   async createSession(opts: { kind: SessionKind; workspacePath?: string; worktree?: boolean; agent?: string | null; projectId?: string | null }) {

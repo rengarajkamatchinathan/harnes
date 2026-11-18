@@ -374,7 +374,65 @@ D37, D44; t21.
 - **Use:** `<available_skills>` index in the baseline (diffs only); `skill` tool returns SKILL.md + base path + sampled file list; `skill_read` reads skill files; users attach with `/skill-name` or "+"; **user-invoked skills still pass policy**; loaded skills re-injected after compaction.
 - **Scripts:** **Chat v1 = instructions + files only** (scripts listed with "runs in Code mode"); in Code/CLI scripts run through `shell` with normal permissions (D44). `skill_run` and the sandbox are v2.
 - **Sources:** disk folders; `.zip`/`.skill` upload (size cap, path-traversal check, SKILL.md required, frontmatter schema); **built-in Genie skills** (e.g. create a skill, write a spec, summarise a meeting, review a document; signed, updated with the app); **signed skills directory** (pinned version + checksum, details page, one-click user-scope install). Policy: allowlist, directory-only, disable upload.
-- **Slash commands** (Code/CLI, and chat where relevant): Markdown in `~/.genie/commands/` and `.genie/commands/` with `description`, `model`, `agent`, `argument-hint`; `$ARGUMENTS`, `$1..$N`, `@file`; `` !`cmd` `` only through shell permissions and only in trusted workspaces. Built-ins: `/compact`, `/init`, `/memory`, `/skills`, `/model`, `/help` (+ CLI built-ins, 07 §3).
+- **Slash commands:** one engine-owned registry serves every client (§9.1).
+
+### 9.1 Slash commands
+
+D30, D33, D37, D46, D49; t17, t21.
+
+The engine keeps **one command registry** per session. The desktop composer, the CLI footer and `genie -p` all read it through `command.list` (02 §6.8). No client keeps its own list of names, so a command can't work in the CLI and be missing from the desktop.
+
+**Sources, in lookup order** (the first match wins):
+
+1. **Built-ins** (table below).
+2. **Markdown commands:** project `.genie/commands/` (trusted workspaces only, D43), then `~/.genie/commands/`. Subfolders become `dir:name`. Frontmatter: `description`, `model`, `agent`, `argument-hint`. Templates: `$ARGUMENTS`, `$1..$N`, `@file`. `` !`cmd` `` runs only through shell permissions and only in trusted workspaces (D37). Files are watched like skills (fingerprint + hot reload).
+3. **Skills:** `/skill-name` for every enabled skill (D37). User-invoked skills still pass policy.
+4. **MCP prompts:** `/server:prompt`, with an argument form for the prompt's arguments (D30).
+
+A Markdown command or skill with a built-in's name is skipped, and `command.list` returns a diagnostic for it.
+
+**Routes.** Every command has a route. The route tells the client what to do with the command, so clients don't need per-name rules for it:
+
+| Route | What the client does | Model turn? | Commands |
+|---|---|---|---|
+| `prompt` | Sends a `command` input part with `session.prompt` (02 §6.2). The engine expands it when the message is admitted, and the reply streams as usual. Steer/queue apply while a turn runs (SA-06). | Yes | `/init`, Markdown commands, skills, MCP prompts |
+| `client` | Never sends a message. Opens the client's own UI (panel, dialog, picker) or calls the protocol method in the table below. | No | Every other built-in |
+
+A `client` command marked **immediate** runs as soon as it's picked: no Enter, no arguments. It also runs while a turn is in progress, because it never goes through the inbox.
+
+**Built-ins.** The CLI runs each one in its footer (07 §2.3), and the desktop opens the UI named here (05 §2.3).
+
+| Command | Arguments | Modes | Route | Desktop | Protocol |
+|---|---|---|---|---|---|
+| `/help` | | Chat, Code | client | The `/` menu, expanded, with descriptions and keybindings | `command.list` |
+| `/model` | `[model]` | Chat, Code | client | Opens the composer's model picker; with an argument, sets the model | `session.update {model}` |
+| `/effort` | `[level]` | Chat, Code | client | Opens the effort selector; with an argument, sets the effort | `session.update {effort}` |
+| `/mcp` (alias `/connectors`) | `[enable\|disable <server>]` | Chat, Code | client, immediate | Opens Connectors; with an argument, toggles the server for this session | `mcp.list`, `mcp.set_enabled` |
+| `/skills` | | Chat, Code | client, immediate | Opens the Skills page | `skill.list` |
+| `/memory` | | Chat, Code | client, immediate | Opens Settings → Your Genie → Memory (D31) | `memory.list` |
+| `/permissions` | | Chat, Code | client, immediate | Chat: Capabilities. Code: Permissions | `config.get` |
+| `/cost` (alias `/usage`) | | Chat, Code | client | Opens the context meter's popover, with a link to Usage & spend | `usage.query` |
+| `/context` | | Chat, Code | client | Opens the context meter's popover (D32) | `usage.updated` |
+| `/resume` | | Chat, Code | client | Opens the session switcher with search | `session.list`, `session.search` |
+| `/export` | `[markdown\|json]` | Chat, Code | client | Opens the export menu; with an argument, exports | `session.export` |
+| `/clear` | | Chat, Code | client | Starts a new chat or session in the same project or workspace | `session.create` |
+| `/mode` | `[default\|accept-edits\|plan\|bypass]` | Code | client | Opens the header's mode selector; with an argument, sets the mode | `session.update {mode}` |
+| `/plan` | `[<description>]` | Code | client | Switches to plan mode (D46); with a description, also sends it as a prompt | `session.update {mode}`, `session.prompt` |
+| `/compact` | `[focus]` | Code (D33) | client | Compacts now; the D33 divider shows in the transcript | `session.compact` |
+| `/rewind` | | Code | client | Opens the rewind dialog for the last message (D49) | `checkpoint.preview` |
+| `/worktree` | | Code | client | Opens New session in worktree (05 §3.1, D50) | `session.create {worktree:"new"}` |
+| `/agents` | | Code | client | Opens the agent picker (D46) | — |
+| `/init` | | Code | prompt | Sends Genie's built-in "create GENIE.md" prompt | `session.prompt` |
+
+Commands that aren't available in the session's mode, or that policy blocks, are left out of `command.list`. They aren't returned greyed out.
+
+**What the model sees.** A `prompt` command is stored as typed (`{type:"command", name:"explore", args:"https://…"}`). The engine resolves it when the message is admitted and stores the expanded text with it. The transcript shows the typed form, and the model gets the expansion. Regenerating reuses the stored expansion and does not read the file again. Editing the message creates a new prompt, which is expanded again (SA-47).
+
+**Guard.** If the first text part of a `session.prompt` is exactly a `client` built-in (`/compact`, `/mcp`, …, optionally followed by arguments), the engine rejects it with `command_not_prompt` (02 §8). A client that forgets to handle a built-in therefore gets an error, and the command never reaches the model as plain text (SA-48).
+
+**Changes.** The list changes when a command file changes, a skill is enabled or disabled, an MCP server's prompts change, the mode changes or the workspace is trusted. The engine then emits `commands.changed` (02 §4.2), and clients call `command.list` again.
+
+**Confirmed by the user as D58 (t46, 2026-11-18)**, which also makes the daemon registry the only command source for both desktop and CLI. **Spec assumption (SA-46):** the two routes, the lookup order, the desktop behaviour of each built-in, and the additions beyond 07 §2.3 (`/plan`, and the aliases `/connectors` and `/usage`). Reason: D30 and D37 name the kinds of command and 07 §2.3 names the CLI built-ins, but nothing says how a desktop client runs a built-in. Claude Code tags each command with a type and opens its own UI for the non-prompt ones, with no model turn; Genie follows that so its desktop and CLI behave alike.
 
 ## 10. Browser tools
 

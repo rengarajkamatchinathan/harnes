@@ -31,7 +31,6 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::commands::load_user_commands;
 use super::model::{App, ConnState, Effect, Msg};
 use super::theme::Theme;
 use super::view;
@@ -127,10 +126,7 @@ pub async fn run(opts: Options) -> Result<u8> {
         kind: opened.info.summary.kind,
     });
     app.update(Msg::Files(list_files(&opts.cwd)));
-    app.update(Msg::UserCommands(load_user_commands(&command_dirs(
-        opts.genie_home.as_deref(),
-        &opts.cwd,
-    ))));
+    refresh_commands(&link.conn, &mut app, &sid).await;
 
     // Terminal setup.
     terminal::enable_raw_mode().context("raw mode")?;
@@ -329,6 +325,11 @@ async fn on_incoming(link: &mut Link, app: &mut App, tracker: &mut Follow, i: In
                 if let Ok(c) = serde_json::from_value::<CancelRequest>(n.params) {
                     app.update(Msg::AskWithdrawn(c.id));
                 }
+                return;
+            }
+            if name == m::CommandsChangedNote::NAME {
+                let sid = session_of(tracker);
+                refresh_commands(&link.conn, app, &sid).await;
                 return;
             }
             if name == m::DaemonRestarting::NAME {
@@ -541,6 +542,7 @@ async fn switch(
     });
     app.model.clone_from(&opened.info.model);
     app.mode = opened.info.mode;
+    refresh_commands(&link.conn, app, &sid).await;
     app.push_line(Line::from(format!("── session {sid} ──")));
     if let Err(e) = session::subscribe(&link.conn, &sid, None).await {
         app.update(Msg::Error(format!("{e:#}")));
@@ -608,13 +610,16 @@ pub fn genie_home() -> Option<PathBuf> {
         .or_else(|| std::env::home_dir().map(|h| h.join(".genie")))
 }
 
-fn command_dirs(home: Option<&Path>, cwd: &Path) -> Vec<PathBuf> {
-    let mut v = vec![];
-    if let Some(h) = home {
-        v.push(h.join("commands"));
+/// The `/` menu from the engine (`command.list`, 06 §9.1). An older engine without it
+/// leaves the list empty, and the menu falls back to the local key table.
+async fn refresh_commands(conn: &Connection, app: &mut App, sid: &str) {
+    let params = genie_protocol::api::mcp::CommandListParams {
+        session_id: Some(sid.to_string()),
+        ..Default::default()
+    };
+    if let Ok(r) = conn.call::<m::CommandList>(params).await {
+        app.update(Msg::Commands(r.commands));
     }
-    v.push(cwd.join(".genie/commands"));
-    v
 }
 
 fn agent_dirs(home: Option<&Path>, cwd: &Path) -> Vec<PathBuf> {

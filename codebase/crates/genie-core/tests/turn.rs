@@ -1742,6 +1742,57 @@ mod wiring {
     }
 
     #[tokio::test]
+    async fn command_parts_expand_commands_skills_and_init() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join(".genie");
+        std::fs::create_dir_all(home.join("skills/greet")).unwrap();
+        std::fs::write(
+            home.join("skills/greet/SKILL.md"),
+            "---\nname: greet\ndescription: Greet people warmly.\n---\nAlways greet with GREET-MARKER.\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(home.join("commands")).unwrap();
+        std::fs::write(home.join("commands/hello.md"), "Say hello to $ARGUMENTS").unwrap();
+        let h = hub(d.path());
+        let settings: Arc<dyn SettingsSource> = Arc::new(Settings);
+        let skills = genie_core::runtime::skills::SkillsHub::new(home, h.clone(), settings.clone());
+        let mut t = harness_with(
+            vec![text(&["one"]), text(&["two"]), text(&["three"])],
+            |_| {},
+            vec![],
+            None,
+            settings.clone(),
+            |b, _, _| b.skills(skills.clone()),
+        );
+        let cmd = |name: &str, args: &str| {
+            vec![genie_protocol::message::InputPart::Command {
+                name: name.into(),
+                args: args.into(),
+            }]
+        };
+        t.s.prompt_parts(cmd("hello", "Bob"), Delivery::Steer)
+            .unwrap();
+        t.settle().await;
+        t.s.prompt_parts(cmd("greet", "Ann"), Delivery::Steer)
+            .unwrap();
+        t.settle().await;
+        t.s.prompt_parts(cmd("init", ""), Delivery::Steer).unwrap();
+        t.settle().await;
+        let bodies = t.bodies();
+        let first = bodies[0]["messages"].to_string();
+        assert!(first.contains("Say hello to Bob"), "{first}");
+        let second = bodies[1]["messages"].to_string();
+        assert!(
+            second.contains("GREET-MARKER") && second.contains("Ann"),
+            "{second}"
+        );
+        let third = bodies[2]["messages"].to_string();
+        assert!(third.contains("Create a GENIE.md file"), "{third}");
+        // The expansion is stored with the message: later requests repeat it as sent.
+        assert!(third.contains("Say hello to Bob"), "{third}");
+    }
+
+    #[tokio::test]
     async fn skills_index_skill_tool_and_user_commands() {
         let d = tempfile::tempdir().unwrap();
         let home = d.path().join(".genie");

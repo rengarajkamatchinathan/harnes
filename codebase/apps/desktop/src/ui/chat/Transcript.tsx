@@ -155,11 +155,19 @@ const MessageRow = memo(
       <article className={`msg ${isUser ? "msg--user" : "msg--assistant"}`} aria-label={isUser ? "You" : "Genie"}>
         {isUser ? (
           <div className="bubble">
+            {msg.input
+              ?.filter((p) => p.type === "command")
+              .map((p, i) => (
+                <div key={`cmd${i}`} className="bubble__text">
+                  <span className="slash-token">/{p.name}</span>
+                  {p.args ? ` ${p.args}` : ""}
+                </div>
+              ))}
             {text && <div className="bubble__text">{text}</div>}
-            {msg.input?.some((p) => p.type !== "text") && (
+            {msg.input?.some((p) => p.type !== "text" && p.type !== "command") && (
               <div className="row wrap">
                 {msg.input
-                  .filter((p) => p.type !== "text")
+                  .filter((p) => p.type !== "text" && p.type !== "command")
                   .map((p, i) => (
                     <Badge key={i}>
                       <Icon name={p.type === "attachment" ? "paperclip" : p.type === "skill" ? "sparkle" : "file"} />

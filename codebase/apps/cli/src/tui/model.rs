@@ -20,11 +20,12 @@ use genie_protocol::session::{Delivery, LiveStatus};
 use ratatui::text::{Line, Span};
 use serde_json::{Value, json};
 
-use super::commands::{self, Cmd, UserCommand};
+use super::commands::{self, Cmd};
 use super::markdown;
 use super::theme::{Role, Theme};
 use crate::errors;
 use crate::render;
+use genie_protocol::api::mcp::{CommandInfo, CommandRoute};
 
 /// What the runner should do.
 #[derive(Debug, Clone, PartialEq)]
@@ -83,7 +84,8 @@ pub enum Msg {
     Notice(String),
     Error(String),
     Files(Vec<String>),
-    UserCommands(Vec<UserCommand>),
+    /// The engine's `/` menu (`command.list`, 06 §9.1).
+    Commands(Vec<CommandInfo>),
     Width(u16),
     Connection(ConnState),
     /// The session this view follows changed (new / resumed).
@@ -173,7 +175,8 @@ pub struct App {
     pub inbox: Vec<InboxItemView>,
     pub attachments: Vec<PathBuf>,
     pub files: Vec<String>,
-    pub user_commands: Vec<UserCommand>,
+    /// The engine's command registry; empty until the first `command.list`.
+    pub commands: Vec<CommandInfo>,
     pub notice: Option<String>,
     pub driver: Option<String>,
     pub read_only: bool,
@@ -210,7 +213,7 @@ impl App {
             inbox: vec![],
             attachments: vec![],
             files: vec![],
-            user_commands: vec![],
+            commands: vec![],
             notice: None,
             driver: None,
             read_only: false,
@@ -298,8 +301,8 @@ impl App {
                 self.files = f;
                 vec![]
             }
-            Msg::UserCommands(c) => {
-                self.user_commands = c;
+            Msg::Commands(c) => {
+                self.commands = c;
                 vec![]
             }
             Msg::Width(w) => {
@@ -381,10 +384,13 @@ impl App {
                     }
                     // A slash command without arguments runs right away.
                     let name = self.input.trim().trim_start_matches('/').to_string();
-                    let takes_args = commands::REGISTRY
-                        .iter()
-                        .find(|s| s.slash == Some(name.as_str()))
-                        .is_some_and(|s| !s.args.is_empty());
+                    let takes_args = match self.commands.iter().find(|c| c.name == name) {
+                        Some(c) => c.args_hint.as_deref().is_some_and(|h| !h.is_empty()),
+                        None => commands::REGISTRY
+                            .iter()
+                            .find(|s| s.slash == Some(name.as_str()))
+                            .is_some_and(|s| !s.args.is_empty()),
+                    };
                     if takes_args {
                         return vec![];
                     }
@@ -547,22 +553,28 @@ impl App {
         if let Some(q) = self.input.strip_prefix('/')
             && !q.contains(char::is_whitespace)
         {
-            let mut items: Vec<MenuItem> = commands::REGISTRY
+            // The engine's list first (06 §9.1); CLI-only commands (`/exit`, `/takeover`)
+            // and, before the list arrives, the local key table fill in.
+            let mut items: Vec<MenuItem> = self
+                .commands
                 .iter()
-                .filter_map(|s| s.slash.map(|n| (n, s)))
-                .filter(|(n, _)| n.starts_with(q))
-                .map(|(n, s)| MenuItem {
-                    name: n.to_string(),
-                    hint: format!("{} {}", s.args, s.help).trim().to_string(),
+                .filter(|c| c.name.starts_with(q) || c.aliases.iter().any(|a| a.starts_with(q)))
+                .map(|c| MenuItem {
+                    name: c.name.clone(),
+                    hint: format!("{} {}", c.args_hint.as_deref().unwrap_or(""), c.description)
+                        .trim()
+                        .to_string(),
                 })
                 .collect();
             items.extend(
-                self.user_commands
+                commands::REGISTRY
                     .iter()
-                    .filter(|c| c.name.starts_with(q))
-                    .map(|c| MenuItem {
-                        name: c.name.clone(),
-                        hint: c.description.clone(),
+                    .filter_map(|s| s.slash.map(|n| (n, s)))
+                    .filter(|(n, _)| n.starts_with(q))
+                    .filter(|(n, _)| !self.commands.iter().any(|c| c.name == *n))
+                    .map(|(n, s)| MenuItem {
+                        name: n.to_string(),
+                        hint: format!("{} {}", s.args, s.help).trim().to_string(),
                     }),
             );
             if !items.is_empty() {
@@ -641,29 +653,41 @@ impl App {
         self.set_input(String::new());
         if let Some(rest) = text.strip_prefix('/') {
             let (name, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-            if let Some(cmd) = commands::by_slash(name) {
+            // Aliases (`/connectors`, `/usage`) resolve through the engine's list.
+            let engine = self
+                .commands
+                .iter()
+                .find(|c| c.name == name || c.aliases.iter().any(|a| a == name))
+                .cloned();
+            let canonical = engine.as_ref().map_or(name, |c| c.name.as_str());
+            if engine
+                .as_ref()
+                .is_none_or(|c| c.route != CommandRoute::Prompt)
+                && let Some(cmd) = commands::by_slash(canonical)
+            {
                 return self.run_cmd(cmd, args.trim());
             }
-            if let Some(uc) = self.user_commands.iter().find(|c| c.name == name).cloned() {
-                return self.prompt(uc.expand(args.trim()), delivery);
+            // `prompt` route: Markdown commands, skills, MCP prompts, `/init` (06 §9.1).
+            if let Some(c) = engine.filter(|c| c.route == CommandRoute::Prompt) {
+                return self.command(c.name, args.trim().to_string(), delivery);
             }
-            // `/skill-name` and `/server:prompt` go to the engine as a skill reference.
-            if !name.is_empty() {
-                return vec![Effect::Prompt {
-                    parts: vec![
-                        InputPart::Skill {
-                            id: name.to_string(),
-                        },
-                        InputPart::text(args.trim()),
-                    ]
-                    .into_iter()
-                    .filter(|p| !matches!(p, InputPart::Text { text } if text.is_empty()))
-                    .collect(),
-                    delivery,
-                }];
-            }
+            // Unknown `/word`: sent as text (D58).
         }
         self.prompt(text, delivery)
+    }
+
+    /// Send a `prompt`-route command; the engine expands and stores it (06 §9.1).
+    fn command(&mut self, name: String, args: String, delivery: Delivery) -> Vec<Effect> {
+        let mut parts = vec![InputPart::Command { name, args }];
+        parts.extend(std::mem::take(&mut self.attachments).into_iter().map(|p| {
+            InputPart::FileRef {
+                path: p.to_string_lossy().into_owned(),
+            }
+        }));
+        if self.running() && delivery == Delivery::Queue {
+            self.notice = Some("Queued; it runs after this turn".into());
+        }
+        vec![Effect::Prompt { parts, delivery }]
     }
 
     fn prompt(&mut self, text: String, delivery: Delivery) -> Vec<Effect> {
@@ -709,8 +733,9 @@ impl App {
                     self.say(Role::Text, r);
                 }
                 let uc: Vec<String> = self
-                    .user_commands
+                    .commands
                     .iter()
+                    .filter(|c| c.source != genie_protocol::api::mcp::CommandSource::Builtin)
                     .map(|c| format!("  /{:<43} {}", c.name, c.description))
                     .collect();
                 for r in uc {
@@ -796,13 +821,7 @@ impl App {
                     )]
                 }
             }
-            Cmd::Init => self.prompt(
-                "Create a GENIE.md file at the root of this project with the build, test and \
-                 lint commands, the code layout and the conventions a new contributor needs. \
-                 If GENIE.md already exists, improve it."
-                    .into(),
-                Delivery::Steer,
-            ),
+            Cmd::Init => self.command("init".into(), args.to_string(), Delivery::Steer),
             Cmd::Memory => vec![call("memory", "memory.list", json!({}))],
             Cmd::Skills => vec![call("skills", "skill.list", json!({}))],
             Cmd::Agents => vec![Effect::ListAgents],
@@ -1104,6 +1123,9 @@ impl App {
                         InputPart::FileRef { path } => format!("[{path}]"),
                         InputPart::Attachment { name, .. } => format!("[{name}]"),
                         InputPart::Skill { id } => format!("/{id}"),
+                        InputPart::Command { name, args } => {
+                            format!("/{name} {args}").trim_end().to_string()
+                        }
                         InputPart::Resource { server, uri } => format!("[{server}:{uri}]"),
                     })
                     .collect();

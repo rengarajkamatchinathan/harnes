@@ -6,7 +6,7 @@ import { Button, Card, Select, Switch } from "@genie/ui";
 import { t } from "../i18n";
 import { useApp } from "./context";
 import { GenieMark } from "./GenieMark";
-import { ProviderCard } from "./settings/ProvidersSection";
+import { ConnectForm, providerMeta } from "./settings/ProvidersSection";
 
 export type Step = "welcome" | "privacy" | "provider" | "import" | "memory";
 export const STEPS: Step[] = ["welcome", "privacy", "provider", "import", "memory"];
@@ -94,9 +94,9 @@ export function FirstRun() {
             <h2>{t("firstrun.provider")}</h2>
             <p className="muted">{t("firstrun.providerBody")}</p>
             {app.providers.length > 1 && (
-              <Select aria-label={t("firstrun.preset")} value={p?.id ?? ""} onChange={setProvider} options={app.providers.map((x) => ({ value: x.id, label: x.id }))} />
+              <Select aria-label={t("firstrun.preset")} value={p?.id ?? ""} onChange={setProvider} options={app.providers.filter((x) => x.status !== "disabled").map((x) => ({ value: x.id, label: providerMeta(x).name }))} />
             )}
-            {p ? <ProviderCard p={p} compact /> : <p className="muted">{t("providers.none")}</p>}
+            {p ? <ConnectForm key={p.id} p={p} onDone={() => undefined} /> : <p className="muted">{t("providers.none")}</p>}
           </>
         )}
         {step === "import" && (

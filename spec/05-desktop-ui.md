@@ -55,7 +55,20 @@ Implements D5, D8, D19, D28, D29, D31–D34, D36, D39 (consent), D43 (trust dial
 - **Context meter ring** (D32): fills with context use; hover shows tokens used/window, cost so far, "compaction at X%"; amber near the trigger.
 - **While a turn runs:** the Send button becomes **Stop**; typing and sending delivers as **steer** by default; **Alt+Enter** sends as **queue**; queued items appear as chips above the composer with remove.
   - **Spec assumption (SA-06):** steer by default, queue on Alt+Enter, in both desktop and CLI. Reason: D20/D42 require both deliveries but don't say which is default; steer matches Claude Code's behaviour of folding new input into the running task.
-- Slash commands in chat: `/skill-name`, `/server:prompt` (MCP prompts with an argument form, D30).
+- **Slash commands:** the `/` menu below.
+
+#### Slash menu
+
+D30, D33, D37, D58; 06 §9.1. Chat and Code use the same menu. The list, and what each command does, comes from the engine (`command.list`), so the desktop and the CLI offer the same commands.
+
+- **Opening (D58).** Typing `/` as the first character of the prompt opens a menu above the composer, like Claude's: **one flat, scrolling list of command names**, with no group headers. Typing more filters by name and alias, ranked by match. Unfiltered order: **recently used first** (per user, kept with desktop UI state), then built-ins, then your commands (project, then user) and skills, then connector prompts. The description shows in a tooltip on hover or keyboard focus.
+- **`+` menu (D58).** The composer's `+` gains **Skills & commands**, listing the same non-built-in entries from `command.list`; picking one inserts its `/token`.
+- **Keys.** **↑/↓** choose · **Tab** completes the name · **Enter** runs · **Esc** closes the menu (it doesn't stop a running turn). Hovering selects a row and clicking runs it. The cursor stays in the prompt.
+- **After a pick.** The command shows in the prompt as a token in the accent colour, followed by its argument hint as grey placeholder text (`/plan [<description>]`) until the user types. A command whose hint starts with `<` (required) waits for its argument. Enter runs any other command straight away.
+- **Built-ins open Genie's own UI** (`client` route): no message is sent and nothing streams. `/mcp` opens Connectors, `/skills` the Skills page, `/permissions` Capabilities (Chat) or Permissions (Code), `/memory` Your Genie → Memory, `/model` and `/effort` the composer's pickers, `/cost` and `/context` the context meter's popover, `/resume` the session switcher, `/export` the export menu, and `/clear` starts a new chat. The immediate ones (`/mcp`, `/skills`, `/memory`, `/permissions`) open as soon as they're picked, even while a turn runs. Given an argument, a command that sets something applies it directly (`/model <id>`, `/mcp disable <server>`) and confirms with a toast. The full table is in 06 §9.1.
+- **Your commands, skills and connector prompts are sent as a message** (`prompt` route), and the reply streams as usual. A connector prompt with arguments opens its argument form first (D30). In the transcript, the user message shows what was typed, as a token (`/explore https://…`). **Show prompt** expands the text the model received.
+- **No match.** If nothing matches, the menu says "No command matches. Enter sends it as a message.", and Enter sends the text unchanged.
+- **Code mode** adds `/mode`, `/plan`, `/compact`, `/rewind`, `/worktree`, `/agents` and `/init` (§3.2).
 
 ### 2.4 Projects (t31, D32)
 
@@ -92,6 +105,7 @@ D54, D55; t23, t24.
 - **Plan mode:** the final plan renders as a card with **Approve → default / accept-edits** and **Keep planning** (D46).
 - **Rewind** action on each message (D49): dialog with Restore files / conversation / both, the file list, external changes and skipped files.
 - **Worktree finish** footer (D50): Merge into <base> · Create PR · Keep · Discard.
+- **Composer:** as in Chat, including the `/` menu (§2.3), plus the Code built-ins: `/mode` and `/plan` set the header's mode selector, `/compact` shows the D33 divider, `/rewind` opens the rewind dialog for the last message, `/worktree` opens New session in worktree, `/agents` the agent picker, and `/init` is sent as a prompt (06 §9.1).
 - **Trust dialog** on first open of a folder (D43): Trust / Trust once / Don't trust, listing what the project can configure. **Definition-hash approvals** for project MCP servers, hooks and setup commands show a diff with Approve / Skip.
 
 ### 3.3 Right panel (D54)

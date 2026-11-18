@@ -251,87 +251,6 @@ pub fn by_slash(name: &str) -> Option<Cmd> {
         .map(|s| s.cmd)
 }
 
-/// A user command from `~/.genie/commands` or `.genie/commands` (Markdown body with
-/// `$ARGUMENTS`), sent as a prompt.
-#[derive(Debug, Clone, PartialEq)]
-pub struct UserCommand {
-    pub name: String,
-    pub description: String,
-    pub body: String,
-}
-
-impl UserCommand {
-    pub fn expand(&self, args: &str) -> String {
-        if self.body.contains("$ARGUMENTS") {
-            self.body.replace("$ARGUMENTS", args)
-        } else if args.is_empty() {
-            self.body.clone()
-        } else {
-            format!("{}\n\n{args}", self.body)
-        }
-    }
-}
-
-/// Load `*.md` user commands from the given directories (later dirs win by name).
-/// Subdirectories become `dir:name`. Frontmatter `description:` is used when present.
-pub fn load_user_commands(dirs: &[std::path::PathBuf]) -> Vec<UserCommand> {
-    let mut out: Vec<UserCommand> = vec![];
-    for dir in dirs {
-        let mut stack = vec![(dir.clone(), String::new())];
-        while let Some((d, prefix)) = stack.pop() {
-            let Ok(rd) = std::fs::read_dir(&d) else {
-                continue;
-            };
-            for e in rd.flatten() {
-                let p = e.path();
-                let stem = p
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if p.is_dir() {
-                    stack.push((p, format!("{prefix}{stem}:")));
-                } else if p.extension().is_some_and(|x| x == "md")
-                    && let Ok(text) = std::fs::read_to_string(&p)
-                {
-                    let (description, body) = split_frontmatter(&text);
-                    let name = format!("{prefix}{stem}");
-                    out.retain(|c| c.name != name);
-                    out.push(UserCommand {
-                        name,
-                        description,
-                        body,
-                    });
-                }
-            }
-        }
-    }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out
-}
-
-fn split_frontmatter(text: &str) -> (String, String) {
-    if let Some(rest) = text.strip_prefix("---\n")
-        && let Some(end) = rest.find("\n---")
-    {
-        let fm = &rest[..end];
-        let body = rest[end + 4..].trim_start_matches('\n');
-        let desc = fm
-            .lines()
-            .find_map(|l| l.strip_prefix("description:"))
-            .map(|d| d.trim().trim_matches('"').to_string())
-            .unwrap_or_default();
-        return (desc, body.to_string());
-    }
-    let desc = text
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim_start_matches('#')
-        .trim()
-        .to_string();
-    (desc, text.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -373,23 +292,5 @@ mod tests {
         ] {
             assert!(by_slash(n).is_some(), "/{n}");
         }
-    }
-
-    #[test]
-    fn user_commands_load_and_expand() {
-        let d = tempfile::tempdir().unwrap();
-        std::fs::write(
-            d.path().join("review.md"),
-            "---\ndescription: Review code\n---\nReview $ARGUMENTS",
-        )
-        .unwrap();
-        std::fs::create_dir(d.path().join("git")).unwrap();
-        std::fs::write(d.path().join("git/pr.md"), "# Open a PR\nDo it").unwrap();
-        let c = load_user_commands(&[d.path().to_path_buf()]);
-        assert_eq!(c.len(), 2);
-        assert_eq!(c[0].name, "git:pr");
-        assert_eq!(c[0].description, "Open a PR");
-        assert_eq!(c[1].description, "Review code");
-        assert_eq!(c[1].expand("src/"), "Review src/");
     }
 }

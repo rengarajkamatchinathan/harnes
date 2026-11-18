@@ -9,7 +9,7 @@ import { t } from "../../i18n";
 import { useApp, useAsync } from "../context";
 import { coerce, controlFor, description, keySchema, matches, sectionOf, SECTIONS, uiKeys, type Control, type KeyMeta, type SectionId } from "./schema";
 import { AccountSection, AppearanceSection, CapabilitiesSection, ConnectorsSection, DeveloperSection, GenieSection, GeneralExtras, PrivacySection, UsageSection } from "./Sections";
-import { ProvidersSection } from "./ProvidersSection";
+import { ProvidersSection, providerMeta } from "./ProvidersSection";
 import { PermissionsSection } from "./ManageSections";
 
 export function SettingsPage() {
@@ -22,8 +22,10 @@ export function SettingsPage() {
   const keys = useMemo(() => uiKeys(schema.data?.ui), [schema.data]);
   const [restart, setRestart] = useState(false);
 
-  // Appearance draws its own theme control; don't render the schema's copy beside it.
-  const own = (k: KeyMeta) => k.key !== "theme";
+  // Appearance draws its own theme control, and Providers tucks the raw `providers` JSON
+  // under its Advanced disclosure; don't render the schema's copies beside them.
+  const own = (k: KeyMeta) => k.key !== "theme" && k.key !== "providers";
+  const rawProviders = keys.filter((k) => k.key === "providers");
   const shown = (q ? keys.filter((k) => matches(q, k, keySchema(schema.data?.schema, k.key))) : keys.filter((k) => sectionOf(k.key) === section)).filter((k) => q || own(k));
 
   const close = () => app.setUi({ view: "main" });
@@ -69,7 +71,7 @@ export function SettingsPage() {
             <>
               {section === "general" && <GeneralExtras />}
               {section === "genie" && <GenieSection />}
-              {section === "providers" && <ProvidersSection />}
+              {section === "providers" && <ProvidersSection advanced={rawProviders.length ? <SchemaFields metas={rawProviders} schema={schema.data?.schema} org={org} onRestart={() => setRestart(true)} bare /> : undefined} />}
               {section === "capabilities" && <CapabilitiesSection />}
               {section === "connectors" && <ConnectorsSection />}
               {section === "permissions" && <PermissionsSection />}
@@ -110,7 +112,7 @@ export function humanize(v: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : v;
 }
 
-function SchemaFields({ metas, schema, org, onRestart }: { metas: KeyMeta[]; schema: unknown; org: string; onRestart: () => void }) {
+function SchemaFields({ metas, schema, org, onRestart, bare }: { metas: KeyMeta[]; schema: unknown; org: string; onRestart: () => void; /** No schema descriptions (the caller explains). */ bare?: boolean }) {
   const app = useApp();
   const session = app.ui.activeSession ? app.sessions.get(app.ui.activeSession) : null;
   const cwd = app.ui.mode === "code" ? (session?.workspace_id ?? null) : null;
@@ -140,6 +142,7 @@ function SchemaFields({ metas, schema, org, onRestart }: { metas: KeyMeta[]; sch
       scope={m.scopes.includes(scope) ? scope : "user"}
       cwd={cwd}
       onRestart={onRestart}
+      bare={bare}
     />
   );
   return (
@@ -161,7 +164,7 @@ function SchemaFields({ metas, schema, org, onRestart }: { metas: KeyMeta[]; sch
   );
 }
 
-function SchemaField({ meta, schema, value, source, locked, scope, cwd, onRestart }: { meta: KeyMeta; schema: Record<string, unknown> | undefined; value: unknown; source?: string; locked: string | null; scope: ConfigScope; cwd: string | null; onRestart: () => void }) {
+function SchemaField({ meta, schema, value, source, locked, scope, cwd, onRestart, bare }: { meta: KeyMeta; schema: Record<string, unknown> | undefined; value: unknown; source?: string; locked: string | null; scope: ConfigScope; cwd: string | null; onRestart: () => void; bare?: boolean }) {
   const app = useApp();
   const control: Control = controlFor(schema);
   const [draft, setDraft] = useState<unknown>(value);
@@ -209,15 +212,15 @@ function SchemaField({ meta, schema, value, source, locked, scope, cwd, onRestar
       break;
     default:
       // Model keys pick from the engine's model list instead of a free-text id.
-      input = MODEL_KEYS.has(meta.key) && app.models.length ? (
+      input = MODEL_KEYS.has(meta.key) && app.usableModels.length ? (
         <Select
           id={id}
           disabled={!!locked}
           value={String(draft ?? "")}
           onChange={(v) => (setDraft(v), void commit(v))}
           options={[
-            ...(draft == null || draft === "" || !app.models.some((m) => m.id === draft) ? [{ value: String(draft ?? ""), label: draft ? String(draft) : t("settings.choose"), disabled: true }] : []),
-            ...app.models.map((m) => ({ value: m.id, label: m.name || m.id, group: m.provider })),
+            ...(draft == null || draft === "" || !app.usableModels.some((m) => m.id === draft) ? [{ value: String(draft ?? ""), label: draft ? t("settings.modelUnavailable", { id: String(draft) }) : t("settings.choose"), disabled: true }] : []),
+            ...app.usableModels.map((m) => ({ value: m.id, label: m.name || m.id, group: providerMeta({ id: m.provider, kind: m.provider }).name })),
           ]}
         />
       ) : (
@@ -225,7 +228,7 @@ function SchemaField({ meta, schema, value, source, locked, scope, cwd, onRestar
       );
   }
   return (
-    <Field inline={control.kind !== "list" && control.kind !== "json"} label={meta.title} htmlFor={id} description={description(schema)} error={error} saved={saved} locked={locked} extra={source && source !== "default" && source !== "user" ? <span className="muted">({source})</span> : undefined}>
+    <Field inline={control.kind !== "list" && control.kind !== "json"} label={meta.title} htmlFor={id} description={bare ? undefined : description(schema)} error={error} saved={saved} locked={locked} extra={source && source !== "default" && source !== "user" ? <span className="muted">({source})</span> : undefined}>
       {input}
     </Field>
   );

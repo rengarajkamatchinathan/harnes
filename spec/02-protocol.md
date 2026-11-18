@@ -123,6 +123,7 @@ type SessionEventEnvelope = {
 | `status` | `"thinking"|"retrying"|"compacting"|"interrupting"|"waiting_for_children"` |
 | `browser.frame` | screencast frame (§6.6) |
 | `terminal.output` | terminal bytes (§6.7) |
+| `commands.changed` | `{}`: the session's command list changed; call `command.list` again (06 §9.1) |
 
 ## 5. Driver lease
 
@@ -179,7 +180,8 @@ Names follow `area.verb`. Results are omitted where they are `{}`. All ids are U
 
 - **Edit = prompt with `parent_id`** set to the edited message's parent: it creates a sibling branch (D24).
 - `client_msg_id` makes `prompt` idempotent across reconnects.
-- `InputPart = {type:"text", text} | {type:"attachment", blob_id, name, mime} | {type:"resource", server, uri} | {type:"skill", id} | {type:"file_ref", path}`.
+- `InputPart = {type:"text", text} | {type:"attachment", blob_id, name, mime} | {type:"resource", server, uri} | {type:"skill", id} | {type:"file_ref", path} | {type:"command", name, args}`.
+- `command` is a `/` command with the `prompt` route (06 §9.1): `name` has no slash (`explore`, `git:pr`, `files:summarize`), and `args` is the rest of the line. The engine stores the expanded text with the message when it is admitted. `skill` stays for skills attached from the "+" menu. A text part that starts with a `client` built-in is rejected with `command_not_prompt` (§8).
 
 ### 6.3 Asks (permissions, elicitation, sampling, questions)
 
@@ -248,6 +250,7 @@ Notification: `config.changed {keys, scope}`.
 | `mcp.tools` / `mcp.resources` / `mcp.prompts` | `{name}` → lists |
 | `mcp.resource.read` | `{name, uri}` → `{blob_id, mime}` |
 | `skill.list` / `skill.set_enabled` / `skill.upload` | `{blob_id}` for `.zip`/`.skill` upload (D37) |
+| `command.list` | `{session_id}`, or `{kind, project_id?, workspace_path?}` before a session exists → `{commands:[{name, aliases, description, args_hint, source:"builtin"|"project"|"user"|"skill"|"mcp_prompt", route:"prompt"|"client", immediate, server?}], diagnostics}`: the `/` menu, already filtered by mode and policy (06 §9.1) |
 | `directory.list` | `{kind:"connectors"|"skills", query?}` → signed-feed entries |
 | `directory.install` | `{kind, id, version}` → returns the "what will run" manifest first; second call with `confirm: true` |
 
@@ -333,6 +336,7 @@ JSON-RPC error objects with a typed `data.kind` (t02). Internal defects become `
 | -32011 | `busy` | e.g. daemon draining |
 | -32012 | `invalid_state` | e.g. resume when not interrupted |
 | -32013 | `cancelled` | |
+| -32014 | `command_not_prompt` | `{name}`: a `client` built-in sent as prompt text; the client must run it itself (06 §9.1) |
 | -32099 | `internal_error` | `{incident_id}`; details only in logs |
 
 **Spec assumption (SA-09):** these numeric codes. Reason: t02 fixes `data.kind` values but not codes; one code per kind lets non-Rust tools switch on the code.

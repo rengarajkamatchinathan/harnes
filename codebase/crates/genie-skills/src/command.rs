@@ -20,19 +20,220 @@ use serde_json::Value;
 use crate::frontmatter;
 use crate::scan::{Diagnostic, Severity};
 
-/// Engine built-ins (06 §9). User commands with these names are ignored.
-pub const BUILTIN_COMMANDS: &[(&str, &str)] = &[
-    ("compact", "Summarise the conversation to free context"),
-    ("init", "Create GENIE.md for this project"),
-    ("memory", "Show and edit memory"),
-    ("skills", "List skills"),
-    ("model", "Switch the model"),
-    ("help", "Commands and keys"),
+/// Which session kinds a built-in appears in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinModes {
+    Both,
+    CodeOnly,
+}
+
+/// One engine built-in (06 §9.1 table).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Builtin {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub description: &'static str,
+    pub args_hint: Option<&'static str>,
+    pub modes: BuiltinModes,
+    /// `prompt` route (sent as a message); otherwise `client` (no model turn).
+    pub prompt: bool,
+    /// Runs as soon as it is picked, even during a turn.
+    pub immediate: bool,
+}
+
+const fn b(
+    name: &'static str,
+    aliases: &'static [&'static str],
+    description: &'static str,
+    args_hint: Option<&'static str>,
+    modes: BuiltinModes,
+    immediate: bool,
+) -> Builtin {
+    Builtin {
+        name,
+        aliases,
+        description,
+        args_hint,
+        modes,
+        prompt: false,
+        immediate,
+    }
+}
+
+use BuiltinModes::{Both, CodeOnly};
+
+/// Engine built-ins in menu order (06 §9.1, D58). User commands and skills with these
+/// names (or aliases) are skipped with a diagnostic.
+pub const BUILTINS: &[Builtin] = &[
+    b(
+        "help",
+        &[],
+        "Show commands and keyboard shortcuts",
+        None,
+        Both,
+        false,
+    ),
+    b(
+        "model",
+        &[],
+        "Switch the model",
+        Some("[model]"),
+        Both,
+        false,
+    ),
+    b(
+        "effort",
+        &[],
+        "Change reasoning effort",
+        Some("[level]"),
+        Both,
+        false,
+    ),
+    b(
+        "mcp",
+        &["connectors"],
+        "Manage connectors (MCP servers)",
+        Some("[enable|disable <server>]"),
+        Both,
+        true,
+    ),
+    b("skills", &[], "Browse and manage skills", None, Both, true),
+    b("memory", &[], "View and edit memory", None, Both, true),
+    b(
+        "permissions",
+        &[],
+        "Capabilities and permission rules",
+        None,
+        Both,
+        true,
+    ),
+    b(
+        "cost",
+        &["usage"],
+        "Show usage and cost for this session",
+        None,
+        Both,
+        false,
+    ),
+    b(
+        "context",
+        &[],
+        "Show context window usage",
+        None,
+        Both,
+        false,
+    ),
+    b(
+        "resume",
+        &[],
+        "Open another chat or session",
+        None,
+        Both,
+        false,
+    ),
+    b(
+        "export",
+        &[],
+        "Export this conversation",
+        Some("[markdown|json]"),
+        Both,
+        false,
+    ),
+    b(
+        "clear",
+        &[],
+        "Start a new chat or session",
+        None,
+        Both,
+        false,
+    ),
+    b(
+        "mode",
+        &[],
+        "Change the permission mode",
+        Some("[default|accept-edits|plan|bypass]"),
+        CodeOnly,
+        false,
+    ),
+    b(
+        "plan",
+        &[],
+        "Switch to plan mode",
+        Some("[<description>]"),
+        CodeOnly,
+        false,
+    ),
+    b(
+        "compact",
+        &[],
+        "Summarise the conversation to free context",
+        Some("[focus]"),
+        CodeOnly,
+        false,
+    ),
+    b(
+        "rewind",
+        &[],
+        "Rewind files or conversation to a checkpoint",
+        None,
+        CodeOnly,
+        false,
+    ),
+    b(
+        "worktree",
+        &[],
+        "Start a new session in a worktree",
+        None,
+        CodeOnly,
+        false,
+    ),
+    b("agents", &[], "Pick an agent", None, CodeOnly, false),
+    Builtin {
+        name: "init",
+        aliases: &[],
+        description: "Create GENIE.md for this project",
+        args_hint: None,
+        modes: CodeOnly,
+        prompt: true,
+        immediate: false,
+    },
 ];
 
-pub fn is_builtin(name: &str) -> bool {
-    BUILTIN_COMMANDS.iter().any(|(n, _)| *n == name)
+/// The built-in named `name` (or one of its aliases).
+pub fn builtin(name: &str) -> Option<&'static Builtin> {
+    BUILTINS
+        .iter()
+        .find(|b| b.name == name || b.aliases.contains(&name))
 }
+
+pub fn is_builtin(name: &str) -> bool {
+    builtin(name).is_some()
+}
+
+/// The `client` built-in a prompt would send to the model, if any (06 §9.1 guard, SA-48):
+/// a first text part that is exactly `/name` or `/name args`, or a `command` part naming
+/// one. Returns the built-in's canonical name.
+pub fn client_builtin_in_prompt(
+    first_text: Option<&str>,
+    command: Option<&str>,
+) -> Option<&'static str> {
+    let name = match (command, first_text) {
+        (Some(c), _) => c,
+        (None, Some(t)) => {
+            let line = t.trim_start().strip_prefix('/')?;
+            line.split(char::is_whitespace).next().unwrap_or("")
+        }
+        (None, None) => return None,
+    };
+    builtin(name).filter(|b| !b.prompt).map(|b| b.name)
+}
+
+/// Genie's prompt for `/init` (a `prompt`-route built-in).
+pub const INIT_PROMPT: &str = "Create a GENIE.md file at the root of this project. Read the \
+repository first (README, build files, the main source folders) and write concise \
+instructions for a coding agent: what the project is, how to build, test and lint it, \
+the code layout, and conventions worth following. If GENIE.md, AGENTS.md or CLAUDE.md \
+already exists, improve it instead of starting over. Keep it short and specific.";
 
 /// Largest command file read (bytes).
 pub const MAX_COMMAND_FILE: u64 = 256 * 1024;
@@ -480,5 +681,21 @@ mod tests {
     #[test]
     fn builtins() {
         assert!(is_builtin("compact") && is_builtin("help") && !is_builtin("review"));
+        assert_eq!(builtin("connectors").map(|b| b.name), Some("mcp"));
+        assert_eq!(builtin("usage").map(|b| b.name), Some("cost"));
+        assert!(builtin("init").is_some_and(|b| b.prompt));
+        assert_eq!(
+            client_builtin_in_prompt(Some("/compact now"), None),
+            Some("compact")
+        );
+        assert_eq!(client_builtin_in_prompt(Some("/usage"), None), Some("cost"));
+        assert_eq!(client_builtin_in_prompt(Some("/init"), None), None);
+        assert_eq!(
+            client_builtin_in_prompt(Some("/usr/bin is here"), None),
+            None
+        );
+        assert_eq!(client_builtin_in_prompt(Some("hi /model"), None), None);
+        assert_eq!(client_builtin_in_prompt(None, Some("mcp")), Some("mcp"));
+        assert_eq!(client_builtin_in_prompt(None, Some("review")), None);
     }
 }

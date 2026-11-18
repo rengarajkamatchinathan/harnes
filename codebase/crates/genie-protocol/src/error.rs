@@ -26,6 +26,8 @@ pub enum ErrorKind {
     Busy,
     InvalidState,
     Cancelled,
+    /// A `client` built-in sent as prompt text (06 §9.1); the client must run it itself.
+    CommandNotPrompt,
     InternalError,
     /// Forward compatibility: unknown kinds from a newer peer (02 §10).
     #[serde(other)]
@@ -53,12 +55,13 @@ impl ErrorKind {
             ErrorKind::Busy => -32011,
             ErrorKind::InvalidState => -32012,
             ErrorKind::Cancelled => -32013,
+            ErrorKind::CommandNotPrompt => -32014,
             ErrorKind::InternalError | ErrorKind::Unknown => -32099,
         }
     }
 
     pub fn from_code(code: i64) -> ErrorKind {
-        const ALL: [ErrorKind; 18] = [
+        const ALL: [ErrorKind; 19] = [
             ErrorKind::ParseError,
             ErrorKind::InvalidRequest,
             ErrorKind::MethodNotFound,
@@ -76,6 +79,7 @@ impl ErrorKind {
             ErrorKind::Busy,
             ErrorKind::InvalidState,
             ErrorKind::Cancelled,
+            ErrorKind::CommandNotPrompt,
             ErrorKind::InternalError,
         ];
         ALL.into_iter()
@@ -102,6 +106,7 @@ impl ErrorKind {
             ErrorKind::Busy => "busy",
             ErrorKind::InvalidState => "invalid_state",
             ErrorKind::Cancelled => "cancelled",
+            ErrorKind::CommandNotPrompt => "command_not_prompt",
             ErrorKind::InternalError => "internal_error",
             ErrorKind::Unknown => "unknown",
         }

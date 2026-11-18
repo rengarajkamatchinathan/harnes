@@ -1351,6 +1351,21 @@ fn session_prompt(
     if p.parts.is_empty() {
         return Err(RpcError::invalid_params("parts must not be empty"));
     }
+    // `client` built-ins never reach the model (06 §9.1, SA-48).
+    let (first_text, command) = match p.parts.first() {
+        Some(genie_protocol::message::InputPart::Text { text }) => (Some(text.as_str()), None),
+        Some(genie_protocol::message::InputPart::Command { name, .. }) => {
+            (None, Some(name.as_str()))
+        }
+        _ => (None, None),
+    };
+    if let Some(name) = genie_skills::command::client_builtin_in_prompt(first_text, command) {
+        return Err(RpcError::new(
+            ErrorKind::CommandNotPrompt,
+            format!("/{name} is a client command; run it in the client"),
+        )
+        .with_data(json!({ "name": name })));
+    }
     let key = (p.session_id.clone(), p.client_msg_id.clone());
     if let Some(prev) = state
         .prompts

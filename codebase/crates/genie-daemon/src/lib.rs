@@ -472,7 +472,7 @@ fn build_engine(
                     turns,
                     store.clone(),
                 );
-                rb = rb.tool_provider(mcp.clone());
+                rb = rb.tool_provider(mcp.clone()).mcp_prompts(mcp.clone());
                 services.mcp = Some(mcp);
             }
             Err(e) => tracing::error!(error = %e, "MCP unavailable"),

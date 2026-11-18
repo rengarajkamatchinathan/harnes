@@ -44,6 +44,14 @@ pub enum InputPart {
     FileRef {
         path: String,
     },
+    /// A `/` command with the `prompt` route (06 §9.1): `name` without the slash
+    /// (`explore`, `git:pr`, `server:prompt`), `args` the rest of the line. The engine
+    /// stores the expansion when the message is admitted.
+    Command {
+        name: String,
+        #[serde(default)]
+        args: String,
+    },
 }
 
 impl InputPart {

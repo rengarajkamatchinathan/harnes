@@ -326,6 +326,48 @@ export interface ClientRef {
   label?: string | null;
 }
 
+/** One row of the `/` menu. */
+export interface CommandInfo {
+  aliases?: string[];
+  /** Argument hint: `[x]` optional, `<x>` required. */
+  args_hint?: string | null;
+  description: string;
+  /** A `client` command that runs as soon as it is picked, even during a turn. */
+  immediate?: boolean;
+  /** Without the slash (`model`, `git:pr`, `github:review`). */
+  name: string;
+  route: CommandRoute;
+  /** MCP server of a `mcp_prompt`. */
+  server?: string | null;
+  source: CommandSource;
+}
+
+/**
+ * `command.list`: by `session_id`, or by `kind` (+ `project_id` / `workspace_path`)
+ * before a session exists.
+ */
+export interface CommandListParams {
+  kind?: SessionKind | null;
+  project_id?: string | null;
+  session_id?: string | null;
+  workspace_path?: string | null;
+}
+
+export interface CommandListResult {
+  commands: CommandInfo[];
+  /** Skipped files, name clashes with built-ins, unreachable MCP servers. */
+  diagnostics?: string[];
+}
+
+/** What a client does with a command (06 §9.1). */
+export type CommandRoute = "unknown" | "prompt" | "client";
+
+/** Where a command comes from; also its lookup order (built-ins win). */
+export type CommandSource = "builtin" | "project" | "user" | "skill" | "mcp_prompt" | "unknown";
+
+/** `commands.changed`: call `command.list` again. */
+export type CommandsChanged = Record<string, unknown>;
+
 export type CommitThen = "push" | "pr" | "unknown";
 
 export interface CompactParams {
@@ -755,7 +797,7 @@ export interface InitializeResult {
 export type InputEvent = ({ action: string; button?: string | null; click_count?: number; modifiers?: number; type: "mouse"; x: number; y: number }) | ({ action: string; code: string; key: string; modifiers?: number; text?: string | null; type: "key" }) | { delta_x: number; delta_y: number; type: "wheel"; x: number; y: number } | { selection_end: number; selection_start: number; text: string; type: "ime" } | { text: string; type: "insert_text" };
 
 /** What a client sends in `session.prompt` (02 §6.2). */
-export type InputPart = { text: string; type: "text" } | { blob_id: string; mime: string; name: string; type: "attachment" } | { server: string; type: "resource"; uri: string } | { id: string; type: "skill" } | { path: string; type: "file_ref" };
+export type InputPart = { text: string; type: "text" } | { blob_id: string; mime: string; name: string; type: "attachment" } | { server: string; type: "resource"; uri: string } | { id: string; type: "skill" } | { path: string; type: "file_ref" } | { args?: string; name: string; type: "command" };
 
 export interface InstalledBrowser {
   kind: BrowserKind;

@@ -90,4 +90,22 @@ describe("app over the mock platform", () => {
     expect(app.openDeepLink("genie://settings/providers")).toBe(true);
     expect(app.ui).toMatchObject({ view: "settings", settingsSection: "providers" });
   });
+
+  it("never offers or defaults to a model whose provider isn't connected", async () => {
+    const platform = createMockPlatform({ tickMs: 0 });
+    const app = new App(platform);
+    await app.start();
+    await until(() => app.models.length > 0 && app.providers.length > 0);
+    // The catalog lists Claude first, but Anthropic has no key yet.
+    expect(app.models[0].provider).toBe("anthropic");
+    expect(app.usableModels.some((m) => m.provider === "anthropic")).toBe(false);
+    expect(app.preferredModel()).toBe("mock/genie-small");
+    // A stale pick of an unconnected model is skipped, too.
+    app.setUi({ model: "anthropic/claude-sonnet-4-5" });
+    expect(app.preferredModel()).toBe("mock/genie-small");
+    // Once Anthropic is connected its models become usable and the pick sticks.
+    await app.client.provider.credential.add({ provider: "anthropic", kind: "key", label: "Work", secret: "sk-ant-1234" });
+    await app.refreshLists();
+    expect(app.preferredModel()).toBe("anthropic/claude-sonnet-4-5");
+  });
 });

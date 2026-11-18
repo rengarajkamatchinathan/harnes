@@ -123,6 +123,8 @@ pub struct AgentRuntime {
     pub turns: Arc<ActiveTurns>,
     /// Skills and slash commands (06 §9).
     pub skills: Option<Arc<skills::SkillsHub>>,
+    /// MCP hub for `/server:prompt` commands (06 §9.1); tools come via `tool_providers`.
+    pub mcp: Option<Arc<mcp::McpHub>>,
     /// Per-turn taint cells; the web tools' [`genie_tools::web::TaintPort`].
     pub taints: Arc<host::TurnTaints>,
     /// The shell tool's runtime (Code): cwd per session, background jobs.
@@ -163,6 +165,43 @@ impl AgentRuntime {
             Some(s) => s.resolve_input(session_id, parts),
             None => parts.to_vec(),
         }
+    }
+
+    /// Replace `command` parts that name an MCP prompt (`server:prompt`) with the prompt's
+    /// text (`prompts/get`). Other parts are returned unchanged; [`Self::resolve_input`]
+    /// handles them.
+    pub async fn expand_mcp_commands(
+        &self,
+        session_id: &str,
+        parts: &[genie_protocol::message::InputPart],
+    ) -> Vec<genie_protocol::message::InputPart> {
+        use genie_protocol::message::InputPart;
+        let Some(hub) = &self.mcp else {
+            return parts.to_vec();
+        };
+        let mut out = Vec::with_capacity(parts.len());
+        for p in parts {
+            match p {
+                InputPart::Command { name, args }
+                    if name.contains(':')
+                        // A Markdown command in a subfolder (`git:pr`) wins over MCP.
+                        && !self
+                            .skills
+                            .as_ref()
+                            .is_some_and(|s| s.has_command(session_id, name)) =>
+                {
+                    match hub.expand_prompt(name, args).await {
+                        Some(Ok(text)) => out.push(InputPart::text(text)),
+                        Some(Err(e)) => out.push(InputPart::text(format!(
+                            "[/{name} could not be loaded: {e}]"
+                        ))),
+                        None => out.push(p.clone()),
+                    }
+                }
+                _ => out.push(p.clone()),
+            }
+        }
+        out
     }
 
     /// Canonical parts of a user message: skills/commands resolved, attachments read
@@ -327,6 +366,7 @@ impl RuntimeBuilder {
                 tool_providers: Vec::new(),
                 turns: Arc::new(ActiveTurns::new()),
                 skills: None,
+                mcp: None,
                 taints: Arc::new(host::TurnTaints::default()),
                 shell: None,
                 web_search: None,
@@ -406,6 +446,12 @@ impl RuntimeBuilder {
     /// tools for Chat and Code, skill parts and user commands in prompts.
     pub fn skills(mut self, hub: Arc<skills::SkillsHub>) -> Self {
         self.rt.skills = Some(hub);
+        self
+    }
+
+    /// `/server:prompt` commands expand through this hub's `prompts/get` (06 §9.1).
+    pub fn mcp_prompts(mut self, hub: Arc<mcp::McpHub>) -> Self {
+        self.rt.mcp = Some(hub);
         self
     }
 

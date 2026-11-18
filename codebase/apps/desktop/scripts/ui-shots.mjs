@@ -77,7 +77,8 @@ async function click(sel, text) {
   return true;
 }
 const key = async (k, code = k, modifiers = 0) => {
-  await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, modifiers, windowsVirtualKeyCode: k === "Escape" ? 27 : k === "Enter" ? 13 : 0 });
+  const vk = { Escape: 27, Enter: 13, Tab: 9, Backspace: 8, ArrowDown: 40, ArrowUp: 38 }[k] ?? 0;
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, modifiers, windowsVirtualKeyCode: vk });
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, modifiers });
 };
 const type = (text) => send("Input.insertText", { text });
@@ -100,6 +101,20 @@ for (const theme of themes)
     await sleep(2200);
     await shot("01-home");
 
+    // The / menu (D58): names, the selected row's tooltip, then a picked command's token + hint.
+    await click("textarea");
+    await type("/");
+    await sleep(300);
+    await shot("01b-slash-menu");
+    await key("ArrowDown");
+    await key("ArrowDown");
+    await shot("01c-slash-tip");
+    await type("rev");
+    await sleep(150);
+    await key("Tab");
+    await shot("01d-slash-token");
+    for (let i = 0; i < 12; i++) await key("Backspace");
+
     await click("textarea");
     await type("Show me a markdown table and a code sample");
     await key("Enter");
@@ -107,6 +122,12 @@ for (const theme of themes)
     await shot("02-streaming");
     await sleep(3500);
     await shot("03-reply");
+    await click("textarea");
+    await type("/");
+    await sleep(300);
+    await shot("03b-slash-reply");
+    await key("Escape");
+    await key("Backspace");
 
     // Right panel while a chat is open (at mid widths the sidebar turns into a drawer).
     if (await click(".chat__header .header-icons button")) {

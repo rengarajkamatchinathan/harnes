@@ -17,7 +17,7 @@ use genie_protocol::api::mcp::{
 };
 use genie_protocol::api::mcp::{DirectoryKind, IdResult};
 use genie_protocol::api::session::ToolsListResult;
-use genie_protocol::common::{ConfigScope, Empty};
+use genie_protocol::common::{ConfigScope, Empty, SessionKind};
 use genie_protocol::methods::{self as m, Method};
 use genie_protocol::workspace::{ConfigChanged, PolicyChanged};
 use genie_protocol::{ErrorKind, Request, Response, RpcError};
@@ -347,6 +347,7 @@ impl Services {
                 to_result(&ToolsListResult { tools })
             }),
 
+            n if n == m::CommandList::NAME => return self.command_list(conn, r),
             n if n == m::SkillList::NAME => self
                 .skills
                 .as_ref()
@@ -557,6 +558,68 @@ impl Services {
         Handled::Later
     }
 
+    /// `command.list` (06 §9.1, D58): built-ins, Markdown commands and skills from the
+    /// skills hub, then MCP prompts from connected servers (asked concurrently per call).
+    fn command_list(self: &Arc<Self>, conn: &Arc<Conn>, r: &Request) -> Handled {
+        let r = r.clone();
+        let c = conn.clone();
+        let me = self.clone();
+        conn.scope()
+            .child("command-list")
+            .spawn_cancellable(async move {
+                let res: Result<Value, RpcError> = async {
+                    let p = params::<m::CommandList>(&r)?;
+                    let skills = me
+                        .skills
+                        .clone()
+                        .ok_or_else(|| not_implemented(m::CommandList::NAME))?;
+                    let (kind, workspace) = match &p.session_id {
+                        Some(id) => {
+                            let s = me
+                                .runtime
+                                .as_ref()
+                                .and_then(|rt| rt.settings.settings(id))
+                                .ok_or_else(|| {
+                                    RpcError::new(ErrorKind::NotFound, "session not found")
+                                })?;
+                            (s.kind, s.workspace)
+                        }
+                        None => (
+                            p.kind.unwrap_or_default(),
+                            p.workspace_path
+                                .as_deref()
+                                .map(|w| PathBuf::from(canonical(w))),
+                        ),
+                    };
+                    let mut out = skills.command_list(kind, workspace.as_deref());
+                    if let Some(h) = &me.mcp {
+                        let cwd = (kind == SessionKind::Code)
+                            .then_some(workspace.as_deref())
+                            .flatten();
+                        let (prompts, diags) = h.prompt_commands(cwd).await;
+                        out.diagnostics.extend(diags);
+                        for pc in prompts {
+                            if out.commands.iter().any(|c| c.name == pc.name) {
+                                out.diagnostics.push(format!(
+                                    "MCP prompt /{}: hidden, a command already uses that name",
+                                    pc.name
+                                ));
+                            } else {
+                                out.commands.push(pc);
+                            }
+                        }
+                    }
+                    to_result(&out)
+                }
+                .await;
+                c.respond(match res {
+                    Ok(v) => Response::ok(r.id, v),
+                    Err(e) => Response::err(r.id, e),
+                });
+            });
+        Handled::Later
+    }
+
     fn mcp_async(self: &Arc<Self>, h: Arc<McpHub>, conn: &Arc<Conn>, r: &Request) -> Handled {
         let r = r.clone();
         let c = conn.clone();
@@ -658,6 +721,18 @@ impl Services {
             // telemetry export (D23, 08 §5–7).
             crate::sync::start(self, &scope, hub.clone());
         }
+        if let Some(sk) = &self.skills {
+            let mut rx = sk.subscribe_changes();
+            let st = state.clone();
+            scope.spawn_cancellable(async move {
+                while rx.changed().await.is_ok() {
+                    st.workspace_send(
+                        m::CommandsChangedNote::NAME,
+                        &genie_protocol::api::mcp::CommandsChanged {},
+                    );
+                }
+            });
+        }
         if let Some(mcp) = &self.mcp {
             let mut rx = mcp.subscribe_status();
             let st = state.clone();
@@ -673,6 +748,11 @@ impl Services {
                                 );
                             }
                             st.workspace_send(m::McpStatusNote::NAME, &s);
+                            // Prompts appear/disappear with the server (06 §9.1).
+                            st.workspace_send(
+                                m::CommandsChangedNote::NAME,
+                                &genie_protocol::api::mcp::CommandsChanged {},
+                            );
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
                         Err(broadcast::error::RecvError::Closed) => break,

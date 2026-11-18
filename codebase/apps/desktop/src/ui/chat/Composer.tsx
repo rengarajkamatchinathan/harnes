@@ -1,14 +1,18 @@
 // Composer (05 §2.3): Enter sends, Shift+Enter newline; while a turn runs Enter steers and
 // Alt+Enter queues (SA-06); attachments via blob.put; model + effort pickers; "+" menu;
-// context meter ring (D32); queued items as chips.
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { Delivery, InputPart, McpServerInfo, ModelInfo, SkillInfo } from "@genie/protocol";
+// context meter ring (D32); queued items as chips; the `/` menu (D58).
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import type { CommandInfo, Delivery, InputPart, McpServerInfo, ModelInfo } from "@genie/protocol";
 import { Button, Chip, Dialog, Icon, IconButton, Menu, Ring, Switch } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
 import { formatBytes, guessMime, rejectReason, uploadBlob, type Attachment } from "../../state/attachments";
 import type { SessionStore } from "../../state/session";
 import { useApp } from "../context";
+import { providerMeta } from "../settings/ProvidersSection";
+import { RewindDialog } from "../code/CodeExtras";
 import { McpPromptPicker, McpResourcePicker, type McpResource } from "./McpPickers";
+import { findCommand, hintAfter, needsArgs, parseSlash, pushRecent, rankCommands, slashQuery } from "./slash";
+import { ChoiceDialog, CommandPicker, HelpDialog, SlashMenu, runClientCommand, useCommands, type CommandDialog } from "./SlashMenu";
 
 export interface ComposerProps {
   store: SessionStore | null;
@@ -30,6 +34,10 @@ export function keyAction(e: { key: string; shiftKey: boolean; altKey: boolean; 
   return "send";
 }
 
+function providerName(id: string): string {
+  return providerMeta({ id, kind: id }).name;
+}
+
 export function groupModels(models: ModelInfo[]) {
   return models.map((m) => ({ value: m.id, label: m.name || m.id, group: m.provider }));
 }
@@ -40,7 +48,7 @@ let keySeq = 0;
 export function ModelPicker({ store }: { store: SessionStore | null }) {
   const app = useApp();
   const info = store?.model.info;
-  const currentModel = info?.model ?? app.ui.model ?? app.models[0]?.id ?? "";
+  const currentModel = info?.model ?? app.preferredModel() ?? "";
   const modelInfo = app.models.find((m) => m.id === currentModel);
   const effortLevels = modelInfo?.effort_levels ?? [];
   const effort = info?.effort ?? app.ui.effort ?? effortLevels[0] ?? null;
@@ -53,6 +61,17 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
     app.setUi({ effort: e });
     if (store) void app.client.session.update({ session_id: store.id, effort: e }).catch(fail);
   };
+  // Only models from connected providers; a session keeps showing the model it already uses.
+  const usable = app.usableModels;
+  if (!currentModel)
+    return (
+      <span className="modelpick">
+        <button className="textbtn" onClick={() => app.openDeepLink("genie://settings/providers")}>
+          <Icon name="plug" size={14} /> {t("composer.connectProvider")}
+        </button>
+      </span>
+    );
+  const multi = new Set(usable.map((x) => x.provider)).size > 1;
   return (
     <span className="modelpick">
       <Menu
@@ -60,7 +79,7 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
         placement="up"
         align="right"
         className="modelpick__list"
-        items={app.models.map((m) => ({ id: m.id, label: m.name || m.id, group: new Set(app.models.map((x) => x.provider)).size > 1 ? m.provider : undefined, checked: m.id === currentModel, onSelect: () => setModel(m.id) }))}
+        items={usable.map((m) => ({ id: m.id, label: m.name || m.id, group: multi ? providerName(m.provider) : undefined, checked: m.id === currentModel, onSelect: () => setModel(m.id) }))}
         trigger={(p) => (
           <button className="textbtn" aria-label={t("composer.model")} {...p}>
             {modelInfo?.name || currentModel || "—"}
@@ -110,6 +129,10 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
   const [sending, setSending] = useState(false);
   const [connectors, setConnectors] = useState(false);
   const [skillPick, setSkillPick] = useState(false);
+  const [menuSel, setMenuSel] = useState(0);
+  /** Esc closed the `/` menu for this text; typing reopens it. */
+  const [menuClosedFor, setMenuClosedFor] = useState<string | null>(null);
+  const [cmdDialog, setCmdDialog] = useState<CommandDialog | null>(null);
   const [mcpPick, setMcpPick] = useState<"resource" | "prompt" | null>(null);
   const [codeNotice, setCodeNotice] = useState(false);
   // Per-chat provider tools (06 §8, D35): web search on, code execution off by default.
@@ -139,8 +162,21 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
   const model = store?.model;
   const busy = store?.busy ?? false;
   const info = model?.info;
-  const currentModel = info?.model ?? app.ui.model ?? app.models[0]?.id ?? "";
+  const currentModel = info?.model ?? app.preferredModel() ?? "";
   const modelInfo = app.models.find((m) => m.id === currentModel);
+  const kind = info?.kind === "code" || (!info && app.ui.mode === "code") ? "code" : "chat";
+  const commands = useCommands(app, store, kind);
+
+  // The `/` menu (D58): open while the name is typed at the very start of the prompt.
+  const query = slashQuery(text);
+  const rows = useMemo(() => (query === null ? [] : rankCommands(commands ?? [], query, app.ui.recentCommands)), [query, commands, app.ui.recentCommands]);
+  const menuOpen = query !== null && menuClosedFor !== text;
+  useEffect(() => setMenuSel(0), [query]);
+  // The picked command as an accent token with its grey argument hint.
+  const typed = parseSlash(text);
+  const typedCmd = typed && /^\/[^\s]+\s/.test(text) ? findCommand(commands ?? [], typed.name) : undefined;
+  const tokenLen = typedCmd ? 1 + (typed?.name.length ?? 0) : 0;
+  const mirrorRef = useRef<HTMLDivElement>(null);
 
   // Autosize.
   useEffect(() => {
@@ -170,15 +206,48 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
     }
   };
 
-  const submit = async (delivery: Delivery) => {
-    const body = text.trim();
+  const remember = (name: string) => app.setUi({ recentCommands: pushRecent(app.ui.recentCommands, name) });
+
+  /** A `client` built-in: Genie's own UI, never a model turn (06 §9.1). */
+  const runClient = async (c: CommandInfo, args: string) => {
+    remember(c.name);
+    setText("");
+    try {
+      const d = await runClientCommand(app, store, kind, c.name, args);
+      if (d) setCmdDialog(d);
+    } catch (e) {
+      app.toast({ title: app.describeError(e), tone: "danger" });
+    }
+  };
+
+  /** Enter or click on a menu row: run it, or insert it when a required argument is missing. */
+  const pick = (c: CommandInfo) => {
+    setMenuClosedFor(null);
+    if (needsArgs(c, "")) {
+      setText(`/${c.name} `);
+      taRef.current?.focus();
+      return;
+    }
+    if (c.route === "client") void runClient(c, "");
+    else void submit("steer", `/${c.name}`);
+  };
+
+  const submit = async (delivery: Delivery, override?: string) => {
+    const body = (override ?? text).trim();
     const ready = atts.filter((a) => a.state === "ready" && a.blobId);
     if ((!body && !ready.length) || sending || atts.some((a) => a.state === "uploading")) return;
     const parts: InputPart[] = [];
-    const skill = /^\/([\w:-]+)\s*/.exec(body);
-    if (skill && !skill[1].includes(":")) parts.push({ type: "skill", id: skill[1] });
-    const rest = skill && !skill[1].includes(":") ? body.slice(skill[0].length) : body;
-    if (rest) parts.push({ type: "text", text: rest });
+    const slash = parseSlash(body);
+    const cmd = slash ? findCommand(commands ?? [], slash.name) : undefined;
+    // Attachments stay in the composer for the next message.
+    if (slash && cmd?.route === "client") return void runClient(cmd, slash.args);
+    if (slash && cmd?.route === "prompt") {
+      parts.push({ type: "command", name: cmd.name, args: slash.args });
+      remember(cmd.name);
+    } else if (body) {
+      // Plain text, and an unknown `/word` too (D58).
+      parts.push({ type: "text", text: body });
+    }
     for (const a of ready) parts.push({ type: "attachment", blob_id: a.blobId!, mime: a.mime, name: a.name });
     setSending(true);
     try {
@@ -196,6 +265,35 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menuOpen && !e.nativeEvent.isComposing) {
+      const n = rows.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (n) setMenuSel((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + n) % n);
+        return;
+      }
+      if (e.key === "Tab" && n) {
+        e.preventDefault();
+        setText(`/${rows[menuSel].name} `);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && !e.altKey && n) {
+        e.preventDefault();
+        pick(rows[menuSel]);
+        return;
+      }
+      if (e.key === "Escape") {
+        // Closes the menu; it doesn't stop a running turn.
+        e.preventDefault();
+        setMenuClosedFor(text);
+        return;
+      }
+    }
+    // A picked command waiting for its required argument.
+    if (e.key === "Enter" && !e.shiftKey && typedCmd && typed && needsArgs(typedCmd, typed.args)) {
+      e.preventDefault();
+      return;
+    }
     const a = keyAction({ key: e.key, shiftKey: e.shiftKey, altKey: e.altKey, isComposing: e.nativeEvent.isComposing }, busy);
     if (a === "send" || a === "queue") {
       e.preventDefault();
@@ -207,23 +305,44 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
 
   const tooBig = (a: Attachment) => !!modelInfo?.context_window && a.size / 4 > modelInfo.context_window;
 
+  const hint = typedCmd && typed ? hintAfter(typedCmd, typed.args) : null;
   const textarea = (
-    <textarea
-      ref={taRef}
-      className="composer__input"
-      rows={1}
-      value={text}
-      placeholder={drag ? t("composer.dropHere") : busy ? t("composer.placeholderBusy") : (placeholder ?? t("composer.placeholder"))}
-      aria-label={t("composer.placeholder")}
-      onChange={(e) => setText(e.target.value)}
-      onKeyDown={onKey}
-      onPaste={(e) => {
-        if (e.clipboardData.files.length) {
-          e.preventDefault();
-          addFiles(e.clipboardData.files);
-        }
-      }}
-    />
+    <div className="composer__field">
+      {typedCmd && (
+        <div ref={mirrorRef} className="composer__input composer__mirror" aria-hidden>
+          <span className="slash-token">{text.slice(0, tokenLen)}</span>
+          {text.slice(tokenLen)}
+          {hint && <span className="slash-hint">{text.endsWith(" ") ? "" : " "}{hint}</span>}
+        </div>
+      )}
+      <textarea
+        ref={taRef}
+        className={`composer__input ${typedCmd ? "composer__input--token" : ""}`}
+        rows={1}
+        value={text}
+        placeholder={drag ? t("composer.dropHere") : busy ? t("composer.placeholderBusy") : (placeholder ?? t("composer.placeholder"))}
+        aria-label={t("composer.placeholder")}
+        role={menuOpen ? "combobox" : undefined}
+        aria-expanded={menuOpen || undefined}
+        aria-activedescendant={menuOpen && rows[menuSel] ? `slash-${rows[menuSel].name}` : undefined}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (menuClosedFor !== null && e.target.value !== menuClosedFor) setMenuClosedFor(null);
+        }}
+        onKeyDown={onKey}
+        onBlur={() => query !== null && setMenuClosedFor(text)}
+        onFocus={() => setMenuClosedFor(null)}
+        onScroll={(e) => {
+          if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+        }}
+        onPaste={(e) => {
+          if (e.clipboardData.files.length) {
+            e.preventDefault();
+            addFiles(e.clipboardData.files);
+          }
+        }}
+      />
+    </div>
   );
 
   if (readOnly) return <div className="composer composer--readonly muted">{t("composer.readOnly")}</div>;
@@ -242,6 +361,7 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
         if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
       }}
     >
+      {menuOpen && <SlashMenu rows={rows} loading={commands === null} selected={menuSel} onHover={setMenuSel} onPick={pick} />}
       {model && model.inbox.length > 0 && (
         <div className="row wrap composer__queue" aria-label={t("composer.queued")}>
           {model.inbox.map((q) => (
@@ -338,15 +458,20 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
         />
       )}
       {skillPick && (
-        <SkillPicker
-          onPick={(s) => {
-            setText((x) => `/${s.id} ${x}`);
+        <CommandPicker
+          commands={commands}
+          onPick={(c) => {
+            setText((x) => `/${c.name} ${x.replace(/^\/\S*\s*/, "")}`);
             setSkillPick(false);
             taRef.current?.focus();
           }}
           onClose={() => setSkillPick(false)}
         />
       )}
+      {cmdDialog?.kind === "help" && <HelpDialog commands={commands ?? []} onClose={() => setCmdDialog(null)} />}
+      {cmdDialog?.kind === "choice" && <ChoiceDialog title={cmdDialog.title} options={cmdDialog.options} onPick={cmdDialog.onPick} onClose={() => setCmdDialog(null)} />}
+      {cmdDialog?.kind === "connectors" && store && <ConnectorToggles sessionId={store.id} onClose={() => setCmdDialog(null)} />}
+      {cmdDialog?.kind === "rewind" && store && <RewindDialog sessionId={store.id} message={cmdDialog.message} onClose={() => setCmdDialog(null)} onDone={() => setCmdDialog(null)} />}
     </div>
   );
 }
@@ -384,33 +509,6 @@ function ConnectorToggles({ sessionId, onClose }: { sessionId: string; onClose: 
               }}
             />
           ))}
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-function SkillPicker({ onPick, onClose }: { onPick: (s: SkillInfo) => void; onClose: () => void }) {
-  const app = useApp();
-  const [skills, setSkills] = useState<SkillInfo[] | null>(null);
-  useEffect(() => {
-    app.client.skill
-      .list({})
-      .then((r) => setSkills(r.skills.filter((s) => s.enabled)))
-      .catch(() => setSkills([]));
-  }, [app]);
-  return (
-    <Dialog open title={t("composer.skills")} onClose={onClose} footer={<Button onClick={onClose}>{t("common.close")}</Button>}>
-      {!skills ? (
-        t("common.loading")
-      ) : (
-        <div className="stack">
-          {skills.map((s) => (
-            <button key={s.id} className="list-button" onClick={() => onPick(s)}>
-              <strong>/{s.id}</strong> <span className="muted">{s.description}</span>
-            </button>
-          ))}
-          {skills.length === 0 && <p className="muted">No skills enabled.</p>}
         </div>
       )}
     </Dialog>

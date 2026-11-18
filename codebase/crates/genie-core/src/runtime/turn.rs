@@ -298,7 +298,8 @@ impl Run {
                 };
                 let turn = self.turn.clone();
                 let input = &turn.input;
-                let mut parts = self.rt.user_parts(&self.sid, &input.parts);
+                let expanded = self.rt.expand_mcp_commands(&self.sid, &input.parts).await;
+                let mut parts = self.rt.user_parts(&self.sid, &expanded);
                 if let Some(p) = self
                     .rt
                     .excerpts(&self.sid, &self.settings, &input.parts)
@@ -463,7 +464,7 @@ impl Run {
                     user_stopped,
                 } => {
                     overflow = 0;
-                    let steered = self.inject_steer()?;
+                    let steered = self.inject_steer().await?;
                     if final_step {
                         return Ok(());
                     }
@@ -507,7 +508,7 @@ impl Run {
         };
         let mut waiting = false;
         let r = loop {
-            match self.inject_steer() {
+            match self.inject_steer().await {
                 Ok(true) => break Ok(true),
                 Ok(false) => {}
                 Err(e) => break Err(e),
@@ -584,14 +585,15 @@ impl Run {
     }
 
     /// Steer items become user messages at the step boundary (01 §5.2, D20).
-    fn inject_steer(&mut self) -> Result<bool, TurnError> {
+    async fn inject_steer(&mut self) -> Result<bool, TurnError> {
         let items = self.turn.step_boundary();
         let any = !items.is_empty();
         for i in items {
+            let expanded = self.rt.expand_mcp_commands(&self.sid, &i.parts).await;
             let msg = Message::new(
                 i.message_id.clone(),
                 Role::User,
-                self.rt.user_parts(&self.sid, &i.parts),
+                self.rt.user_parts(&self.sid, &expanded),
             );
             self.append(msg, MsgKind::Normal)?;
         }

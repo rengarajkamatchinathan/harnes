@@ -603,6 +603,100 @@ impl McpHub {
         best.or_else(|| self.manager(None).get(name).ok())
     }
 
+    /// MCP prompts as `/server:prompt` rows of the `/` menu (06 §9.1, D30). Only connected
+    /// servers are asked; a server that fails or is slow becomes a diagnostic.
+    pub async fn prompt_commands(
+        &self,
+        cwd: Option<&Path>,
+    ) -> (Vec<genie_protocol::api::mcp::CommandInfo>, Vec<String>) {
+        use genie_protocol::api::mcp::{CommandInfo, CommandRoute, CommandSource};
+        let mut out = Vec::new();
+        let mut diags = Vec::new();
+        for info in self.list(cwd) {
+            if info.status != genie_protocol::api::mcp::McpStatus::Connected {
+                continue;
+            }
+            let Some(server) = self.server(&info.name) else {
+                continue;
+            };
+            let listed = tokio::time::timeout(PROMPT_LIST_TIMEOUT, server.list_prompts()).await;
+            let items = match listed {
+                Ok(Ok(items)) => items,
+                Ok(Err(e)) => {
+                    diags.push(format!("{}: prompts unavailable: {e}", info.name));
+                    continue;
+                }
+                Err(_) => {
+                    diags.push(format!("{}: prompts timed out", info.name));
+                    continue;
+                }
+            };
+            for p in items {
+                let Some(name) = p.get("name").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                let description = p
+                    .get("description")
+                    .or_else(|| p.get("title"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                out.push(CommandInfo {
+                    name: format!("{}:{name}", info.name),
+                    aliases: vec![],
+                    description,
+                    args_hint: prompt_args_hint(&p),
+                    source: CommandSource::McpPrompt,
+                    route: CommandRoute::Prompt,
+                    immediate: false,
+                    server: Some(info.name.clone()),
+                });
+            }
+        }
+        (out, diags)
+    }
+
+    /// Expand `/server:prompt args` through `prompts/get`. `None`: no such server or prompt
+    /// (the caller falls back). Arguments are `key="value"` pairs; leftover text fills the
+    /// first argument not given by name.
+    pub async fn expand_prompt(&self, name: &str, args: &str) -> Option<Result<String, String>> {
+        let (server_name, prompt) = name.split_once(':')?;
+        let server = self.server(server_name)?;
+        let listed = tokio::time::timeout(PROMPT_LIST_TIMEOUT, server.list_prompts())
+            .await
+            .ok()?
+            .ok()?;
+        let def = listed
+            .iter()
+            .find(|p| p.get("name").and_then(serde_json::Value::as_str) == Some(prompt))?;
+        let arg_names: Vec<String> = def
+            .get("arguments")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a.get("name").and_then(serde_json::Value::as_str))
+            .map(str::to_string)
+            .collect();
+        let arguments = parse_prompt_args(args, &arg_names);
+        Some(match server.get_prompt(prompt, arguments).await {
+            Ok(r) => {
+                let text = r
+                    .messages
+                    .iter()
+                    .map(|(_, part)| match part {
+                        McpPart::Text(t) => t.clone(),
+                        McpPart::Json(v) => v.to_string(),
+                        McpPart::Resource { text, .. } => text.clone(),
+                        _ => "[non-text prompt content omitted]".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                Ok(text)
+            }
+            Err(e) => Err(e.to_string()),
+        })
+    }
+
     /// `mcp.add`: validate, write the entry to the scope's file, reconcile.
     pub fn add(
         &self,
@@ -805,5 +899,98 @@ impl ToolProvider for McpHub {
             }
         }
         Some(Some(format!("the MCP tool `{tool}`")))
+    }
+}
+
+/// How long `/` menu and expansion wait for one server's `prompts/list`.
+const PROMPT_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// `<required> [optional]` from an MCP prompt's `arguments`.
+fn prompt_args_hint(prompt: &serde_json::Value) -> Option<String> {
+    let args = prompt.get("arguments")?.as_array()?;
+    let parts: Vec<String> = args
+        .iter()
+        .filter_map(|a| {
+            let n = a.get("name")?.as_str()?;
+            let required = a
+                .get("required")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            Some(if required {
+                format!("<{n}>")
+            } else {
+                format!("[{n}]")
+            })
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+/// `key="value"` / `key=value` pairs; leftover words fill the first argument not named.
+fn parse_prompt_args(args: &str, names: &[String]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut rest = Vec::new();
+    let mut chars = args.trim().chars().peekable();
+    let mut tokens: Vec<String> = Vec::new();
+    while chars.peek().is_some() {
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        let mut tok = String::new();
+        let mut quoted = false;
+        while let Some(&c) = chars.peek() {
+            if c == '"' {
+                quoted = !quoted;
+                chars.next();
+                continue;
+            }
+            if c.is_whitespace() && !quoted {
+                break;
+            }
+            tok.push(c);
+            chars.next();
+        }
+        if !tok.is_empty() {
+            tokens.push(tok);
+        }
+    }
+    for tok in tokens {
+        match tok.split_once('=') {
+            Some((k, v)) if names.iter().any(|n| n == k) => {
+                out.insert(k.to_string(), v.to_string());
+            }
+            _ => rest.push(tok),
+        }
+    }
+    if !rest.is_empty()
+        && let Some(n) = names.iter().find(|n| !out.contains_key(*n))
+    {
+        out.insert(n.clone(), rest.join(" "));
+    }
+    out
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+
+    #[test]
+    fn args_hint_marks_required() {
+        let p = serde_json::json!({"name": "review", "arguments": [
+            {"name": "pr", "required": true}, {"name": "focus"}
+        ]});
+        assert_eq!(prompt_args_hint(&p).as_deref(), Some("<pr> [focus]"));
+        assert_eq!(prompt_args_hint(&serde_json::json!({"name": "x"})), None);
+    }
+
+    #[test]
+    fn prompt_args_named_and_leftover() {
+        let names = vec!["pr".to_string(), "focus".to_string()];
+        let a = parse_prompt_args(r#"focus="error handling" 42"#, &names);
+        assert_eq!(a.get("focus").map(String::as_str), Some("error handling"));
+        assert_eq!(a.get("pr").map(String::as_str), Some("42"));
+        let a = parse_prompt_args("fix the login bug", &names);
+        assert_eq!(a.get("pr").map(String::as_str), Some("fix the login bug"));
+        assert!(parse_prompt_args("", &names).is_empty());
     }
 }

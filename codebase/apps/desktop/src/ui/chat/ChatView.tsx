@@ -79,7 +79,9 @@ function PanelButtons({ hasArtifacts }: { hasArtifacts: boolean }) {
 
 function EmptyChat() {
   const app = useApp();
-  const noProvider = app.providers.length > 0 && !app.providers.some((p) => p.status === "ready");
+  // Nothing to talk to until some connected provider offers a model (Ollama is "ready"
+  // with no key, so provider status alone isn't enough).
+  const noProvider = app.providers.length > 0 && !app.usableModels.length;
   return app.ui.mode === "code" ? <EmptyCode noProvider={noProvider} /> : <EmptyHero noProvider={noProvider} />;
 }
 

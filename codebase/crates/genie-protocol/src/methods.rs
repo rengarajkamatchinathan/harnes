@@ -215,6 +215,8 @@ methods! {
     SkillSetEnabled = "skill.set_enabled", Request, false, mcp::SkillSetEnabledParams => Empty;
     SkillUpload = "skill.upload", Request, false, mcp::BlobIdParams => mcp::IdResult;
     DirectoryList = "directory.list", Request, false, mcp::DirectoryListParams => mcp::DirectoryListResult;
+    /// The `/` menu (06 §9.1, D58): built-ins, Markdown commands, skills, MCP prompts.
+    CommandList = "command.list", Request, false, mcp::CommandListParams => mcp::CommandListResult;
     DirectoryInstall = "directory.install", Request, false, mcp::DirectoryInstallParams => mcp::DirectoryInstallResult;
 
     // ---- projects, artifacts, memory, blobs (§6.9)
@@ -270,6 +272,8 @@ methods! {
     McpStatusNote = "mcp.status", Notification, false, workspace::McpStatusChanged => ();
     CatalogUpdated = "catalog.updated", Notification, false, workspace::CatalogUpdated => ();
     ProviderStatusNote = "provider.status", Notification, false, workspace::ProviderStatusChanged => ();
+    /// The command list changed (06 §9.1); clients call `command.list` again.
+    CommandsChangedNote = "commands.changed", Notification, false, mcp::CommandsChanged => ();
     UserNotification = "notification", Notification, false, workspace::UserNotification => ();
     TerminalExited = "terminal.exited", Notification, false, workspace::TerminalExited => ();
     /// Memory changed outside a turn (`memory.update/delete/reset`, Settings → Memory).

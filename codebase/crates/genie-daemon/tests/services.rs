@@ -440,3 +440,157 @@ async fn browser_tools_are_off_in_headless_sessions_and_sites_persist() {
         .unwrap();
     assert!(st.running);
 }
+
+#[tokio::test]
+async fn command_list_routes_guard_and_changes() {
+    use genie_protocol::api::mcp::{CommandListParams, CommandRoute, CommandSource};
+    let mem = daemon();
+    let cmds = mem.dir.path().join("home/.genie/commands");
+    std::fs::create_dir_all(cmds.join("git")).unwrap();
+    std::fs::write(
+        cmds.join("review.md"),
+        "---\ndescription: Review the diff\nargument-hint: \"[focus]\"\n---\nReview $ARGUMENTS",
+    )
+    .unwrap();
+    std::fs::write(cmds.join("git/pr.md"), "# Open a PR\nDo it").unwrap();
+    // A user command can't shadow a built-in.
+    std::fs::write(cmds.join("model.md"), "Not a model switch").unwrap();
+    let mut c = connect(&mem, "desk", ClientKind::Desktop, vec![AskKind::Permission]).await;
+    c.conn
+        .call::<m::WorkspaceSubscribe>(Empty {})
+        .await
+        .unwrap();
+
+    let chat = c
+        .conn
+        .call::<m::CommandList>(CommandListParams {
+            kind: Some(SessionKind::Chat),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let find = |n: &str| chat.commands.iter().find(|c| c.name == n);
+    let model = find("model").unwrap();
+    assert_eq!(
+        (model.source, model.route),
+        (CommandSource::Builtin, CommandRoute::Client)
+    );
+    assert!(find("mcp").unwrap().immediate);
+    assert_eq!(find("mcp").unwrap().aliases, vec!["connectors"]);
+    assert!(
+        find("compact").is_none() && find("init").is_none(),
+        "Code-only built-ins"
+    );
+    let review = find("review").unwrap();
+    assert_eq!(review.source, CommandSource::User);
+    assert_eq!(review.route, CommandRoute::Prompt);
+    assert_eq!(review.description, "Review the diff");
+    assert_eq!(review.args_hint.as_deref(), Some("[focus]"));
+    assert_eq!(find("git:pr").unwrap().description, "Open a PR");
+    assert_eq!(
+        chat.commands.iter().filter(|c| c.name == "model").count(),
+        1
+    );
+    assert!(
+        chat.diagnostics.iter().any(|d| d.contains("model")),
+        "{:?}",
+        chat.diagnostics
+    );
+    let skill = find("write-spec").unwrap();
+    assert_eq!(
+        (skill.source, skill.route),
+        (CommandSource::Skill, CommandRoute::Prompt)
+    );
+
+    let code = c
+        .conn
+        .call::<m::CommandList>(CommandListParams {
+            kind: Some(SessionKind::Code),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let init = code.commands.iter().find(|c| c.name == "init").unwrap();
+    assert_eq!(init.route, CommandRoute::Prompt);
+    assert!(code.commands.iter().any(|c| c.name == "compact"));
+
+    // By session id.
+    let sid = c
+        .conn
+        .call::<m::SessionCreate>(CreateParams {
+            kind: SessionKind::Chat,
+            model: "m".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .session_id;
+    let by_session = c
+        .conn
+        .call::<m::CommandList>(CommandListParams {
+            session_id: Some(sid.clone()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(by_session.commands.len(), chat.commands.len());
+
+    // A `client` built-in never reaches the model (SA-48), typed or as a command part.
+    for parts in [
+        vec![InputPart::text("/compact now")],
+        vec![InputPart::text("/connectors")],
+        vec![InputPart::Command {
+            name: "mcp".into(),
+            args: String::new(),
+        }],
+    ] {
+        let e = c
+            .conn
+            .call::<m::SessionPrompt>(PromptParams {
+                session_id: sid.clone(),
+                parts,
+                delivery: Delivery::Steer,
+                parent_id: None,
+                client_msg_id: "g".into(),
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(e, ClientError::Rpc(ref r) if r.code == ErrorKind::CommandNotPrompt.code()),
+            "{e:?}"
+        );
+    }
+    // A prompt-route command is admitted.
+    c.conn
+        .call::<m::SessionPrompt>(PromptParams {
+            session_id: sid.clone(),
+            parts: vec![InputPart::Command {
+                name: "review".into(),
+                args: "src/".into(),
+            }],
+            delivery: Delivery::Steer,
+            parent_id: None,
+            client_msg_id: "ok".into(),
+        })
+        .await
+        .unwrap();
+
+    // Disabling a skill changes the menu: `commands.changed`, and the row is gone.
+    c.conn
+        .call::<m::SkillSetEnabled>(genie_protocol::api::mcp::SkillSetEnabledParams {
+            id: "write-spec".into(),
+            enabled: false,
+        })
+        .await
+        .unwrap();
+    c.note(m::CommandsChangedNote::NAME).await;
+    let after = c
+        .conn
+        .call::<m::CommandList>(CommandListParams {
+            kind: Some(SessionKind::Chat),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(!after.commands.iter().any(|c| c.name == "write-spec"));
+}
