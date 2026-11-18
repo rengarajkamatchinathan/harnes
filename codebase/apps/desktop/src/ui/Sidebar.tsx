@@ -1,14 +1,13 @@
-// Left sidebar (05 §2.1, §3.1, D54): title-bar strip (sidebar toggle, back/forward, Chat/Code
+// Left sidebar (05 §2.1, §3.1, D54), laid out like Claude Desktop: title-bar strip (sidebar toggle, back/forward, Chat/Code
 // switch), nav rows (New, Search, Projects, Customize), foldable Pinned/Chats sections (Chat) or
 // sessions grouped by repo (Code), row actions, ⌘K search palette, profile footer.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { SessionSummary } from "@genie/protocol";
-import { Badge, Button, Dialog, Icon, IconButton, Input, Menu, Select, Switch, type MenuItem } from "@genie/ui";
+import { Badge, Button, Dialog, Icon, IconButton, Input, Menu, Select, Switch, Tooltip, type MenuItem } from "@genie/ui";
 import { t } from "../i18n";
 import type { App } from "../state/app";
 import { useApp } from "./context";
-import { GenieMark } from "./GenieMark";
 import { NewCodeSession } from "./code/NewCodeSession";
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useShell } from "./shell";
 
@@ -35,30 +34,32 @@ export function groupByDate(items: SessionSummary[], now: Date = new Date()): [D
 
 const STATUS_TONE: Record<string, string> = { running: "dot--running", awaiting_ask: "dot--ask", paused: "dot--ask", interrupted: "dot--interrupted", compacting: "dot--running", interrupting: "dot--running" };
 
-/** Is any session doing work right now? Drives the title-bar mark's "thinking" state. */
-const WORKING = new Set(["running", "compacting", "interrupting"]);
+/** Working or waiting on the user: what "Active only" keeps in the chat list. */
+const ACTIVE = new Set(["running", "compacting", "interrupting", "awaiting_ask", "paused"]);
 
-/** Genie mark, sidebar toggle, back/forward and the Chat/Code switch, in the window's title-bar strip. */
+const DATE_LABEL: Record<DateGroup, Parameters<typeof t>[0]> = { pinned: "sidebar.pinned", today: "sidebar.today", yesterday: "sidebar.yesterday", week: "sidebar.week", older: "sidebar.older" };
+
+/** Sidebar toggle, back/forward and the Chat/Code switch, in the window's title-bar strip. */
 export function TitlebarControls() {
   const app = useApp();
   const { ui } = app;
   const shell = useShell();
-  const working = [...app.sessions.values()].some((s) => WORKING.has(s.status));
   // Inline sidebar: collapse/expand (persisted). Overlay layout: open/close the drawer.
   const toggle = () => (shell.overlay ? shell.setDrawer(!shell.drawerOpen) : app.setUi({ sidebarCollapsed: !ui.sidebarCollapsed }));
   return (
     <div className="titlebar__controls">
-      <span className="titlebar__mark" title="Genie" data-tauri-drag-region>
-        <GenieMark size={20} state={working ? "thinking" : "idle"} />
-      </span>
       <IconButton icon="sidebar" size="sm" label={t("sidebar.toggle")} shortcut={isMac() ? "⌘." : "Ctrl+."} onClick={toggle} />
       <IconButton icon="chevronLeft" size="sm" label={t("sidebar.back")} disabled={!app.canGoBack} onClick={() => app.goBack()} />
       <IconButton icon="chevronRight" size="sm" label={t("sidebar.forward")} disabled={!app.canGoForward} onClick={() => app.goForward()} />
-      <div className="modeswitch" role="group" aria-label="Mode">
+      {/* Segmented Chat/Code switch; the thumb slides between the two. */}
+      <div className="modeswitch" role="group" aria-label="Mode" data-active={ui.mode}>
+        <span className="modeswitch__thumb" aria-hidden />
         {(["chat", "code"] as const).map((m) => (
-          <button key={m} className="modeswitch__btn" aria-pressed={ui.mode === m} title={t(`mode.${m}`)} aria-label={t(`mode.${m}`)} onClick={() => ui.mode !== m && app.setUi({ mode: m, activeSession: null, view: "main", activeProject: null })}>
-            <Icon name={m === "chat" ? "chat" : "code"} />
-          </button>
+          <Tooltip key={m} content={t(`mode.${m}`)}>
+            <button className="modeswitch__btn" aria-pressed={ui.mode === m} aria-label={t(`mode.${m}`)} onClick={() => ui.mode !== m && app.setUi({ mode: m, activeSession: null, view: "main", activeProject: null })}>
+              <Icon name={m === "chat" ? "chat" : "code"} />
+            </button>
+          </Tooltip>
         ))}
       </div>
     </div>
@@ -75,22 +76,43 @@ function NavRow({ icon, label, onClick, active, badge }: { icon: Parameters<type
   );
 }
 
-function Section({ id, title, children, action }: { id: string; title: string; children: React.ReactNode; action?: React.ReactNode }) {
+/**
+ * Foldable sidebar section. The body stays mounted and animates its height (0fr ↔ 1fr) so
+ * folding slides closed rather than snapping. `persistentAction` keeps the heading buttons
+ * visible; otherwise they appear on hover.
+ */
+function Section({ id, title, children, action, persistentAction }: { id: string; title: string; children: React.ReactNode; action?: React.ReactNode; persistentAction?: boolean }) {
   const app = useApp();
+  const bodyId = useId();
   const folded = app.ui.foldedSections.includes(id);
   const toggle = () => app.setUi({ foldedSections: folded ? app.ui.foldedSections.filter((x) => x !== id) : [...app.ui.foldedSections, id] });
   return (
-    <section className="sidebar__section">
+    <section className={`sidebar__section ${folded ? "is-folded" : ""}`}>
       <div className="sidebar__heading">
-        <button className="sidebar__fold" aria-expanded={!folded} onClick={toggle}>
+        <button className="sidebar__fold" aria-expanded={!folded} aria-controls={bodyId} onClick={toggle}>
           <span className="sidebar__heading-text">{title}</span>
           <Icon name="chevronDown" size={12} />
         </button>
-        {action}
+        {action && <div className={`sidebar__heading-actions ${persistentAction ? "is-persistent" : ""}`}>{action}</div>}
       </div>
-      {!folded && <div className="sidebar__section-body">{children}</div>}
+      <div className="sidebar__section-body" id={bodyId} inert={folded} aria-hidden={folded || undefined}>
+        <div className="sidebar__section-inner">{children}</div>
+      </div>
     </section>
   );
+}
+
+/**
+ * Ids that appeared since the previous render (a new chat, or rows a filter change reveals),
+ * so they can ease in. Nothing animates on first mount.
+ */
+function useFreshIds(ids: string[]): (id: string) => boolean {
+  const seen = useRef<Set<string> | null>(null);
+  const until = useRef(new Map<string, number>());
+  const now = Date.now();
+  if (seen.current) for (const id of ids) if (!seen.current.has(id)) until.current.set(id, now + 600);
+  seen.current = new Set(ids);
+  return (id) => (until.current.get(id) ?? 0) > now;
 }
 
 export function initials(name: string) {
@@ -151,13 +173,16 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const [newCode, setNewCode] = useState<string | null>(null);
   const [newProject, setNewProject] = useState(false);
 
-  // ⌘K / Ctrl+K opens search, ⌘N / Ctrl+N starts a new chat or session.
+  // ⌘K / Ctrl+K opens search, ⌘N / Ctrl+N starts a new chat or session, ⌘, opens settings.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       if (e.key === "k") {
         e.preventDefault();
         setSearch(true);
+      } else if (e.key === ",") {
+        e.preventDefault();
+        app.setUi({ view: "settings" });
       } else if (e.key === ".") {
         e.preventDefault();
         if (shell.overlay) shell.setDrawer(!shell.drawerOpen);
@@ -175,6 +200,8 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const isNew = ui.view === "main" && !ui.activeSession;
   const startNew = () => app.setUi({ activeSession: null, view: "main", activeProject: null });
   const name = app.userName || t("sidebar.you");
+  const account = app.info?.user_name?.trim();
+  const go = (section: string) => () => app.openDeepLink(`genie://settings/${section}`);
 
   return (
     <nav className="sidebar" aria-label="Sidebar" inert={hidden} aria-hidden={hidden || undefined}>
@@ -202,13 +229,17 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
 
       <div className="sidebar__footer">
         <Menu
-          label={name}
+          label={t("sidebar.account")}
           placement="up"
+          className="profile-menu"
+          header={account ? t("sidebar.signedIn", { name: account }) : t("sidebar.localProfile")}
           items={[
-            { id: "settings", label: t("sidebar.settings"), icon: "settings", onSelect: () => app.setUi({ view: "settings" }) },
-            { id: "appearance", label: t("settings.section.appearance"), icon: "palette", onSelect: () => app.openDeepLink("genie://settings/appearance") },
-            { id: "usage", label: t("settings.section.usage"), icon: "chart", onSelect: () => app.openDeepLink("genie://settings/usage") },
-            { id: "account", label: t("settings.section.account"), icon: "user", onSelect: () => app.openDeepLink("genie://settings/account") },
+            { id: "settings", label: t("sidebar.settings"), icon: "settings", shortcut: isMac() ? "⌘," : "Ctrl+,", onSelect: () => app.setUi({ view: "settings" }) },
+            { id: "account", label: t("settings.section.account"), icon: "user", onSelect: go("account") },
+            { id: "usage", label: t("settings.section.usage"), icon: "chart", onSelect: go("usage") },
+            { id: "appearance", label: t("settings.section.appearance"), icon: "palette", onSelect: go("appearance") },
+            { id: "connectors", label: t("settings.section.connectors"), icon: "plug", onSelect: go("connectors") },
+            { id: "developer", label: t("settings.section.developer"), icon: "code", separatorBefore: true, onSelect: go("developer") },
           ]}
           trigger={(p) => (
             <button className="profile" {...p}>
@@ -235,7 +266,24 @@ function ChatList({ items, app, onNewProject }: { items: SessionSummary[]; app: 
   const { ui } = app;
   const sorted = [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const pinned = sorted.filter((s) => s.pinned);
-  const rest = sorted.filter((s) => !s.pinned);
+  const unpinned = sorted.filter((s) => !s.pinned);
+  const rest = ui.sidebarShow === "active" ? unpinned.filter((s) => ACTIVE.has(s.status)) : unpinned;
+  const fresh = useFreshIds(sorted.map((s) => s.session_id));
+  const filtered = ui.sidebarShow !== "all" || ui.sidebarGroupByDate;
+  const row = (s: SessionSummary) => <SessionRow key={s.session_id} s={s} app={app} fresh={fresh(s.session_id)} />;
+  const filter = (
+    <Menu
+      label={t("sidebar.filter")}
+      align="right"
+      items={[
+        { id: "flat", group: t("sidebar.view"), label: t("sidebar.listFlat"), checked: !ui.sidebarGroupByDate, onSelect: () => app.setUi({ sidebarGroupByDate: false }) },
+        { id: "date", group: t("sidebar.view"), label: t("sidebar.listByDate"), checked: ui.sidebarGroupByDate, onSelect: () => app.setUi({ sidebarGroupByDate: true }) },
+        { id: "all", group: t("sidebar.show"), label: t("sidebar.showAll"), checked: ui.sidebarShow === "all", onSelect: () => app.setUi({ sidebarShow: "all" }) },
+        { id: "active", group: t("sidebar.show"), label: t("sidebar.showActive"), checked: ui.sidebarShow === "active", onSelect: () => app.setUi({ sidebarShow: "active" }) },
+      ]}
+      trigger={(p) => <IconButton icon="filter" size="sm" label={t("sidebar.filter")} className={filtered ? "is-on" : undefined} {...p} />}
+    />
+  );
   return (
     <>
       {app.projects.length > 0 && (
@@ -255,16 +303,20 @@ function ChatList({ items, app, onNewProject }: { items: SessionSummary[]; app: 
       )}
       {pinned.length > 0 && (
         <Section id="pinned" title={t("sidebar.pinned")}>
-          {pinned.map((s) => (
-            <SessionRow key={s.session_id} s={s} app={app} />
-          ))}
+          {pinned.map(row)}
         </Section>
       )}
-      {rest.length > 0 && (
-        <Section id="recents" title={t("sidebar.chatsAndTasks")}>
-          {rest.map((s) => (
-            <SessionRow key={s.session_id} s={s} app={app} />
-          ))}
+      {unpinned.length > 0 && (
+        <Section id="recents" title={t("sidebar.chatsAndTasks")} action={filter} persistentAction>
+          {rest.length === 0 && <div className="sidebar__empty muted">{t("sidebar.noActive")}</div>}
+          {ui.sidebarGroupByDate
+            ? groupByDate(rest).map(([g, list]) => (
+                <div key={g} className="sidebar__dategroup">
+                  <div className="sidebar__group">{t(DATE_LABEL[g])}</div>
+                  {list.map(row)}
+                </div>
+              ))
+            : rest.map(row)}
         </Section>
       )}
     </>
@@ -279,15 +331,16 @@ function CodeList({ items, app, onNew }: { items: SessionSummary[]; app: App; on
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k)!.push(s);
   }
+  const fresh = useFreshIds(items.map((s) => s.session_id));
   if (!items.length) return null;
   return (
     <>
       {[...groups.entries()].map(([ws, list]) => {
-        const folder = ws.split(/[\\/]/).filter(Boolean).pop() ?? ws;
+        const folder = ws === "—" ? t("sidebar.noFolder") : (ws.split(/[\\/]/).filter(Boolean).pop() ?? ws);
         return (
           <Section key={ws} id={`ws:${ws}`} title={folder} action={<IconButton icon="plus" size="sm" label={t("sidebar.newInFolder", { folder })} onClick={() => onNew(ws === "—" ? "" : ws)} />}>
             {list.map((s) => (
-              <SessionRow key={s.session_id} s={s} app={app} code />
+              <SessionRow key={s.session_id} s={s} app={app} code fresh={fresh(s.session_id)} />
             ))}
           </Section>
         );
@@ -359,12 +412,29 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function SessionRow({ s, app, code }: { s: SessionSummary; app: App; code?: boolean }) {
+function SessionRow({ s, app, code, fresh }: { s: SessionSummary; app: App; code?: boolean; fresh?: boolean }) {
   const [renaming, setRenaming] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [title, setTitle] = useState(s.title ?? "");
+  // Enter commits and unmounts the input, which then blurs: commit only once.
+  const renameDone = useRef(false);
   const active = app.ui.view === "main" && app.ui.activeSession === s.session_id;
+  const untitled = code ? t("sidebar.untitledSession") : t("sidebar.untitled");
+
+  const startRename = () => {
+    setTitle(s.title ?? "");
+    renameDone.current = false;
+    setRenaming(true);
+  };
+  const finishRename = (save: boolean) => {
+    if (renameDone.current) return;
+    renameDone.current = true;
+    setRenaming(false);
+    const next = title.trim();
+    if (save && next && next !== (s.title ?? "")) void app.client.session.update({ session_id: s.session_id, title: next }).catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }));
+  };
 
   const exportAs = async (format: "markdown" | "json") => {
     try {
@@ -377,35 +447,57 @@ function SessionRow({ s, app, code }: { s: SessionSummary; app: App; code?: bool
     }
   };
   const items: MenuItem[] = [
-    { id: "rename", label: t("row.rename"), icon: "edit", onSelect: () => setRenaming(true) },
     { id: "pin", label: s.pinned ? t("row.unpin") : t("row.pin"), icon: "pin", onSelect: () => void app.client.session.update({ session_id: s.session_id, pinned: !s.pinned }) },
+    { id: "rename", label: t("row.rename"), icon: "edit", onSelect: startRename },
     ...(code ? [{ id: "archive", label: t("row.archive"), icon: "folder" as const, onSelect: () => void app.client.session.update({ session_id: s.session_id, archived: true }) }] : []),
     ...(!code ? [{ id: "move", label: t("row.moveToProject"), icon: "folder" as const, onSelect: () => setMoving(true) }] : []),
-    { id: "md", label: t("row.exportMd"), icon: "download", onSelect: () => void exportAs("markdown") },
+    { id: "md", label: t("row.exportMd"), icon: "download", separatorBefore: true, onSelect: () => void exportAs("markdown") },
     { id: "json", label: t("row.exportJson"), icon: "download", onSelect: () => void exportAs("json") },
-    { id: "delete", label: t("row.delete"), icon: "trash", danger: true, onSelect: () => setConfirm(true) },
+    { id: "delete", label: t("row.delete"), icon: "trash", danger: true, separatorBefore: true, onSelect: () => setConfirm(true) },
   ];
 
   return (
-    <div className={`sidebar__row ${active ? "is-active" : ""}`}>
+    <div
+      className={`sidebar__row ${active ? "is-active" : ""} ${fresh ? "is-new" : ""} ${renaming ? "is-renaming" : ""}`}
+      onContextMenu={(e) => {
+        // Right-click opens the same actions menu as the ··· button.
+        if (renaming) return;
+        e.preventDefault();
+        setMenuOpen(true);
+      }}
+    >
       {renaming ? (
-        <form
-          className="row grow"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setRenaming(false);
-            void app.client.session.update({ session_id: s.session_id, title });
+        <input
+          className="sidebar__rename"
+          autoFocus
+          value={title}
+          aria-label={t("row.rename")}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => finishRename(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              finishRename(true);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              finishRename(false);
+            }
           }}
-        >
-          <Input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => setRenaming(false)} aria-label={t("row.rename")} />
-        </form>
+        />
       ) : (
-        <button className="sidebar__link" onClick={() => app.selectSession(s.session_id)} aria-current={active ? "page" : undefined}>
+        <button
+          className="sidebar__link"
+          onClick={() => app.selectSession(s.session_id)}
+          onKeyDown={(e) => e.key === "F2" && (e.preventDefault(), startRename())}
+          aria-current={active ? "page" : undefined}
+        >
           {STATUS_TONE[s.status] ? <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} /> : !code && <span className="bullet" aria-hidden />}
-          <span className="sidebar__title">{s.title || t("sidebar.untitled")}</span>
+          <span className="sidebar__title">{s.title || untitled}</span>
         </button>
       )}
-      <Menu label={t("row.rename")} align="right" items={items} trigger={(p) => <IconButton icon="more" size="sm" label="Actions" className="sidebar__more" {...p} />} />
+      <Menu label={t("row.actions")} align="right" items={items} open={menuOpen} onOpenChange={setMenuOpen} trigger={(p) => <IconButton icon="more" size="sm" label={t("row.actions")} className="sidebar__more" {...p} />} />
       <Dialog
         open={confirm}
         title={t("row.delete")}
@@ -419,7 +511,7 @@ function SessionRow({ s, app, code }: { s: SessionSummary; app: App; code?: bool
           </>
         }
       >
-        {t("row.deleteConfirm", { title: s.title || t("sidebar.untitled") })}
+        {t("row.deleteConfirm", { title: s.title || untitled })}
       </Dialog>
       <Dialog open={moving} title={t("row.moveToProject")} onClose={() => setMoving(false)} footer={<Button onClick={() => setMoving(false)}>{t("common.close")}</Button>}>
         <Select

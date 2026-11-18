@@ -386,12 +386,19 @@ export interface MenuItem {
   danger?: boolean;
   disabled?: boolean;
   title?: string;
+  /** Keyboard shortcut shown at the right edge (display only). */
+  shortcut?: string;
+  /** Opens outside the app: shows an arrow at the right edge. */
+  external?: boolean;
+  /** Draws a separator above this item (without a group label). */
+  separatorBefore?: boolean;
   onSelect: () => void;
 }
 
 /**
  * Button + popup menu (Radix DropdownMenu): portalled, collision-aware, typeahead, arrow keys,
  * closes on outside click / Esc / selection. `trigger` gets props to spread on one element.
+ * Pass `open`/`onOpenChange` to control it (e.g. to open it from a right-click elsewhere).
  */
 export function Menu({
   trigger,
@@ -400,6 +407,9 @@ export function Menu({
   placement = "down",
   align = "left",
   className,
+  header,
+  open: openProp,
+  onOpenChange,
 }: {
   trigger: (props: { "aria-expanded": boolean; "aria-haspopup": "menu" }) => ReactElement;
   items: MenuItem[];
@@ -408,8 +418,14 @@ export function Menu({
   align?: "left" | "right";
   /** Extra class on the popup list. */
   className?: string;
+  /** Non-interactive line at the top of the list (e.g. the signed-in account). */
+  header?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [own, setOwn] = useState(false);
+  const open = openProp ?? own;
+  const setOpen = (v: boolean) => (onOpenChange ? onOpenChange(v) : setOwn(v));
   return (
     <div className="g-menu">
       <RMenu.Root open={open} onOpenChange={setOpen} modal={false}>
@@ -424,6 +440,7 @@ export function Menu({
             loop
             aria-label={label}
           >
+            {header && <div className="g-menu__header">{header}</div>}
             {items.map((it, i) => (
               <Fragment key={it.id}>
                 {it.group && it.group !== items[i - 1]?.group && (
@@ -432,12 +449,19 @@ export function Menu({
                     <RMenu.Label className="g-menu__label">{it.group}</RMenu.Label>
                   </>
                 )}
+                {it.separatorBefore && i > 0 && <RMenu.Separator className="g-menu__sep" />}
                 <RMenu.Item className={cx("g-menu__item", it.danger && "g-menu__item--danger")} disabled={it.disabled} title={it.title} onSelect={() => it.onSelect()}>
                   {it.icon && it.icon !== "check" && <Icon name={it.icon} />}
                   <span className="g-menu__text">
                     <span className="g-menu__label-text">{it.label}</span>
                     {it.hint && <span className="g-menu__hint">{it.hint}</span>}
                   </span>
+                  {it.shortcut && <span className="g-menu__shortcut">{it.shortcut}</span>}
+                  {it.external && (
+                    <span className="g-menu__external" aria-hidden>
+                      <Icon name="external" size={14} />
+                    </span>
+                  )}
                   {(it.checked || it.icon === "check") && (
                     <span className="g-menu__check" aria-label="Selected">
                       <Icon name="check" />

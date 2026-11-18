@@ -585,6 +585,24 @@ body {
   margin-left: auto;
   color: var(--text);
 }
+.g-menu__header {
+  padding: 8px 10px 6px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+.g-menu__shortcut {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.g-menu__external { display: inline-grid; margin-left: auto; color: var(--text-faint); }
 .g-select__item { padding-right: 10px; }
 .g-menu__label {
   padding: 6px 10px 4px;

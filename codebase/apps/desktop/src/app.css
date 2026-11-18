@@ -67,13 +67,18 @@ code { font-size: 0.92em; }
 .top-banner { padding: var(--space-2) var(--space-4) 0; }
 .titlebar { height: var(--titlebar-h); flex: none; display: flex; align-items: center; padding: 0 var(--space-2) 0 calc(var(--space-2) + var(--traffic-w)); -webkit-user-select: none; user-select: none; }
 .titlebar__controls { display: flex; align-items: center; gap: 2px; flex: none; }
-.titlebar__mark { display: grid; place-items: center; width: 28px; height: 28px; margin-right: 2px; color: var(--text); }
 .titlebar__controls .g-btn { color: var(--text-muted); }
 .titlebar__controls .g-btn:disabled { opacity: 0.35; }
-.modeswitch { display: inline-flex; margin-left: var(--space-2); padding: 2px; gap: 2px; border-radius: var(--radius-md); background: var(--surface-hover); }
-.modeswitch__btn { display: grid; place-items: center; width: 30px; height: 24px; border: none; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
-.modeswitch__btn:hover { color: var(--text); }
-.modeswitch__btn[aria-pressed="true"] { background: var(--surface-active); color: var(--text); box-shadow: 0 1px 2px oklch(0 0 0 / 0.25); }
+/* In the sidebar strip the Chat/Code switch sits at the right edge (Claude Desktop layout). */
+.sidebar .titlebar__controls { flex: 1; min-width: 0; }
+.sidebar .titlebar .modeswitch { margin-left: auto; }
+/* Segmented control: a thumb slides under the pressed segment. */
+.modeswitch { --seg-w: 32px; position: relative; display: inline-flex; margin-left: var(--space-2); padding: 2px; gap: 2px; border-radius: 9px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.modeswitch__thumb { position: absolute; top: 2px; left: 2px; width: var(--seg-w); height: 24px; border-radius: 7px; background: var(--surface-active); box-shadow: 0 1px 2px oklch(0 0 0 / 0.2), inset 0 0 0 1px var(--border); transition: transform var(--dur-slow) var(--ease-out); pointer-events: none; }
+.modeswitch[data-active="code"] .modeswitch__thumb { transform: translateX(calc(var(--seg-w) + 2px)); }
+.modeswitch__btn { position: relative; z-index: 1; display: grid; place-items: center; width: var(--seg-w); height: 24px; border: none; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; transition: color var(--dur-fast) var(--ease); }
+.modeswitch__btn:hover, .modeswitch__btn[aria-pressed="true"] { color: var(--text); }
+.modeswitch__btn:active:not([aria-pressed="true"]) { transform: scale(0.94); }
 
 /* ---------- sidebar ---------- */
 .sidebar { position: relative; display: flex; flex-direction: column; height: 100%; background: var(--sidebar-bg); border-right: 1px solid var(--border-subtle); min-width: 0; }
@@ -91,27 +96,44 @@ code { font-size: 0.92em; }
 .sidebar__asks { padding: var(--space-1) 10px; }
 .search { display: flex; align-items: center; gap: var(--space-2); height: var(--control-h); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-hover); color: var(--text-muted); }
 .search input { flex: 1; border: none; background: none; outline: none; font: inherit; font-size: var(--text-sm); color: var(--text); min-width: 0; }
-.sidebar__list { flex: 1; overflow: auto; padding: 0 var(--space-2) var(--space-3); scrollbar-width: thin; }
-.sidebar__section { margin-top: var(--space-4); }
-.sidebar__heading { display: flex; align-items: center; justify-content: space-between; height: 28px; padding: 0 2px 0 10px; }
-.sidebar__heading .g-btn { opacity: 0; color: var(--text-muted); transition: opacity var(--dur-fast) var(--ease); }
-.sidebar__heading:hover .g-btn, .sidebar__heading .g-btn:focus-visible { opacity: 1; }
-.sidebar__fold { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: none; background: none; color: var(--text); font: inherit; font-size: var(--text-sm); font-weight: 500; cursor: pointer; min-width: 0; }
+/* The scrollbar shows only while the pointer is over the list. */
+.sidebar__list { flex: 1; overflow: auto; padding: 0 var(--space-2) var(--space-3); scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.sidebar__list:hover { scrollbar-color: var(--border) transparent; }
+.sidebar__section { margin-top: var(--space-5); }
+.sidebar__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); height: 28px; padding: 0 2px 0 10px; }
+.sidebar__heading-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.sidebar__heading-actions .g-btn { color: var(--text-muted); }
+.sidebar__heading-actions .g-btn:hover:not(:disabled) { color: var(--text); }
+.sidebar__heading-actions .g-btn.is-on { background: none; color: var(--text); }
+.sidebar__heading-actions:not(.is-persistent) .g-btn { opacity: 0; transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+.sidebar__heading:hover .g-btn, .sidebar__heading .g-btn:focus-visible, .sidebar__heading .g-btn[aria-expanded="true"] { opacity: 1; }
+.sidebar__fold { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: none; background: none; color: var(--text-muted); font: inherit; font-size: var(--text-sm); font-weight: 500; cursor: pointer; min-width: 0; transition: color var(--dur-fast) var(--ease); }
 .sidebar__fold:hover { color: var(--text); }
-.sidebar__fold .g-icon { color: var(--text-muted); transition: transform var(--dur-base) var(--ease-out); }
+.sidebar__fold .g-icon { flex: none; transition: transform var(--dur-base) var(--ease-out); }
 .sidebar__fold[aria-expanded="false"] .g-icon { transform: rotate(-90deg); }
-.sidebar__section-body { animation: section-open var(--dur-base) var(--ease-out); }
+/* Fold: the body animates its height (grid row 0fr ↔ 1fr) and fades. The inner box clips the
+   rows while folded; its bleed keeps row focus rings from being cut off. */
+.sidebar__section-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--dur-slow) var(--ease-out), opacity var(--dur-base) var(--ease-out); }
+.sidebar__section.is-folded .sidebar__section-body { grid-template-rows: 0fr; opacity: 0; }
+.sidebar__section-inner { min-height: 0; overflow: hidden; margin: -2px -3px; padding: 2px 3px; }
 @keyframes section-open { from { opacity: 0; transform: translateY(-4px); } }
 .sidebar__heading-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar__group { font-size: var(--text-xs); color: var(--text-faint); margin: var(--space-3) 10px var(--space-1); }
+.sidebar__dategroup:first-child .sidebar__group { margin-top: var(--space-1); }
 .sidebar__row { display: flex; align-items: center; gap: var(--space-1); width: 100%; min-height: 32px; border-radius: var(--radius-md); padding: 0 2px 0 0; color: var(--text); font-size: var(--text-base); transition: background-color var(--dur-fast) var(--ease); }
 .sidebar__row:hover { background: var(--surface-hover); }
 .sidebar__row.is-active { background: var(--surface-active); }
+.sidebar__row.is-renaming, .sidebar__row.is-renaming:hover { background: none; }
+/* A row that just appeared (new chat, or revealed by a filter) slides in. */
+.sidebar__row.is-new { animation: row-in var(--dur-slow) var(--ease-out) both; }
+@keyframes row-in { from { opacity: 0; transform: translateX(-8px); } }
+.sidebar__rename { flex: 1; min-width: 0; height: 30px; margin: 1px 0; padding: 0 9px; border: 1px solid var(--gray-8); border-radius: var(--radius-md); background: var(--surface-raised); color: var(--text); font: inherit; font-size: var(--text-base); outline: none; box-shadow: 0 0 0 3px oklch(0.6 0 0 / 0.12); }
 .sidebar__link { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; height: 32px; padding: 0 10px; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .sidebar__link .g-icon { color: var(--text-muted); }
 .sidebar__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bullet { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--gray-8); flex: none; margin: 0 4px 0 4px; }
-.sidebar__more { opacity: 0; color: var(--text-muted); transition: opacity var(--dur-fast) var(--ease); }
+.bullet { width: 7px; height: 7px; border-radius: 50%; border: 1.25px solid var(--gray-8); flex: none; margin: 0 4px 0 4px; transition: border-color var(--dur-fast) var(--ease); }
+.sidebar__row:hover .bullet, .sidebar__row.is-active .bullet { border-color: var(--text-muted); }
+.sidebar__more { opacity: 0; color: var(--text-muted); transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
 .sidebar__row:hover .sidebar__more, .sidebar__row.is-active .sidebar__more, .sidebar__row:focus-within .sidebar__more, .sidebar__more[aria-expanded="true"] { opacity: 1; }
 .sidebar__empty { padding: var(--space-2) 10px; font-size: var(--text-sm); }
 .sidebar__footer { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2); border-top: 1px solid var(--border-subtle); }
@@ -120,7 +142,12 @@ code { font-size: 0.92em; }
 .sidebar__footer > .g-btn { color: var(--text-muted); }
 .profile { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 var(--space-2); border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; font-size: var(--text-base); cursor: pointer; text-align: left; transition: background-color var(--dur-fast) var(--ease); }
 .profile:hover { background: var(--surface-hover); }
-.profile > .g-icon { color: var(--text-muted); }
+.profile > .g-icon { color: var(--text-muted); transition: transform var(--dur-base) var(--ease-out); }
+.profile[aria-expanded="true"] { background: var(--surface-hover); }
+.profile[aria-expanded="true"] > .g-icon { transform: rotate(180deg); }
+/* The account menu opens upward across the footer (profile button + settings icon). */
+.profile-menu { min-width: max(240px, calc(var(--radix-dropdown-menu-trigger-width) + 32px)); }
+.profile-menu .g-menu__item { min-height: 34px; }
 .avatar { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 600; flex: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-7); flex: none; margin: 0 3px; }
 .dot--running { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
@@ -518,5 +545,6 @@ code { font-size: 0.92em; }
 /* Reduced motion: keep state changes, drop movement. */
 @media (prefers-reduced-motion: reduce) {
   .shell, .sidebar-slot > .sidebar, .drawer-scrim { transition: none; }
-  .transcript__item.is-new > *, .hero__title, .hero__inner > *, .panel, .toast, .transcript__jump, .ask, .sidebar__section-body, .tool__body, .composer__send { animation: none !important; }
+  .transcript__item.is-new > *, .hero__title, .hero__inner > *, .panel, .toast, .transcript__jump, .ask, .sidebar__row.is-new, .tool__body, .composer__send { animation: none !important; }
+  .sidebar__section-body, .modeswitch__thumb { transition: none; }
 }

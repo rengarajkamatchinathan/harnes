@@ -58,6 +58,10 @@ export interface UiState {
   sidebarCollapsed: boolean;
   /** Sidebar sections the user folded (e.g. "pinned", "recents", a workspace path). */
   foldedSections: string[];
+  /** Chat list in the sidebar: split into Today / Yesterday / Previous 7 days / Older. */
+  sidebarGroupByDate: boolean;
+  /** Chat list filter: everything, or only chats that are working or waiting on you. */
+  sidebarShow: "all" | "active";
 }
 
 const DEFAULT_UI: UiState = {
@@ -83,6 +87,8 @@ const DEFAULT_UI: UiState = {
   displayName: "",
   sidebarCollapsed: false,
   foldedSections: [],
+  sidebarGroupByDate: false,
+  sidebarShow: "all",
 };
 
 /** Where the user is, for the title-bar back/forward buttons. */
