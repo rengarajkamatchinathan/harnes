@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 
 use genie_protocol::api::browser::{
-    BrowserStatus, BrowserTabParams, ClearWhat, FileChooserAnswerParams, NavAction as UserNav,
-    NavigateParams, SiteState, TabActivateParams, TabIdResult, TabInfo, TabNewParams, TabsResult,
+    BrowserStatus, BrowserTabParams, ClearWhat, FileChooserAnswerParams, InspectParams,
+    InspectResult, NavAction as UserNav, NavigateParams, SiteState, TabActivateParams, TabIdResult,
+    TabInfo, TabNewParams, TabsResult,
 };
 use genie_protocol::ask::{BrowserConfirm, Preview, SaveSuggestion};
 use genie_protocol::common::{Mode, RuleScope, SessionKind};
@@ -26,6 +27,22 @@ use crate::host::{BrowserHost, ConfirmDecision, ConfirmRequest, Control};
 use crate::site::{self, Category, Need, Provenance, SitePolicy, Source};
 use crate::snapshot::{COMPUTED_STYLES, DIFF_CHARS, PageMeta, RefInfo, Snapshot, origin_of};
 
+/// A setting read when it is needed (e.g. from the config hub).
+#[derive(Clone)]
+pub struct Flag(pub Arc<dyn Fn() -> bool + Send + Sync>);
+
+impl Flag {
+    pub fn get(&self) -> bool {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for Flag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Flag({})", self.get())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BrowserConfig {
     /// Thumbnail after each `act` step in the audit record (research §4.5, default on).
@@ -38,6 +55,9 @@ pub struct BrowserConfig {
     pub load_timeout: Duration,
     /// Download quarantine (`<data dir>/browser/downloads`).
     pub downloads_dir: Option<PathBuf>,
+    /// **Keep cookies** (ticket 47; default on). Off: cookies are cleared when the daemon
+    /// exits, and once when the browser first starts in a daemon's life (after a crash).
+    pub keep_cookies: Option<Flag>,
 }
 
 impl Default for BrowserConfig {
@@ -48,6 +68,7 @@ impl Default for BrowserConfig {
             max_duration: Duration::from_secs(15 * 60),
             load_timeout: Duration::from_secs(20),
             downloads_dir: None,
+            keep_cookies: None,
         }
     }
 }
@@ -303,6 +324,8 @@ pub struct Browser {
     chooser_seq: AtomicU64,
     /// Console messages per tab (`browser_console`, auto-verify; ticket 47).
     pub(crate) console: StdMutex<crate::console::ConsoleLog>,
+    /// Cookies were cleared at the first start (Keep cookies off).
+    cookies_cleared: std::sync::atomic::AtomicBool,
 }
 
 /// A pending file picker (SA-24).
@@ -311,6 +334,38 @@ struct Chooser {
     cdp_session: String,
     backend_node: i64,
 }
+
+/// The element at viewport point `(x, y)`: a selector (id, else up to 5 levels of tag,
+/// two stable classes and `:nth-of-type`), text, HTML, box and scroll offset.
+const INSPECT_JS: &str = r#"(x, y) => {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(s) : s;
+  const unique = (q) => { try { return document.querySelectorAll(q).length === 1; } catch (_) { return false; } };
+  const part = (e) => {
+    if (e.id && unique('#' + esc(e.id))) return { s: '#' + esc(e.id), done: true };
+    let p = e.tagName.toLowerCase();
+    const cls = [...e.classList].filter((c) => !/^(css|sc|jsx|svelte|emotion)-|^_|\d{3,}/.test(c)).slice(0, 2);
+    if (cls.length) p += '.' + cls.map(esc).join('.');
+    const par = e.parentElement;
+    if (par) {
+      const same = [...par.children].filter((c) => c.tagName === e.tagName);
+      if (same.length > 1) p += ':nth-of-type(' + (same.indexOf(e) + 1) + ')';
+    }
+    return { s: p, done: false };
+  };
+  const parts = [];
+  for (let e = el; e && e.nodeType === 1 && e !== document.documentElement && parts.length < 5; e = e.parentElement) {
+    const { s, done } = part(e);
+    parts.unshift(s);
+    if (done || unique(parts.join(' > '))) break;
+  }
+  const r = el.getBoundingClientRect();
+  return { selector: parts.join(' > '), tag: el.tagName.toLowerCase(),
+    text: (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 500),
+    html: el.outerHTML.slice(0, 1500), x: r.left, y: r.top, w: r.width, h: r.height,
+    sx: window.scrollX, sy: window.scrollY, url: location.href };
+}"#;
 
 /// The most text `browser.copy` returns.
 const MAX_COPY_CHARS: usize = 1_000_000;
@@ -375,6 +430,7 @@ impl Browser {
             choosers: StdMutex::new(HashMap::new()),
             chooser_seq: AtomicU64::new(0),
             console: StdMutex::new(crate::console::ConsoleLog::default()),
+            cookies_cleared: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -415,6 +471,12 @@ impl Browser {
                 p["downloadPath"] = json!(d.to_string_lossy());
             } else {
                 p["behavior"] = json!("deny");
+            }
+            if !self.keep_cookies()
+                && !self.cookies_cleared.swap(true, Ordering::SeqCst)
+                && let Err(e) = c.call("Storage.clearCookies", json!({})).await
+            {
+                tracing::warn!(error = %e, "clearing cookies at start failed");
             }
             if let Err(e) = c.call("Browser.setDownloadBehavior", p).await {
                 tracing::warn!(error = %e, "setDownloadBehavior failed");
@@ -698,6 +760,63 @@ impl Browser {
         Ok(text.chars().take(MAX_COPY_CHARS).collect())
     }
 
+    /// `browser.inspect` (Element select, ticket 47): the element under a screencast point,
+    /// with a selector, its text and HTML, its box and optionally a JPEG crop. Read-only:
+    /// it works whoever is in control.
+    pub async fn inspect(&self, p: &InspectParams) -> Result<InspectResult, BrowserError> {
+        let s = self.session(&p.session_id);
+        let (Some(t), Some(c)) = (s.tab(&p.tab_id), s.client()) else {
+            return Err(BrowserError::Invalid(format!("no tab {}", p.tab_id)));
+        };
+        let sid = Some(t.cdp_session.as_str());
+        let expr = format!("({INSPECT_JS})({}, {})", p.x, p.y);
+        let r = c
+            .call_in(
+                sid,
+                "Runtime.evaluate",
+                json!({"expression": expr, "returnByValue": true}),
+            )
+            .await?;
+        let v = &r["result"]["value"];
+        if v.is_null() {
+            return Err(BrowserError::Invalid("no element there".into()));
+        }
+        let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
+        let st = |k: &str| v[k].as_str().unwrap_or("").to_string();
+        let mut out = InspectResult {
+            selector: st("selector"),
+            tag: st("tag"),
+            text: st("text"),
+            html: st("html"),
+            x: f("x"),
+            y: f("y"),
+            w: f("w"),
+            h: f("h"),
+            url: st("url"),
+            image_b64: None,
+        };
+        if p.capture && out.w >= 1.0 && out.h >= 1.0 {
+            // Page coordinates; a little margin, capped so a huge element stays a cheap crop.
+            let pad = 4.0;
+            let clip = json!({
+                "x": (out.x + f("sx") - pad).max(0.0),
+                "y": (out.y + f("sy") - pad).max(0.0),
+                "width": (out.w + 2.0 * pad).min(1600.0),
+                "height": (out.h + 2.0 * pad).min(1200.0),
+                "scale": 1,
+            });
+            let shot = c
+                .call_in(
+                    sid,
+                    "Page.captureScreenshot",
+                    json!({"format": "jpeg", "quality": 80, "clip": clip, "captureBeyondViewport": true}),
+                )
+                .await?;
+            out.image_b64 = shot["data"].as_str().map(String::from);
+        }
+        Ok(out)
+    }
+
     /// `browser.file_chooser.answer`: put the user's files into the input that opened the
     /// picker (empty `files` cancels).
     pub async fn file_chooser_answer(
@@ -869,6 +988,24 @@ impl Browser {
         Ok(())
     }
 
+    fn keep_cookies(&self) -> bool {
+        self.cfg.keep_cookies.as_ref().is_none_or(Flag::get)
+    }
+
+    /// Daemon exit: with **Keep cookies** off, clear them in the running browser (never
+    /// starts one just for that).
+    pub async fn before_shutdown(&self) {
+        if self.keep_cookies() {
+            return;
+        }
+        let live = self.watched.lock().await.clone().filter(|c| !c.is_closed());
+        if let Some(c) = live
+            && let Err(e) = c.call("Storage.clearCookies", json!({})).await
+        {
+            tracing::warn!(error = %e, "clearing cookies at exit failed");
+        }
+    }
+
     /// `browser.data.clear`.
     pub async fn clear_data(&self, what: ClearWhat) -> Result<(), BrowserError> {
         let c = self.client().await?;
@@ -1012,6 +1149,11 @@ impl Browser {
                 ));
             }
         };
+        if let Some(u) = &url {
+            self.sites
+                .local_only_check(u, false)
+                .map_err(BrowserError::Invalid)?;
+        }
         let c = self.user_client(&s).await?;
         let t = match &p.tab_id {
             Some(id) => s
@@ -1066,9 +1208,28 @@ impl Browser {
                 .ok_or_else(|| BrowserError::Invalid(format!("`{u}` isn't a web address")))?,
             None => "about:blank".to_string(),
         };
+        self.sites
+            .local_only_check(&url, false)
+            .map_err(BrowserError::Invalid)?;
         let s = self.session(&p.session_id);
         let c = self.user_client(&s).await?;
         let t = self.user_new_tab(&s, &c, &url).await?;
+        self.user_acted(&s);
+        Ok(TabIdResult { tab_id: t.tab_id })
+    }
+
+    /// `browser.open_file`: a local file the user clicked in chat, in a new tab. The caller
+    /// checked that `path` is a previewable file inside the session's folder.
+    pub async fn open_file(
+        &self,
+        session_id: &str,
+        path: &std::path::Path,
+    ) -> Result<TabIdResult, BrowserError> {
+        let url = url::Url::from_file_path(path)
+            .map_err(|()| BrowserError::Invalid(format!("{} isn't a file path", path.display())))?;
+        let s = self.session(session_id);
+        let c = self.user_client(&s).await?;
+        let t = self.user_new_tab(&s, &c, url.as_str()).await?;
         self.user_acted(&s);
         Ok(TabIdResult { tab_id: t.tab_id })
     }
@@ -1529,6 +1690,10 @@ impl<'a> Op<'a> {
         }
         if !is_web(url) {
             return Ok(());
+        }
+        if let Err(why) = self.b.sites.local_only_check(url, true) {
+            self.decision = "blocked:policy".into();
+            return Err(Stop::boxed(Outcome::status(Status::Blocked, why)));
         }
         let eff = self.b.sites.effective(url);
         let host = site::host_of(url).unwrap_or_default();

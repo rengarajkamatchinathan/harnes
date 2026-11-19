@@ -866,6 +866,30 @@
     },
     {
       "direction": "request",
+      "ident": "BrowserOpenFile",
+      "name": "browser.open_file",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/OpenFileParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TabIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserInspect",
+      "name": "browser.inspect",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/InspectParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InspectResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "BrowserPopout",
       "name": "browser.popout",
       "needs_lease": false,

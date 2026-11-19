@@ -428,6 +428,10 @@ fn build_engine(
                 p.strings("browser.siteAllowlist"),
                 p.strings("browser.siteBlocklist"),
             );
+            sites.set_local_only(
+                p.bool("browser.agentLocalOnly") == Some(true),
+                p.bool("browser.userLocalOnly") == Some(true),
+            );
             if let Some(v) = h.value(None, "browser.sites")
                 && let Ok(list) =
                     serde_json::from_value::<Vec<genie_protocol::api::browser::SitePermission>>(v)
@@ -443,6 +447,14 @@ fn build_engine(
             sites,
             genie_browser::BrowserConfig {
                 downloads_dir: Some(ep.data_dir.join("browser").join("downloads")),
+                // Settings → ⋮ Keep cookies (ticket 47); read when needed, default on.
+                keep_cookies: hub.clone().map(|h| {
+                    genie_browser::Flag(Arc::new(move || {
+                        h.value(None, "browser.keepCookies")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true)
+                    }))
+                }),
                 ..Default::default()
             },
             btasks,
@@ -704,6 +716,9 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     engine.shutdown();
     if let Some(m) = &services.mcp {
         m.shutdown();
+    }
+    if let Some(b) = &services.browser {
+        let _ = tokio::time::timeout(SHUTDOWN_GRACE, b.before_shutdown()).await;
     }
     if let Some(b) = &services.browser_backend {
         let _ = tokio::time::timeout(SHUTDOWN_GRACE, b.shutdown()).await;

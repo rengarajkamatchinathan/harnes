@@ -125,6 +125,15 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
     taRef.current?.focus();
   }, [seed]);
   const [atts, setAtts] = useState<Attachment[]>([]);
+  // Element select (ticket 47) puts the picked element here.
+  const inject = app.composerInject;
+  useEffect(() => {
+    if (!inject || !store || inject.sessionId !== store.model.sessionId) return;
+    setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${inject.text}` : inject.text));
+    if (inject.files.length) addFilesRef.current?.(inject.files);
+    taRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inject?.n]);
   const [drag, setDrag] = useState(false);
   const [sending, setSending] = useState(false);
   const [connectors, setConnectors] = useState(false);
@@ -186,6 +195,7 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
     ta.style.height = `${Math.min(ta.scrollHeight, 280)}px`;
   }, [text]);
 
+  const addFilesRef = useRef<((files: File[]) => void) | null>(null);
   const addFiles = (files: FileList | File[]) => {
     const list = [...files];
     let count = atts.length;
@@ -205,6 +215,7 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
         .catch((e) => update({ state: "error", error: app.describeError(e) }));
     }
   };
+  addFilesRef.current = addFiles;
 
   const remember = (name: string) => app.setUi({ recentCommands: pushRecent(app.ui.recentCommands, name) });
 

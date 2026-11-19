@@ -3053,6 +3053,93 @@
         }
       ]
     },
+    "InspectParams": {
+      "description": "`browser.inspect`: the element at a point of the screencast (Element select, ticket 47).\n`x`/`y` are viewport CSS pixels like `browser.input`. `capture` adds a JPEG crop.",
+      "properties": {
+        "capture": {
+          "default": false,
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "InspectResult": {
+      "properties": {
+        "h": {
+          "format": "double",
+          "type": "number"
+        },
+        "html": {
+          "description": "`outerHTML`, at most 1500 characters.",
+          "type": "string"
+        },
+        "image_b64": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selector": {
+          "description": "A CSS selector for the element (unique when an id allows it).",
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "text": {
+          "description": "Visible text, at most 500 characters.",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "w": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "description": "The element's box in viewport CSS pixels.",
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "selector",
+        "tag",
+        "text",
+        "html",
+        "x",
+        "y",
+        "w",
+        "h",
+        "url"
+      ],
+      "type": "object"
+    },
     "InstalledBrowser": {
       "properties": {
         "kind": {
@@ -3933,6 +4020,22 @@
       },
       "required": [
         "ok"
+      ],
+      "type": "object"
+    },
+    "OpenFileParams": {
+      "description": "`browser.open_file`: preview a file of the session's folder (HTML, PDF, video, SVG) in a\nnew Browser tab; `path` is relative to the folder or absolute inside it (ticket 47).",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "path"
       ],
       "type": "object"
     },

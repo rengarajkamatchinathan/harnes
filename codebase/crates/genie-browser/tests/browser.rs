@@ -316,6 +316,23 @@ async fn navigate_snapshot_click_with_site_ask_confirmation_and_audit() {
     );
 }
 
+/// Policy `browser.agentLocalOnly` (ticket 47): outside sites are blocked without an ask,
+/// even when the user allowed them (localhost under the policy: `real_chrome_console`).
+#[tokio::test]
+async fn local_only_policy_blocks_outside_sites() {
+    let r = rig();
+    r.allow_site("shop.example");
+    r.browser.sites.set_local_only(true, false);
+    let out = r
+        .call("browser_navigate", json!({"url": "https://shop.example/"}))
+        .await
+        .unwrap();
+    assert!(out.starts_with("status: blocked"), "{out}");
+    assert!(out.contains("local dev servers"), "{out}");
+    assert!(r.fake.calls_to("Page.navigate").is_empty());
+    assert!(r.gate.asked.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn refusals_and_deterministic_gates() {
     let mut r = rig();
@@ -1699,7 +1716,9 @@ async fn real_chrome_console() {
         let c = ctx(name);
         async move { t.execute(input, c).await.unwrap().to_text() }
     };
-    // `localhost` needs no site approval (the gate would record an ask).
+    // `localhost` needs no site approval (the gate would record an ask), and the
+    // local-only policy keeps it reachable.
+    browser.sites.set_local_only(true, true);
     let out = call(
         "browser_navigate",
         json!({"url": format!("http://localhost:{port}/")}),
@@ -1731,6 +1750,101 @@ async fn real_chrome_console() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let out = call("browser_console", json!({"level": "error"})).await;
     assert_eq!(out.matches("[error] boom").count(), 1, "{out}");
+    browser.end_session(SESSION).await;
+    genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
+}
+
+/// Ticket 47 phase 4 against a real browser: Element select (`inspect`) finds the element
+/// under a point with a selector and a crop; a local HTML file opens in a tab; the
+/// local-only policy keeps the agent and the user off outside sites.
+#[tokio::test]
+#[ignore = "needs a local Chrome, Edge or Chromium"]
+async fn real_chrome_inspect_files_and_local_only() {
+    use genie_browser::{SystemChromeBackend, SystemChromeConfig};
+    use genie_protocol::api::browser::InspectParams;
+
+    if genie_browser::discover::find_installed().await.is_empty() {
+        eprintln!("no browser installed; skipping");
+        return;
+    }
+    let tasks = TaskTracker::new();
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("demo.html");
+    std::fs::write(
+        &page,
+        "<html><head><title>Demo</title><style>body{margin:0}</style></head><body>\
+         <div class='toolbar'><button id='save' style='position:absolute;left:10px;top:10px;width:120px;height:40px'>Save draft</button></div>\
+         <ul style='position:absolute;top:100px'><li>a</li><li class='item'>second item</li></ul></body></html>",
+    )
+    .unwrap();
+    let backend = Arc::new(SystemChromeBackend::new(
+        SystemChromeConfig::new(&dir.path().join("profile")),
+        tasks.clone(),
+    ));
+    let browser = Browser::new(
+        backend.clone(),
+        Arc::new(RecordingHost::default()),
+        Arc::new(SitePolicy::new()),
+        BrowserConfig::default(),
+        tasks.clone(),
+    );
+
+    // A local file in a new tab.
+    let tab = browser.open_file(SESSION, &page).await.unwrap().tab_id;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let tabs = browser.tabs(SESSION).await.tabs;
+    assert!(
+        tabs.iter()
+            .any(|t| t.title == "Demo" && t.url.starts_with("file://")),
+        "{tabs:?}"
+    );
+
+    // Element select: the button by id, with a crop; the list item by structure.
+    let r = browser
+        .inspect(&InspectParams {
+            session_id: SESSION.into(),
+            tab_id: tab.clone(),
+            x: 50.0,
+            y: 25.0,
+            capture: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.selector, "#save");
+    assert_eq!(r.tag, "button");
+    assert_eq!(r.text, "Save draft");
+    assert!(
+        (r.w - 120.0).abs() < 1.0 && (r.h - 40.0).abs() < 1.0,
+        "{r:?}"
+    );
+    let jpeg = {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(r.image_b64.as_deref().unwrap())
+            .unwrap()
+    };
+    assert_eq!(&jpeg[..2], &[0xFF, 0xD8], "a JPEG crop");
+    let li = browser
+        .inspect(&InspectParams {
+            session_id: SESSION.into(),
+            tab_id: tab.clone(),
+            x: 60.0,
+            y: 100.0 + 16.0 + 18.0 + 8.0,
+            capture: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(li.text, "second item", "{li:?}");
+    assert!(li.selector.contains("li.item"), "{li:?}");
+    assert!(li.image_b64.is_none());
+
+    // Local-only policy: the user can still open localhost, not outside sites.
+    browser.sites.set_local_only(true, true);
+    let err = browser
+        .navigate(&nav(Some("https://example.org/"), None))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("local dev servers"), "{err}");
     browser.end_session(SESSION).await;
     genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
 }

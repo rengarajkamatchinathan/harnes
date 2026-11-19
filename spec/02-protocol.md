@@ -235,6 +235,8 @@ Notification: `config.changed {keys, scope}`.
 | `browser.file_chooser.answer` | `{session_id, chooser_id, files:[path]}`: answer a `browser.file_chooser` event; empty `files` cancels |
 | `browser.sites.list` / `browser.sites.set` | per-site states `blocked|ask|read|act` |
 | `browser.data.clear` | `{what:"cookies"|"all"}` |
+| `browser.open_file` | `{session_id, path}` → `{tab_id}`: preview a file of the session's folder (`.html/.htm/.pdf/.mp4/.webm/.mov/.ogv/.svg`, inside the folder only) in a new tab, as `file://` (t47) |
+| `browser.inspect` | `{session_id, tab_id, x, y, capture?}` → `{selector, tag, text, html, x, y, w, h, url, image_b64?}`: Element select. The element at a viewport point (CSS px, like `browser.input`); `capture` adds a JPEG crop. Read-only, works whoever is in control (t47) |
 | `preview.list` | `{session_id}` → `{servers:[PreviewServer], configs:[name], auto_verify, config_error?}`: the session's dev servers and its `.genie/launch.json` entries (t47) |
 | `preview.start` / `preview.stop` | `{session_id, name}` → `PreviewServer`, answered once the port accepts connections (or after 60 s, still `starting`) / `{session_id, name?}` (no `name`: all). The user's own start never prompts (t47) |
 | `preview.logs` | `{session_id, name, lines?}` → `{text}`: the last lines of the server's stdout+stderr, ANSI stripped (t47) |

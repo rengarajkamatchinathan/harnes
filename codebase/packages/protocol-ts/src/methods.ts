@@ -74,6 +74,8 @@ export interface Requests {
   "browser.navigate": { params: T.NavigateParams; result: T.TabIdResult };
   "browser.tab.new": { params: T.TabNewParams; result: T.TabIdResult };
   "browser.tab.close": { params: T.BrowserTabParams; result: T.Empty };
+  "browser.open_file": { params: T.OpenFileParams; result: T.TabIdResult };
+  "browser.inspect": { params: T.InspectParams; result: T.InspectResult };
   "browser.popout": { params: T.SessionIdParams; result: T.Empty };
   "browser.copy": { params: T.BrowserTabParams; result: T.CopyResult };
   "browser.file_chooser.answer": { params: T.FileChooserAnswerParams; result: T.Empty };
@@ -245,6 +247,8 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "browser.navigate", direction: "request", needsLease: true },
   { name: "browser.tab.new", direction: "request", needsLease: true },
   { name: "browser.tab.close", direction: "request", needsLease: true },
+  { name: "browser.open_file", direction: "request", needsLease: true },
+  { name: "browser.inspect", direction: "request", needsLease: false },
   { name: "browser.popout", direction: "request", needsLease: false },
   { name: "browser.copy", direction: "request", needsLease: true },
   { name: "browser.file_chooser.answer", direction: "request", needsLease: true },
@@ -366,7 +370,9 @@ export class GenieClient {
     },
     handback: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.handback", params) as Promise<T.Empty>,
     input: (params: T.BrowserInputParams): Promise<T.Empty> => this.t.request("browser.input", params) as Promise<T.Empty>,
+    inspect: (params: T.InspectParams): Promise<T.InspectResult> => this.t.request("browser.inspect", params) as Promise<T.InspectResult>,
     navigate: (params: T.NavigateParams): Promise<T.TabIdResult> => this.t.request("browser.navigate", params) as Promise<T.TabIdResult>,
+    open_file: (params: T.OpenFileParams): Promise<T.TabIdResult> => this.t.request("browser.open_file", params) as Promise<T.TabIdResult>,
     popout: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.popout", params) as Promise<T.Empty>,
     screencast: {
       ack: (params: T.ScreencastAckParams): Promise<T.Empty> => this.t.request("browser.screencast.ack", params) as Promise<T.Empty>,

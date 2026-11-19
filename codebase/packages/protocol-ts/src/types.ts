@@ -831,6 +831,35 @@ export type InputEvent = ({ action: string; button?: string | null; click_count?
 /** What a client sends in `session.prompt` (02 §6.2). */
 export type InputPart = { text: string; type: "text" } | { blob_id: string; mime: string; name: string; type: "attachment" } | { server: string; type: "resource"; uri: string } | { id: string; type: "skill" } | { path: string; type: "file_ref" } | { args?: string; name: string; type: "command" };
 
+/**
+ * `browser.inspect`: the element at a point of the screencast (Element select, ticket 47).
+ * `x`/`y` are viewport CSS pixels like `browser.input`. `capture` adds a JPEG crop.
+ */
+export interface InspectParams {
+  capture?: boolean;
+  session_id: string;
+  tab_id: string;
+  x: number;
+  y: number;
+}
+
+export interface InspectResult {
+  h: number;
+  /** `outerHTML`, at most 1500 characters. */
+  html: string;
+  image_b64?: string | null;
+  /** A CSS selector for the element (unique when an id allows it). */
+  selector: string;
+  tag: string;
+  /** Visible text, at most 500 characters. */
+  text: string;
+  url: string;
+  w: number;
+  /** The element's box in viewport CSS pixels. */
+  x: number;
+  y: number;
+}
+
 export interface InstalledBrowser {
   kind: BrowserKind;
   path: string;
@@ -1087,6 +1116,15 @@ export interface NavigateParams {
 /** `{ok: true}`. */
 export interface OkResult {
   ok: boolean;
+}
+
+/**
+ * `browser.open_file`: preview a file of the session's folder (HTML, PDF, video, SVG) in a
+ * new Browser tab; `path` is relative to the folder or absolute inside it (ticket 47).
+ */
+export interface OpenFileParams {
+  path: string;
+  session_id: string;
 }
 
 /** A stored message part, final value (`part.ended`). */

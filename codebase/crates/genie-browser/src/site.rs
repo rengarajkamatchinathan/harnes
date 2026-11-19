@@ -245,6 +245,9 @@ struct Inner {
     user: BTreeMap<String, SiteState>,
     admin_allow: Vec<String>,
     admin_block: Vec<String>,
+    /// Policy `browser.agentLocalOnly` / `browser.userLocalOnly` (ticket 47).
+    agent_local_only: bool,
+    user_local_only: bool,
 }
 
 /// Site permissions shared by every session of the daemon.
@@ -263,6 +266,48 @@ impl SitePolicy {
         if let Ok(mut g) = self.inner.write() {
             g.admin_allow = allow;
             g.admin_block = block;
+        }
+    }
+
+    /// Managed policy (ticket 47): `agent` keeps the agent's browser tools on local dev
+    /// servers; `user` does the same for the user's own address bar, tabs and chat links.
+    pub fn set_local_only(&self, agent: bool, user: bool) {
+        if let Ok(mut g) = self.inner.write() {
+            g.agent_local_only = agent;
+            g.user_local_only = user;
+        }
+    }
+
+    pub fn agent_local_only(&self) -> bool {
+        self.inner.read().map_or(true, |g| g.agent_local_only)
+    }
+
+    pub fn user_local_only(&self) -> bool {
+        self.inner.read().map_or(true, |g| g.user_local_only)
+    }
+
+    /// `Err(reason)` when policy keeps `url` (http/https) out of reach of the agent or user.
+    pub fn local_only_check(&self, url: &str, agent: bool) -> Result<(), String> {
+        let on = if agent {
+            self.agent_local_only()
+        } else {
+            self.user_local_only()
+        };
+        if !on || !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Ok(());
+        }
+        let host = host_of(url).unwrap_or_default();
+        if is_loopback(&host) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{host} is outside: your organization's policy limits the {} to local dev servers (localhost)",
+                if agent {
+                    "agent browser"
+                } else {
+                    "Browser tab"
+                }
+            ))
         }
     }
 
@@ -452,6 +497,17 @@ mod tests {
             SiteState::Read
         );
         assert_eq!(p.effective("https://example.org").state, SiteState::Ask);
+        // Local-only policy (ticket 47).
+        p.set_local_only(true, false);
+        assert!(p.local_only_check("http://localhost:3000/", true).is_ok());
+        assert!(p.local_only_check("about:blank", true).is_ok());
+        assert!(
+            p.local_only_check("https://example.org/", true)
+                .unwrap_err()
+                .contains("agent browser")
+        );
+        assert!(p.local_only_check("https://example.org/", false).is_ok());
+        p.set_local_only(false, false);
         // Local dev servers are allowed without asking (ticket 47), unless blocked.
         for u in [
             "http://localhost:5173/",

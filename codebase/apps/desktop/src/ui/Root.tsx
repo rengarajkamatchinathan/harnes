@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { layoutFor, ShellContext, useWindowWidth, type ShellState } from "./shell";
-import { applyAppearance, Banner, Button, Card, Input } from "@genie/ui";
+import { applyAppearance, Banner, Button, Card, Dialog, Icon, Input } from "@genie/ui";
 import { GenieMark } from "./GenieMark";
 import { t } from "../i18n";
 import { preloadOnIdle } from "../markdown/markdown";
 import { useApp } from "./context";
 import { Sidebar } from "./Sidebar";
 import { ChatView } from "./chat/ChatView";
-import { RightPanel } from "./panel/RightPanel";
+import { PANEL_ICON, RightPanel, effectiveTab } from "./panel/RightPanel";
 import { SettingsPage } from "./settings/SettingsPage";
 import { FirstRun } from "./FirstRun";
 import { ProjectPage } from "./ProjectPage";
@@ -42,6 +42,12 @@ export function Root() {
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       const el = e.target as HTMLElement;
+      const preview = el.closest<HTMLElement>("[data-preview]");
+      if (preview && app.ui.activeSession) {
+        e.preventDefault();
+        app.openFile(app.ui.activeSession, preview.dataset.preview!);
+        return;
+      }
       const link = el.closest<HTMLElement>("[data-href]");
       if (link) {
         e.preventDefault();
@@ -49,7 +55,10 @@ export function Root() {
         const external = () => void app.platform.openExternal(href).catch(() => {});
         const sid = app.ui.activeSession;
         if (href.startsWith("genie://")) app.openDeepLink(href);
-        else if (sid && app.ui.browserOpenLinks && /^https?:\/\//i.test(href) && !(e.metaKey || e.ctrlKey)) {
+        else if (sid && !app.ui.browserLinkAsked && /^https?:\/\//i.test(href) && !(e.metaKey || e.ctrlKey)) {
+          // The first outside link asks where links should open (t47).
+          app.askLinks(sid, href);
+        } else if (sid && app.ui.browserOpenLinks && /^https?:\/\//i.test(href) && !(e.metaKey || e.ctrlKey)) {
           app.setUi({ panelOpen: true, panelTab: "browser" });
           // No browser installed, or the daemon refused: fall back to the system browser.
           void app.client.browser.tab.new({ session_id: sid, url: href }).catch(external);
@@ -97,7 +106,8 @@ function Shell() {
   const app = useApp();
   const { ui, status } = app;
   const width = useWindowWidth();
-  const panelShown = ui.view !== "project" && ui.panelOpen;
+  const panelShown = ui.view !== "project" && ui.panelOpen && !ui.panelMinimized;
+  const panelPill = ui.view !== "project" && ui.panelOpen && ui.panelMinimized;
   const { narrow, overlay, panelWidth } = layoutFor(width, { sidebarWidth: ui.sidebarWidth, panelOpen: panelShown, panelWidth: ui.panelWidth });
   const [drawerOpen, setDrawer] = useState(false);
   // The drawer is transient: it closes when the layout widens or the user goes somewhere.
@@ -114,6 +124,12 @@ function Shell() {
   // Cmd/Ctrl+Shift+B shows or hides the Browser tab (as in Claude Code Desktop, t47).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+Shift+S: Element select in the Browser tab (ticket 47).
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "s" && app.ui.activeSession) {
+        e.preventDefault();
+        app.setSelectingElement(!app.selectingElement);
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "b") return;
       e.preventDefault();
       const shown = app.ui.panelOpen && app.ui.panelTab === "browser";
@@ -148,6 +164,29 @@ function Shell() {
         {ui.view === "project" && ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />}
       </main>
       {panelShown && <RightPanel />}
+      {panelPill && (
+        <button className="panel-pill" onClick={() => app.setUi({ panelMinimized: false })} title={t("panel.restore")}>
+          <Icon name={PANEL_ICON[effectiveTab(ui.mode, ui.panelTab)]} size={14} />
+          <span>{t(`panel.${effectiveTab(ui.mode, ui.panelTab)}` as Parameters<typeof t>[0])}</span>
+          <Icon name="chevronLeft" size={12} />
+        </button>
+      )}
+      <Dialog
+        open={!!app.linkAsk}
+        title={t("browser.linkAskTitle")}
+        onClose={() => app.answerLinks(null)}
+        footer={
+          <>
+            <Button onClick={() => app.answerLinks(false)}>{t("browser.linkAskSystem")}</Button>
+            <Button variant="primary" icon="globe" onClick={() => app.answerLinks(true)}>
+              {t("browser.linkAskPane")}
+            </Button>
+          </>
+        }
+      >
+        <p>{t("browser.linkAskBody")}</p>
+        {app.linkAsk && <p className="muted link-ask__url">{app.linkAsk.href}</p>}
+      </Dialog>
       {ui.view === "settings" && <SettingsPage />}
       <Toasts />
     </div>

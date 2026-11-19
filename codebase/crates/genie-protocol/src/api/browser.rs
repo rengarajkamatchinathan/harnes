@@ -356,3 +356,42 @@ pub struct PreviewAutoVerifyParams {
     pub session_id: String,
     pub enabled: bool,
 }
+
+/// `browser.open_file`: preview a file of the session's folder (HTML, PDF, video, SVG) in a
+/// new Browser tab; `path` is relative to the folder or absolute inside it (ticket 47).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OpenFileParams {
+    pub session_id: String,
+    pub path: String,
+}
+
+/// `browser.inspect`: the element at a point of the screencast (Element select, ticket 47).
+/// `x`/`y` are viewport CSS pixels like `browser.input`. `capture` adds a JPEG crop.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InspectParams {
+    pub session_id: String,
+    pub tab_id: String,
+    pub x: f64,
+    pub y: f64,
+    #[serde(default)]
+    pub capture: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InspectResult {
+    /// A CSS selector for the element (unique when an id allows it).
+    pub selector: String,
+    pub tag: String,
+    /// Visible text, at most 500 characters.
+    pub text: String,
+    /// `outerHTML`, at most 1500 characters.
+    pub html: String,
+    /// The element's box in viewport CSS pixels.
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_b64: Option<String>,
+}

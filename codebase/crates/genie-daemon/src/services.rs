@@ -506,6 +506,16 @@ impl Services {
                                 .await
                                 .map_err(berr)?,
                         ),
+                        n if n == m::BrowserInspect::NAME => to_result(
+                            &b.inspect(&params::<m::BrowserInspect>(&r)?)
+                                .await
+                                .map_err(berr)?,
+                        ),
+                        n if n == m::BrowserOpenFile::NAME => {
+                            let p = params::<m::BrowserOpenFile>(&r)?;
+                            let path = preview_file(&st, &p.session_id, &p.path)?;
+                            to_result(&b.open_file(&p.session_id, &path).await.map_err(berr)?)
+                        }
                         n if n == m::BrowserTabClose::NAME => {
                             b.tab_close(&params::<m::BrowserTabClose>(&r)?)
                                 .await
@@ -879,4 +889,42 @@ pub(crate) fn read_settings_file(path: &Path) -> Result<Value, String> {
         Ok(v @ Value::Object(_)) => Ok(v),
         _ => Err(format!("{}: not a JSON object", path.display())),
     }
+}
+
+/// Files the Browser tab previews from chat (ticket 47).
+const PREVIEW_EXTS: &[&str] = &["html", "htm", "pdf", "mp4", "webm", "mov", "ogv", "svg"];
+
+/// `browser.open_file`: `path` must be a previewable file inside the session's folder.
+fn preview_file(state: &DaemonState, sid: &str, path: &str) -> Result<PathBuf, RpcError> {
+    let ws = state.registry().extra(sid).workspace.ok_or_else(|| {
+        RpcError::new(
+            ErrorKind::InvalidState,
+            "file previews need a Code session's folder",
+        )
+    })?;
+    let p = Path::new(path.trim());
+    let full = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        ws.join(p)
+    };
+    let canon = std::fs::canonicalize(&full)
+        .map_err(|_| RpcError::new(ErrorKind::NotFound, format!("{path} doesn't exist")))?;
+    let root = std::fs::canonicalize(&ws).unwrap_or(ws);
+    if !canon.starts_with(&root) || !canon.is_file() {
+        return Err(RpcError::invalid_params(
+            "only files inside the session's folder can be previewed",
+        ));
+    }
+    let ext = canon
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if !PREVIEW_EXTS.contains(&ext.as_str()) {
+        return Err(RpcError::invalid_params(format!(
+            "`.{ext}` files can't be previewed (HTML, PDF, video and SVG can)"
+        )));
+    }
+    Ok(canon)
 }

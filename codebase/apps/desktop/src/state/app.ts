@@ -68,6 +68,10 @@ export interface UiState {
   recentCommands: string[];
   /** Web links clicked in chat open in the Browser tab (Cmd/Ctrl-click: system browser). */
   browserOpenLinks: boolean;
+  /** The first outside link from chat asked "Browser tab or default browser?" (t47). */
+  browserLinkAsked: boolean;
+  /** The right panel is minimized to a pill (t47); opening any tab restores it. */
+  panelMinimized: boolean;
 }
 
 const DEFAULT_UI: UiState = {
@@ -97,6 +101,8 @@ const DEFAULT_UI: UiState = {
   sidebarShow: "all",
   recentCommands: [],
   browserOpenLinks: true,
+  browserLinkAsked: false,
+  panelMinimized: false,
 };
 
 /** Where the user is, for the title-bar back/forward buttons. */
@@ -161,6 +167,49 @@ export class App extends Emitter {
     this.devServers = new DevServers(this.client);
   }
 
+  /** Element select (Cmd/Ctrl+Shift+S, ticket 47): the Browser tab picks an element. */
+  selectingElement = false;
+  /** Text and files for a session's composer (Element select); `n` changes per inject. */
+  composerInject: { sessionId: string; text: string; files: File[]; n: number } | null = null;
+
+  setSelectingElement(on: boolean) {
+    this.selectingElement = on;
+    if (on) this.setUi({ panelOpen: true, panelTab: "browser" });
+    this.changedNow();
+  }
+
+  injectComposer(sessionId: string, text: string, files: File[] = []) {
+    this.composerInject = { sessionId, text, files, n: (this.composerInject?.n ?? 0) + 1 };
+    this.changedNow();
+  }
+
+  /** The first outside link from chat, waiting for "Browser tab or default browser?". */
+  linkAsk: { sid: string; href: string } | null = null;
+
+  askLinks(sid: string, href: string) {
+    this.linkAsk = { sid, href };
+    this.changedNow();
+  }
+
+  /** `true`: Browser tab, `false`: default browser (both remembered), `null`: dismissed. */
+  answerLinks(pane: boolean | null) {
+    const ask = this.linkAsk;
+    this.linkAsk = null;
+    if (!ask || pane === null) return this.changedNow();
+    this.setUi({ browserOpenLinks: pane, browserLinkAsked: true });
+    const external = () => void this.platform.openExternal(ask.href).catch(() => {});
+    if (pane) {
+      this.setUi({ panelOpen: true, panelTab: "browser" });
+      void this.client.browser.tab.new({ session_id: ask.sid, url: ask.href }).catch(external);
+    } else external();
+  }
+
+  /** A local file clicked in chat (HTML, PDF, video, SVG) in the session's Browser tab. */
+  openFile(sessionId: string, path: string) {
+    this.setUi({ panelOpen: true, panelTab: "browser" });
+    void this.client.browser.open_file({ session_id: sessionId, path }).catch((e) => this.toast({ title: this.describeError(e), tone: "danger" }));
+  }
+
   /** Show `url` in the session's Browser tab (a dev server, a server card's Open). */
   openInBrowser(sessionId: string, url: string, quiet = false) {
     this.setUi({ panelOpen: true, panelTab: "browser" });
@@ -209,6 +258,8 @@ export class App extends Emitter {
   }
 
   setUi(patch: Partial<UiState>) {
+    // Showing a panel tab brings a minimized panel back.
+    if (patch.panelOpen === true && patch.panelMinimized === undefined) patch = { ...patch, panelMinimized: false };
     const before = locOf(this.ui);
     this.ui = { ...this.ui, ...patch };
     const after = locOf(this.ui);

@@ -62,7 +62,7 @@ Make Genie's Browser tab work like Claude Code Desktop's Browser pane. The featu
   - **UI:** a server card under `preview_start` (live state, Open, Stop or Start); a **Dev servers** menu in the Browser tab bar (Open, Stop or Start per entry, Stop all); a server that comes up in the session on screen opens in its Browser tab. The mock scripts a `preview_start` turn ("start the dev server").
   - **Tests:** `genie-tools/tests/preview.rs` (6, real processes, need `python3`) and the `launch.json` parser unit tests.
   - **Known gaps:** the Dev servers menu is hidden while the "No browser found" state shows. `preview.start` from the menu waits up to 60 s.
-- 2026-11-19: **Phase 3 done** on `fix/browser-panel` (not committed).
+- 2026-11-19: **Phase 3 done** on `fix/browser-panel` (committed, `d757f3d`).
   - **Console capture** (`genie-browser/src/console.rs`): each attached tab enables `Runtime` and `Log`. Console calls, uncaught exceptions and browser log entries are kept per tab: 300 entries, cleared when the main frame navigates, favicon 404s dropped. A new read tool, `browser_console {tab_id?, level?}`, returns them as untrusted page text, so there are now 19 browser tools.
   - **Auto-verify** (`genie-core` turn loop): when a Code turn is about to end after a successful file edit with no page check since (screenshot, snapshot, console or read), and a session dev server is running with `autoVerify` on, the engine adds one hidden note (`hidden/auto_verify.md`) asking the agent to check the app. At most once per turn.
   - **Off switch:** `"autoVerify": false` in `launch.json`, for the project or per server, or the ⋮ menu's **Auto-verify changes** (`preview.auto_verify`).
@@ -70,4 +70,15 @@ Make Genie's Browser tab work like Claude Code Desktop's Browser pane. The featu
     - `genie-core/tests/auto_verify.rs` (4).
     - Console parser unit tests.
     - `real_chrome_console` (ignored): passes against local Chrome, along with the other three real-Chrome tests when run with `--test-threads=1`. In parallel, `real_chrome_user_browsing` can fail because several Chromes start at once.
-- Next: Phase 4 (element select, local file previews, minimize, keep cookies, outside-link prompt, policy keys).
+- 2026-11-19: **Phase 4 done** on `fix/browser-panel` (not committed).
+  - **Element select** (Cmd/Ctrl+Shift+S, or the search icon in the Browser bar): hovering outlines the element under the pointer with its tag and size. A click adds the element's URL, a CSS selector, its text and HTML to the composer, plus a JPEG crop as an attachment. Esc cancels. Backed by `browser.inspect`.
+  - **Local file previews:** inline code or relative links in chat that name `.html/.htm/.pdf/.mp4/.webm/.mov/.ogv/.svg` files are clickable and open as `file://` in a new Browser tab (`browser.open_file`, limited to files inside the session's folder).
+  - **Minimize:** a chevron in the panel header shrinks the panel to a pill at the bottom right. The pill, or opening any panel tab, restores it.
+  - **Keep cookies:** a ⋮ toggle backed by user setting `browser.keepCookies` (default on). Off clears cookies at daemon exit, and at the first browser start after a crash.
+  - **First outside link:** asks "Browser tab" or "Default browser" and remembers the answer, which also sets "Open links in built-in browser". Cmd/Ctrl-click still goes to the default browser.
+  - **Policy keys:** `browser.agentLocalOnly` and `browser.userLocalOnly` (ADMX/ADML added; merge as true-wins).
+  - **Tests:**
+    - `local_only_policy_blocks_outside_sites`.
+    - `real_chrome_inspect_files_and_local_only` (ignored; passes against local Chrome). `real_chrome_console` now runs under the local-only policy.
+    - Desktop `browserParity.test.ts` (5).
+  - **Not done:** the macOS `.mobileconfig` template has no browser keys yet (none of the existing browser keys are there either).

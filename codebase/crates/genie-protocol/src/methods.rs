@@ -191,6 +191,8 @@ methods! {
     BrowserNavigate = "browser.navigate", Request, true, browser::NavigateParams => browser::TabIdResult;
     BrowserTabNew = "browser.tab.new", Request, true, browser::TabNewParams => browser::TabIdResult;
     BrowserTabClose = "browser.tab.close", Request, true, browser::BrowserTabParams => Empty;
+    BrowserOpenFile = "browser.open_file", Request, true, browser::OpenFileParams => browser::TabIdResult;
+    BrowserInspect = "browser.inspect", Request, false, browser::InspectParams => browser::InspectResult;
     BrowserPopout = "browser.popout", Request, false, session::SessionIdParams => Empty;
     BrowserCopy = "browser.copy", Request, true, browser::BrowserTabParams => browser::CopyResult;
     BrowserFileChooserAnswer = "browser.file_chooser.answer", Request, true, browser::FileChooserAnswerParams => Empty;

@@ -41,6 +41,6 @@ pub use backend::{
 };
 pub use cdp::{CdpClient, CdpError, CdpEvent, Wire};
 pub use host::{BrowserHost, ConfirmDecision, ConfirmRequest, Control, FrameSink, NoHost};
-pub use session::{Browser, BrowserConfig, Outcome, Status};
+pub use session::{Browser, BrowserConfig, Flag, Outcome, Status};
 pub use site::SitePolicy;
 pub use tools::tools;

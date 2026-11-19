@@ -7,7 +7,7 @@
 // the daemon attaches it to whichever tab the agent has active (including the first one,
 // opened after the panel), so the panel never has to restart it.
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BrowserControl, BrowserStatus, InputEvent, TabInfo } from "@genie/protocol";
+import type { BrowserControl, BrowserStatus, InputEvent, InspectResult, TabInfo } from "@genie/protocol";
 import { Badge, Banner, Button, EmptyState, IconButton, Input, Menu, type MenuItem } from "@genie/ui";
 import { t } from "../../i18n";
 import { useEmitter } from "../../state/emitter";
@@ -21,6 +21,22 @@ export function mapPoint(clientX: number, clientY: number, rect: { left: number;
     x: clamp(((clientX - rect.left) / rect.width) * frame.w, frame.w),
     y: clamp(((clientY - rect.top) / rect.height) * frame.h, frame.h),
   };
+}
+
+/** The composer text for a picked element (Element select, ticket 47). */
+export function elementMessage(r: Pick<InspectResult, "url" | "selector" | "text" | "html">): string {
+  const text = r.text.length > 200 ? `${r.text.slice(0, 199)}…` : r.text;
+  const lines = [`Selected element on ${r.url}`, `Selector: \`${r.selector}\``];
+  if (text) lines.push(`Text: "${text}"`);
+  lines.push("```html", r.html, "```");
+  return lines.join("\n");
+}
+
+function jpegFile(b64: string, name: string): File {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], name, { type: "image/jpeg" });
 }
 
 export function modifiers(e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
@@ -115,9 +131,28 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
   const interactive = inControl || state === "idle";
   const hasTab = tabs.length > 0 || !!frame;
   const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
+  // Element select (Cmd/Ctrl+Shift+S): hover outlines an element, a click adds it to the message.
+  const selecting = app.selectingElement && !!frame;
+  const [hover, setHover] = useState<InspectResult | null>(null);
+  const inspecting = useRef(false);
+  useEffect(() => {
+    if (!app.selectingElement) setHover(null);
+    if (!app.selectingElement) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && app.setSelectingElement(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [app, app.selectingElement]);
 
   useEffect(() => {
     app.client.browser.status({}).then(setStatus).catch(() => setStatus(null));
+  }, [app]);
+  // ⋮ Keep cookies (t47): a user setting the daemon reads when it quits.
+  const [keepCookies, setKeepCookies] = useState(true);
+  useEffect(() => {
+    app.client.config
+      .get({ keys: ["browser.keepCookies"] })
+      .then((r) => setKeepCookies(r.values["browser.keepCookies"] !== false))
+      .catch(() => {});
   }, [app]);
 
   // One stream per visible tab (SA-23: JPEG 60, ≤ 1280×800); it follows the agent's active tab.
@@ -265,6 +300,37 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
       });
   };
 
+  const hoverAt = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const p = point(e);
+    if (!p || !frame || inspecting.current) return;
+    inspecting.current = true;
+    app.client.browser
+      .inspect({ session_id: sessionId, tab_id: frame.tab_id, x: p.x, y: p.y, capture: false })
+      .then(setHover)
+      .catch(() => setHover(null))
+      .finally(() => (inspecting.current = false));
+  };
+  const pickAt = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const p = point(e);
+    if (!p || !frame) return;
+    app.client.browser
+      .inspect({ session_id: sessionId, tab_id: frame.tab_id, x: p.x, y: p.y, capture: true })
+      .then((r) => {
+        const files = r.image_b64 ? [jpegFile(r.image_b64, `${r.tag}-element.jpg`)] : [];
+        app.injectComposer(sessionId, elementMessage(r), files);
+        app.setSelectingElement(false);
+        app.toast({ title: t("browser.elementAdded"), tone: "success" });
+      })
+      .catch(fail);
+  };
+  const box = (() => {
+    const c = canvas.current;
+    if (!selecting || !hover || !c || !frame) return null;
+    const sx = c.clientWidth / frame.w;
+    const sy = c.clientHeight / frame.h;
+    return { left: c.offsetLeft + hover.x * sx, top: c.offsetTop + hover.y * sy, width: hover.w * sx, height: hover.h * sy };
+  })();
+
   // Wheel: a non-passive listener so the panel doesn't scroll while the page does.
   useEffect(() => {
     const c = canvas.current;
@@ -315,6 +381,16 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
         <Button size="sm" variant="ghost" icon="external" disabled={popping} onClick={popOut}>
           {popping ? t("browser.popOutBusy") : t("browser.popOut")}
         </Button>
+        <IconButton
+          icon="search"
+          size="sm"
+          className={app.selectingElement ? "is-on" : ""}
+          aria-pressed={app.selectingElement}
+          disabled={!frame}
+          label={t("browser.selectElement")}
+          shortcut={/Mac/i.test(navigator.platform) ? "⌘⇧S" : "Ctrl+Shift+S"}
+          onClick={() => app.setSelectingElement(!app.selectingElement)}
+        />
         {app.ui.mode === "code" && <DevServersMenu sessionId={sessionId} />}
         <Menu
           label={t("browser.more")}
@@ -322,10 +398,23 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
           trigger={(p) => <IconButton {...p} icon="more" size="sm" label={t("browser.more")} />}
           items={[
             {
+              id: "cookies",
+              label: t("browser.keepCookies"),
+              hint: t("browser.keepCookiesHint"),
+              checked: keepCookies,
+              onSelect: () => {
+                const v = !keepCookies;
+                app.client.config
+                  .set({ key: "browser.keepCookies", value: v, scope: "user" })
+                  .then(() => setKeepCookies(v))
+                  .catch(fail);
+              },
+            },
+            {
               id: "links",
               label: t("browser.openLinksHere"),
               checked: app.ui.browserOpenLinks,
-              onSelect: () => app.setUi({ browserOpenLinks: !app.ui.browserOpenLinks }),
+              onSelect: () => app.setUi({ browserOpenLinks: !app.ui.browserOpenLinks, browserLinkAsked: true }),
             },
             ...(app.ui.mode === "code"
               ? [
@@ -352,6 +441,11 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
           ]}
         />
       </div>
+      {selecting && (
+        <Banner tone="info" icon="search">
+          {t("browser.selecting")}
+        </Banner>
+      )}
       {state === "handoff" && (
         <Banner tone="warning" icon="hand">
           {control?.reason ? t("browser.handoffReason", { reason: control.reason }) : t("browser.handoff")}
@@ -418,20 +512,30 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
         {frame ? (
           <canvas
             ref={canvas}
-            className={`browser__canvas ${inControl ? "is-controlled" : ""}`}
+            className={`browser__canvas ${inControl ? "is-controlled" : ""} ${selecting ? "is-selecting" : ""}`}
             aria-label={pill}
+            onClick={(e) => selecting && pickAt(e)}
             onMouseDown={(e) => {
+              if (selecting) return e.preventDefault();
               if (!interactive) return;
               e.preventDefault();
               keys.current?.focus({ preventScroll: true });
               mouse(e, "pressed");
             }}
-            onMouseUp={(e) => interactive && mouse(e, "released")}
-            onMouseMove={(e) => interactive && mouse(e, "moved")}
+            onMouseUp={(e) => !selecting && interactive && mouse(e, "released")}
+            onMouseMove={(e) => (selecting ? hoverAt(e) : interactive && mouse(e, "moved"))}
+            onMouseLeave={() => setHover(null)}
             onContextMenu={(e) => interactive && e.preventDefault()}
           />
         ) : (
           <EmptyState icon="globe" title={t("browser.idleTitle")} hint={stream && hasTab ? t("browser.loading") : t("browser.idleHint")} />
+        )}
+        {box && hover && (
+          <div className="browser__pick" style={box} aria-hidden>
+            <span className="browser__pick-label">
+              {hover.tag} · {Math.round(hover.w)}×{Math.round(hover.h)}
+            </span>
+          </div>
         )}
         {interactive && frame && (
           <textarea
