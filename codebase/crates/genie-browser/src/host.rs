@@ -69,6 +69,12 @@ pub trait BrowserHost: Send + Sync {
         false
     }
 
+    /// A turn is running in this session. The user's input and navigation pause the agent
+    /// only then (D56); outside a turn they just mark the page as changed.
+    fn turn_active(&self, _session_id: &str) -> bool {
+        true
+    }
+
     /// The banner state changed.
     fn control_changed(&self, _session_id: &str, _control: Control) {}
 

@@ -36,7 +36,9 @@ export function Root() {
     return () => document.removeEventListener("scroll", onScroll, true);
   }, []);
 
-  // Links in rendered Markdown open in the system browser; code blocks copy (05 §2.2).
+  // Links in rendered Markdown open in the Browser tab when "Open links in built-in browser"
+  // is on and a session is open (t47), else in the system browser (always with Cmd/Ctrl);
+  // code blocks copy (05 §2.2).
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       const el = e.target as HTMLElement;
@@ -44,8 +46,14 @@ export function Root() {
       if (link) {
         e.preventDefault();
         const href = link.dataset.href!;
+        const external = () => void app.platform.openExternal(href).catch(() => {});
+        const sid = app.ui.activeSession;
         if (href.startsWith("genie://")) app.openDeepLink(href);
-        else void app.platform.openExternal(href).catch(() => {});
+        else if (sid && app.ui.browserOpenLinks && /^https?:\/\//i.test(href) && !(e.metaKey || e.ctrlKey)) {
+          app.setUi({ panelOpen: true, panelTab: "browser" });
+          // No browser installed, or the daemon refused: fall back to the system browser.
+          void app.client.browser.tab.new({ session_id: sid, url: href }).catch(external);
+        } else external();
         return;
       }
       const copy = el.closest<HTMLElement>(".code-copy");
@@ -103,6 +111,17 @@ function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
+  // Cmd/Ctrl+Shift+B shows or hides the Browser tab (as in Claude Code Desktop, t47).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "b") return;
+      e.preventDefault();
+      const shown = app.ui.panelOpen && app.ui.panelTab === "browser";
+      app.setUi(shown ? { panelOpen: false } : { panelOpen: true, panelTab: "browser" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [app]);
   const sidebarHidden = overlay ? !drawerOpen : ui.sidebarCollapsed;
   const shell = useMemo<ShellState>(() => ({ width, overlay, narrow, drawerOpen, setDrawer, sidebarHidden }), [width, overlay, narrow, drawerOpen, sidebarHidden]);
   const cls = ["shell", overlay ? "shell--overlay" : ui.sidebarCollapsed ? "shell--collapsed" : "", overlay && drawerOpen ? "shell--drawer" : "", narrow ? "shell--narrow" : ""].filter(Boolean).join(" ");

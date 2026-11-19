@@ -830,6 +830,42 @@
     },
     {
       "direction": "request",
+      "ident": "BrowserNavigate",
+      "name": "browser.navigate",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/NavigateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TabIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserTabNew",
+      "name": "browser.tab.new",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/TabNewParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TabIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserTabClose",
+      "name": "browser.tab.close",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/BrowserTabParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "BrowserPopout",
       "name": "browser.popout",
       "needs_lease": false,

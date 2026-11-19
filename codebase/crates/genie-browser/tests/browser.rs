@@ -3,16 +3,19 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)] // test code
 
 use std::collections::VecDeque;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use genie_browser::host::ConfirmDecision;
+use genie_browser::session::normalize_url;
 use genie_browser::testing::{FakeBackend, FakeCdp, FrameLog, RecordingHost, Reply};
 use genie_browser::{Browser, BrowserConfig, CdpClient, SitePolicy, tools};
 use genie_protocol::api::browser::{
-    BrowserInputParams, InputEvent, ScreencastAckParams, ScreencastStartParams, SitePermission,
-    SiteState, StreamIdParams,
+    BrowserInputParams, BrowserTabParams, InputEvent, NavAction, NavigateParams,
+    ScreencastAckParams, ScreencastStartParams, SitePermission, SiteState, StreamIdParams,
+    TabNewParams,
 };
 use genie_protocol::common::{Mode, SessionKind};
 use genie_protocol::event::{BrowserAction, SessionEvent, ToolProgress};
@@ -958,6 +961,212 @@ async fn copy_and_file_chooser_during_takeover() {
     assert_eq!(r.fake.calls_to("DOM.setFileInputFiles").len(), 1);
 }
 
+#[test]
+fn address_bar_input() {
+    let n = |s: &str| normalize_url(s);
+    assert_eq!(
+        n("https://a.example/x").as_deref(),
+        Some("https://a.example/x")
+    );
+    assert_eq!(
+        n("  example.com/path?q=1 ").as_deref(),
+        Some("https://example.com/path?q=1")
+    );
+    assert_eq!(
+        n("example.com:8443").as_deref(),
+        Some("https://example.com:8443")
+    );
+    assert_eq!(
+        n("localhost:3000").as_deref(),
+        Some("http://localhost:3000")
+    );
+    assert_eq!(
+        n("127.0.0.1:5173/app").as_deref(),
+        Some("http://127.0.0.1:5173/app")
+    );
+    assert_eq!(n("api.localhost").as_deref(), Some("http://api.localhost"));
+    assert_eq!(n("about:blank").as_deref(), Some("about:blank"));
+    for bad in [
+        "",
+        "hello world",
+        "javascript:alert(1)",
+        "javascript:a.b",
+        "file:///etc/passwd",
+        "chrome://settings",
+        "mailto:a@b.example",
+        "intranet",
+        ".example",
+    ] {
+        assert_eq!(n(bad), None, "{bad}");
+    }
+}
+
+fn nav(url: Option<&str>, action: Option<NavAction>) -> NavigateParams {
+    NavigateParams {
+        session_id: SESSION.into(),
+        tab_id: None,
+        url: url.map(String::from),
+        action,
+    }
+}
+
+/// The user's own browsing (t47): no site asks, no "user in control" while the agent is
+/// idle (its next action gets the "user acted" note), tabs, history and pop-ups.
+#[tokio::test]
+async fn user_browsing_needs_no_prompts() {
+    let r = rig();
+    r.host.idle.store(true, Ordering::SeqCst);
+
+    // The first address opens a tab straight at it.
+    let t = r
+        .browser
+        .navigate(&nav(Some("shop.example/checkout"), None))
+        .await
+        .unwrap();
+    assert_eq!(t.tab_id, "t1");
+    assert_eq!(
+        r.fake
+            .calls_to("Target.createTarget")
+            .last()
+            .unwrap()
+            .params["url"],
+        "https://shop.example/checkout"
+    );
+    assert!(r.fake.calls_to("Page.navigate").is_empty());
+    assert!(r.host.confirms.lock().unwrap().is_empty());
+    assert!(r.gate.asked.lock().unwrap().is_empty());
+    assert!(
+        r.host.controls.lock().unwrap().is_empty(),
+        "idle: not 'user in control'"
+    );
+
+    // The address bar on the open tab.
+    r.browser
+        .navigate(&nav(Some("localhost:3000"), None))
+        .await
+        .unwrap();
+    let go = r.fake.calls_to("Page.navigate");
+    assert_eq!(go.last().unwrap().params["url"], "http://localhost:3000");
+    assert_eq!(go.last().unwrap().session_id.as_deref(), Some("S1"));
+
+    // Back through history; nothing further forward is a no-op.
+    r.fake.ok(
+        "Page.getNavigationHistory",
+        json!({"currentIndex": 1, "entries": [
+            {"id": 7, "url": "https://shop.example/checkout"},
+            {"id": 8, "url": "http://localhost:3000/"}]}),
+    );
+    r.browser
+        .navigate(&nav(None, Some(NavAction::Back)))
+        .await
+        .unwrap();
+    r.browser
+        .navigate(&nav(None, Some(NavAction::Forward)))
+        .await
+        .unwrap();
+    let hist = r.fake.calls_to("Page.navigateToHistoryEntry");
+    assert_eq!(hist.len(), 1);
+    assert_eq!(hist[0].params["entryId"], 7);
+    r.browser
+        .navigate(&nav(None, Some(NavAction::Reload)))
+        .await
+        .unwrap();
+    assert_eq!(r.fake.calls_to("Page.reload").len(), 1);
+
+    // Not a web address, or neither/both of url and action.
+    assert!(
+        r.browser
+            .navigate(&nav(Some("javascript:alert(1)"), None))
+            .await
+            .is_err()
+    );
+    assert!(r.browser.navigate(&nav(None, None)).await.is_err());
+
+    // The agent's next action knows the user acted.
+    r.allow_site("shop.example");
+    let out = r.call("browser_snapshot", json!({})).await.unwrap();
+    assert!(out.contains("note: the user acted in the browser"), "{out}");
+
+    // A new tab becomes the shown one; closing it falls back to the first.
+    r.fake.reset("Target.createTarget");
+    r.fake.ok("Target.createTarget", json!({"targetId": "T2"}));
+    r.fake.reset("Target.attachToTarget");
+    r.fake
+        .ok("Target.attachToTarget", json!({"sessionId": "S2"}));
+    let t2 = r
+        .browser
+        .tab_new(&TabNewParams {
+            session_id: SESSION.into(),
+            url: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(t2.tab_id, "t2");
+    assert_eq!(
+        r.fake
+            .calls_to("Target.createTarget")
+            .last()
+            .unwrap()
+            .params["url"],
+        "about:blank"
+    );
+    let tabs = r.browser.tabs(SESSION).await.tabs;
+    assert!(tabs.iter().any(|t| t.tab_id == "t2" && t.active));
+    r.browser
+        .tab_close(&BrowserTabParams {
+            session_id: SESSION.into(),
+            tab_id: "t2".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        r.fake.calls_to("Target.closeTarget").last().unwrap().params["targetId"],
+        "T2"
+    );
+    let tabs = r.browser.tabs(SESSION).await.tabs;
+    assert_eq!(tabs.len(), 1);
+    assert!(tabs[0].active && tabs[0].tab_id == "t1");
+
+    // A pop-up from the user's click joins the strip and is shown.
+    r.fake.reset("Target.attachToTarget");
+    r.fake
+        .ok("Target.attachToTarget", json!({"sessionId": "S3"}));
+    r.fake.emit(
+        json!({"method": "Target.targetCreated", "params": {"targetInfo": {
+        "targetId": "T3", "type": "page", "openerId": "T1", "url": "https://shop.example/help"}}}),
+    );
+    let b = r.browser.clone();
+    eventually(move || {
+        b.session(SESSION)
+            .active_tab()
+            .is_some_and(|t| t.target_id == "T3")
+    })
+    .await;
+
+    // During a turn, input pauses the agent (D56).
+    r.host.idle.store(false, Ordering::SeqCst);
+    let tab = r.browser.session(SESSION).active_tab().unwrap().tab_id;
+    r.browser
+        .input(&BrowserInputParams {
+            session_id: SESSION.into(),
+            tab_id: tab,
+            event: InputEvent::Mouse {
+                action: "pressed".into(),
+                x: 10.0,
+                y: 10.0,
+                button: Some("left".into()),
+                click_count: 1,
+                modifiers: 0,
+            },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        r.host.controls.lock().unwrap().last(),
+        Some(&genie_browser::Control::User)
+    );
+}
+
 /// Drives a real local Chrome/Edge/Chromium (`cargo test -p genie-browser -- --ignored`).
 #[tokio::test]
 #[ignore = "needs a local Chrome, Edge or Chromium"]
@@ -1277,5 +1486,146 @@ async fn real_chrome_panel_flow() {
             stream_id: sc.stream_id,
         })
         .await;
+    genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
+}
+
+/// The user's own browsing against a real local Chrome/Edge/Chromium (t47): an address
+/// typed in the panel opens and streams with no agent involved, history works, and a
+/// `target=_blank` click while Genie is idle opens a tab that the panel shows.
+#[tokio::test]
+#[ignore = "needs a local Chrome, Edge or Chromium"]
+async fn real_chrome_user_browsing() {
+    use genie_browser::{SystemChromeBackend, SystemChromeConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    if genie_browser::discover::find_installed().await.is_empty() {
+        eprintln!("no browser installed; skipping");
+        return;
+    }
+    let tasks = TaskTracker::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tasks.spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut buf = [0u8; 2048];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let body = if req.starts_with("GET /two") {
+                "<html><head><title>Two</title></head><body><h1>Two</h1></body></html>"
+            } else {
+                "<html><head><title>One</title></head><body style='margin:0'>\
+                 <a href='/two' target='_blank' style='position:absolute;left:0;top:0;width:300px;height:100px;display:block'>open</a>\
+                 </body></html>"
+            };
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = s.write_all(resp.as_bytes()).await;
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(SystemChromeBackend::new(
+        SystemChromeConfig::new(dir.path()),
+        tasks.clone(),
+    ));
+    let host = Arc::new(RecordingHost::default());
+    host.idle.store(true, Ordering::SeqCst);
+    let browser = Browser::new(
+        backend.clone(),
+        host.clone(),
+        Arc::new(SitePolicy::new()),
+        BrowserConfig::default(),
+        tasks.clone(),
+    );
+    let titles = |b: Arc<Browser>| async move {
+        b.tabs(SESSION)
+            .await
+            .tabs
+            .into_iter()
+            .map(|t| (t.title, t.active))
+            .collect::<Vec<_>>()
+    };
+
+    // The panel is open before anything else; the user types an address.
+    let log = Arc::new(FrameLog::default());
+    browser
+        .screencast_start(&cast_params(None), log.clone())
+        .await
+        .unwrap();
+    let t = browser
+        .navigate(&nav(Some(&format!("127.0.0.1:{port}")), None))
+        .await
+        .unwrap();
+    assert_eq!(t.tab_id, "t1");
+    let mut ok = false;
+    for _ in 0..250 {
+        let has_frame = log.0.lock().unwrap().iter().any(|f| f.tab_id == "t1");
+        let t = titles(browser.clone()).await;
+        if has_frame && t == vec![("One".to_string(), true)] {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(ok, "no frame or title: {:?}", titles(browser.clone()).await);
+    assert!(
+        host.controls.lock().unwrap().is_empty(),
+        "idle: no 'user in control'"
+    );
+    assert!(host.confirms.lock().unwrap().is_empty());
+
+    // A click on a target=_blank link: the pop-up joins the strip and is shown.
+    let f = log.0.lock().unwrap().last().cloned().unwrap();
+    for action in ["pressed", "released"] {
+        browser
+            .input(&BrowserInputParams {
+                session_id: SESSION.into(),
+                tab_id: f.tab_id.clone(),
+                event: InputEvent::Mouse {
+                    action: action.into(),
+                    x: 50.0,
+                    y: 50.0,
+                    button: Some("left".into()),
+                    click_count: 1,
+                    modifiers: 0,
+                },
+            })
+            .await
+            .unwrap();
+    }
+    let mut ok = false;
+    for _ in 0..250 {
+        let t = titles(browser.clone()).await;
+        if t.len() == 2 && t[1] == ("Two".to_string(), true) {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(ok, "pop-up not shown: {:?}", titles(browser.clone()).await);
+    assert!(host.controls.lock().unwrap().is_empty());
+
+    // Closing it shows the first tab again; reload and a no-op back still work.
+    browser
+        .tab_close(&BrowserTabParams {
+            session_id: SESSION.into(),
+            tab_id: "t2".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        titles(browser.clone()).await,
+        vec![("One".to_string(), true)]
+    );
+    browser
+        .navigate(&nav(None, Some(NavAction::Reload)))
+        .await
+        .unwrap();
+    browser
+        .navigate(&nav(None, Some(NavAction::Back)))
+        .await
+        .unwrap();
+    browser.end_session(SESSION).await;
     genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
 }

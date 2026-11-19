@@ -200,6 +200,10 @@ impl BrowserHost for EngineBrowserHost {
         })
     }
 
+    fn turn_active(&self, session_id: &str) -> bool {
+        self.turns.get(session_id).is_some()
+    }
+
     fn control_changed(&self, session_id: &str, control: Control) {
         let c = match control {
             Control::Agent => "agent",

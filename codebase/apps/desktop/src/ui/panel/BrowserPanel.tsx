@@ -1,12 +1,14 @@
-// Browser tab (05 §9, D56): screencast frames on a <canvas>, agent-control banner, tab
-// strip, take over (input forwarded in CSS pixels), hand back, stop, pop out.
+// Browser tab (05 §9, D56, t47): screencast frames on a <canvas>, agent-control banner, tab
+// strip with new/close, address bar with back/forward/reload, take over (input forwarded in
+// CSS pixels), hand back, stop, pop out, ⋮ menu. While Genie is idle the user can use the
+// page directly; during a turn they take over first.
 //
 // The screencast stream watches the *session*: it is started once when the tab shows and
 // the daemon attaches it to whichever tab the agent has active (including the first one,
 // opened after the panel), so the panel never has to restart it.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserControl, BrowserStatus, InputEvent, TabInfo } from "@genie/protocol";
-import { Badge, Banner, Button, EmptyState } from "@genie/ui";
+import { Badge, Banner, Button, EmptyState, IconButton, Input, Menu } from "@genie/ui";
 import { t } from "../../i18n";
 import { isBusy } from "../../state/sessionModel";
 import { useApp, useSession } from "../context";
@@ -75,6 +77,11 @@ export function bannerState(control: BrowserControl | null, busy: boolean): Bann
 
 const MOUSE_BUTTONS = ["left", "middle", "right"];
 
+/** The address bar's text for a tab URL (blank for a new tab). */
+export function addressText(url: string | undefined): string {
+  return !url || url === "about:blank" ? "" : url;
+}
+
 /** Streams this window stopped: their frames (still in the session model) are not shown or acked. */
 const deadStreams = new Set<string>();
 
@@ -89,6 +96,10 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
   const [tabs, setTabs] = useState<TabInfo[]>([]);
   const [stream, setStream] = useState<string | null>(null);
   const [popping, setPopping] = useState(false);
+  const [addr, setAddr] = useState("");
+  const editing = useRef(false);
+  const address = useRef<HTMLInputElement>(null);
+  const lastTabs = useRef(0);
 
   const model = store?.model;
   const raw = model?.browser.frame ?? null;
@@ -99,6 +110,8 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
   const busy = model ? isBusy(model) : false;
   const state = bannerState(control, busy);
   const inControl = state === "user" || state === "handoff";
+  // Idle: the page is the user's to use directly (the daemon doesn't pause anything).
+  const interactive = inControl || state === "idle";
   const hasTab = tabs.length > 0 || !!frame;
   const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
 
@@ -132,12 +145,55 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
 
   // The tab strip: refreshed after every agent action, tab switch and control change.
   const refreshTabs = useCallback(() => {
+    lastTabs.current = Date.now();
     app.client.browser
       .tabs({ session_id: sessionId })
       .then((r) => setTabs(r.tabs))
       .catch(() => {});
   }, [app, sessionId]);
   useEffect(refreshTabs, [refreshTabs, actions.length, frame?.tab_id, control]);
+  // Pages change under links and redirects: refresh at most every 1.5 s while frames arrive.
+  useEffect(() => {
+    if (frame && Date.now() - lastTabs.current > 1500) refreshTabs();
+  }, [frame, refreshTabs]);
+  const activeTab = tabs.find((x) => x.active);
+  // The address bar follows the shown tab unless the user is typing in it.
+  useEffect(() => {
+    if (!editing.current) setAddr(addressText(activeTab?.url));
+  }, [activeTab?.url, activeTab?.tab_id]);
+  /** After a navigation: refresh now and once the page has committed. */
+  const settle = () => {
+    refreshTabs();
+    setTimeout(refreshTabs, 800);
+  };
+  const go = (url: string) => {
+    const u = url.trim();
+    if (!u) return;
+    editing.current = false;
+    address.current?.blur();
+    void app.client.browser
+      .navigate({ session_id: sessionId, url: u })
+      .then(settle)
+      .catch(fail);
+  };
+  const step = (action: "back" | "forward" | "reload") =>
+    void app.client.browser.navigate({ session_id: sessionId, action }).then(settle).catch(fail);
+  const newTab = () =>
+    void app.client.browser
+      .tab.new({ session_id: sessionId })
+      .then(() => {
+        settle();
+        editing.current = true;
+        setAddr("");
+        address.current?.focus();
+      })
+      .catch(fail);
+  const closeTab = (tabId: string) =>
+    void app.client.browser.tab
+      .close({ session_id: sessionId, tab_id: tabId })
+      .then(() => setTabs((x) => x.filter((y) => y.tab_id !== tabId)))
+      .then(settle)
+      .catch(fail);
 
   // Decode, draw, then ack (one frame in flight; the ack asks for the next one).
   useEffect(() => {
@@ -180,10 +236,10 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
 
   const send = useCallback(
     (event: InputEvent) => {
-      if (!inControl || !frame) return;
+      if (!interactive || !frame) return;
       void app.client.browser.input({ session_id: sessionId, tab_id: frame.tab_id, event }).catch(() => {});
     },
-    [app, sessionId, inControl, frame],
+    [app, sessionId, interactive, frame],
   );
 
   const point = (e: { clientX: number; clientY: number }) => {
@@ -211,7 +267,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
   // Wheel: a non-passive listener so the panel doesn't scroll while the page does.
   useEffect(() => {
     const c = canvas.current;
-    if (!c || !inControl) return;
+    if (!c || !interactive) return;
     const onWheel = (e: WheelEvent) => {
       const p = point(e);
       if (!p) return;
@@ -258,33 +314,93 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
         <Button size="sm" variant="ghost" icon="external" disabled={popping} onClick={popOut}>
           {popping ? t("browser.popOutBusy") : t("browser.popOut")}
         </Button>
+        <Menu
+          label={t("browser.more")}
+          align="right"
+          trigger={(p) => <IconButton {...p} icon="more" size="sm" label={t("browser.more")} />}
+          items={[
+            {
+              id: "links",
+              label: t("browser.openLinksHere"),
+              checked: app.ui.browserOpenLinks,
+              onSelect: () => app.setUi({ browserOpenLinks: !app.ui.browserOpenLinks }),
+            },
+            {
+              id: "clear",
+              label: t("browser.clearData"),
+              icon: "trash",
+              separatorBefore: true,
+              onSelect: () =>
+                void app.client.browser.data
+                  .clear({ what: "all" })
+                  .then(() => app.toast({ title: t("browser.cleared"), tone: "success" }))
+                  .catch(fail),
+            },
+          ]}
+        />
       </div>
       {state === "handoff" && (
         <Banner tone="warning" icon="hand">
           {control?.reason ? t("browser.handoffReason", { reason: control.reason }) : t("browser.handoff")}
         </Banner>
       )}
-      {tabs.length > 1 && (
-        <div className="browser__tabs" role="tablist" aria-label="Browser tabs">
+      {tabs.length > 0 && (
+        <div className="browser__tabs" role="tablist" aria-label={t("browser.tabsLabel")}>
           {tabs.map((tb) => (
-            <button
-              key={tb.tab_id}
-              role="tab"
-              aria-selected={tb.active}
-              className="g-tab"
-              title={tb.url}
-              onClick={() =>
-                void app.client.browser.tab
-                  .activate({ session_id: sessionId, tab_id: tb.tab_id })
-                  .then(() => setTabs((x) => x.map((y) => ({ ...y, active: y.tab_id === tb.tab_id }))))
-                  .catch(fail)
-              }
-            >
-              {tb.title || tb.url || t("browser.newTab")}
-            </button>
+            <div key={tb.tab_id} className="browser__tab" data-active={tb.active}>
+              <button
+                role="tab"
+                aria-selected={tb.active}
+                className="g-tab"
+                title={tb.url}
+                onClick={() =>
+                  void app.client.browser.tab
+                    .activate({ session_id: sessionId, tab_id: tb.tab_id })
+                    .then(() => setTabs((x) => x.map((y) => ({ ...y, active: y.tab_id === tb.tab_id }))))
+                    .catch(fail)
+                }
+              >
+                {tb.title || addressText(tb.url) || t("browser.newTab")}
+              </button>
+              <IconButton className="browser__tab-close" icon="x" size="sm" label={t("browser.closeTab")} tooltip={false} onClick={() => closeTab(tb.tab_id)} />
+            </div>
           ))}
+          <IconButton icon="plus" size="sm" label={t("browser.newTabButton")} onClick={newTab} />
         </div>
       )}
+      <form
+        className="browser__nav"
+        onSubmit={(e) => {
+          e.preventDefault();
+          go(addr);
+        }}
+      >
+        <IconButton icon="chevronLeft" size="sm" label={t("browser.back")} disabled={!activeTab} onClick={() => step("back")} />
+        <IconButton icon="chevronRight" size="sm" label={t("browser.forward")} disabled={!activeTab} onClick={() => step("forward")} />
+        <IconButton icon="refresh" size="sm" label={t("browser.reload")} disabled={!activeTab} onClick={() => step("reload")} />
+        <Input
+          ref={address}
+          className="browser__address"
+          aria-label={t("browser.address")}
+          placeholder={t("browser.addressPlaceholder")}
+          value={addr}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoComplete="off"
+          onFocus={(e) => {
+            editing.current = true;
+            e.currentTarget.select();
+          }}
+          onBlur={() => {
+            editing.current = false;
+            setAddr(addressText(activeTab?.url));
+          }}
+          onChange={(e) => setAddr(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") e.currentTarget.blur();
+          }}
+        />
+      </form>
       <div className="browser__view">
         {frame ? (
           <canvas
@@ -292,19 +408,19 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
             className={`browser__canvas ${inControl ? "is-controlled" : ""}`}
             aria-label={pill}
             onMouseDown={(e) => {
-              if (!inControl) return;
+              if (!interactive) return;
               e.preventDefault();
               keys.current?.focus({ preventScroll: true });
               mouse(e, "pressed");
             }}
-            onMouseUp={(e) => inControl && mouse(e, "released")}
-            onMouseMove={(e) => inControl && mouse(e, "moved")}
-            onContextMenu={(e) => inControl && e.preventDefault()}
+            onMouseUp={(e) => interactive && mouse(e, "released")}
+            onMouseMove={(e) => interactive && mouse(e, "moved")}
+            onContextMenu={(e) => interactive && e.preventDefault()}
           />
         ) : (
           <EmptyState icon="globe" title={t("browser.idleTitle")} hint={stream && hasTab ? t("browser.loading") : t("browser.idleHint")} />
         )}
-        {inControl && (
+        {interactive && frame && (
           <textarea
             ref={keys}
             className="browser__keys"
@@ -314,7 +430,8 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
             spellCheck={false}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-              if (e.key === "Escape" && !modifiers(e)) {
+              // Esc hands back during take-over; while idle it goes to the page.
+              if (inControl && e.key === "Escape" && !modifiers(e)) {
                 e.preventDefault();
                 return handBack();
               }
@@ -332,7 +449,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
               send({ type: "key", action: "down", key: e.key, code: e.code, modifiers: modifiers(e), text: keyText(e) });
             }}
             onKeyUp={(e) => {
-              if (e.nativeEvent.isComposing || e.key === "Escape" || isPasteChord(e) || copyChord(e) === "copy") return;
+              if (e.nativeEvent.isComposing || (inControl && e.key === "Escape") || isPasteChord(e) || copyChord(e) === "copy") return;
               send({ type: "key", action: "up", key: e.key, code: e.code, modifiers: modifiers(e) });
             }}
             onPaste={(e) => {

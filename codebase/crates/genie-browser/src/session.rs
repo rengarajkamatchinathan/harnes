@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 
 use genie_protocol::api::browser::{
-    BrowserStatus, ClearWhat, FileChooserAnswerParams, SiteState, TabActivateParams, TabInfo,
-    TabsResult,
+    BrowserStatus, BrowserTabParams, ClearWhat, FileChooserAnswerParams, NavAction as UserNav,
+    NavigateParams, SiteState, TabActivateParams, TabIdResult, TabInfo, TabNewParams, TabsResult,
 };
 use genie_protocol::ask::{BrowserConfirm, Preview, SaveSuggestion};
 use genie_protocol::common::{Mode, RuleScope, SessionKind};
@@ -410,6 +410,13 @@ impl Browser {
             if let Err(e) = c.call("Browser.setDownloadBehavior", p).await {
                 tracing::warn!(error = %e, "setDownloadBehavior failed");
             }
+            // Pop-ups from the user's clicks join the tab strip (`Target.targetCreated`).
+            if let Err(e) = c
+                .call("Target.setDiscoverTargets", json!({"discover": true}))
+                .await
+            {
+                tracing::warn!(error = %e, "setDiscoverTargets failed");
+            }
             let me = self.me.clone();
             let mut rx = c.subscribe();
             self.tasks.spawn(async move {
@@ -471,6 +478,33 @@ impl Browser {
                         multiple: e.params["mode"] == "selectMultiple",
                     },
                 );
+            }
+            // A page opened a pop-up. Outside a turn it came from the user's click, so it
+            // joins the tab strip and is shown; during a turn the agent adopts it itself.
+            "Target.targetCreated" => {
+                let info = &e.params["targetInfo"];
+                let opener = info["openerId"].as_str().unwrap_or("");
+                let Some(target) = info["targetId"].as_str().map(String::from) else {
+                    return;
+                };
+                if info["type"] != "page" || opener.is_empty() {
+                    return;
+                }
+                let owner = self
+                    .sessions
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.values().find(|s| s.owns_target(opener)).cloned());
+                let Some(s) = owner else { return };
+                if self.host.turn_active(&s.id) {
+                    return;
+                }
+                let me = self.me.clone();
+                self.tasks.spawn(async move {
+                    if let Some(b) = me.upgrade() {
+                        b.adopt_user_popup(&s, &target).await;
+                    }
+                });
             }
             // A tab went away outside our tools (closed in the popped-out window, crashed).
             "Target.detachedFromTarget" => {
@@ -834,6 +868,238 @@ impl Browser {
         }
         Ok(())
     }
+
+    // ------------------------------------------------- the user's own browsing (t47)
+
+    /// The user did something in the browser. During a turn that pauses the agent (D56);
+    /// otherwise the agent's next action just gets the "user acted" note.
+    pub(crate) fn user_acted(&self, s: &BrowserSession) {
+        if self.host.turn_active(&s.id) {
+            if s.control() != Control::User {
+                s.set_control(Control::User);
+                self.host.control_changed(&s.id, Control::User);
+            }
+        } else {
+            s.with(|g| g.handed_back = true);
+        }
+    }
+
+    /// The live connection with the session attached to it, as an agent action would
+    /// (tabs from an older connection are dropped).
+    async fn user_client(&self, s: &BrowserSession) -> Result<CdpClient, BrowserError> {
+        let c = self.client().await?;
+        let changed = s
+            .with(|g| {
+                let changed = !g.client.as_ref().is_some_and(|x| x.same_connection(&c));
+                if changed {
+                    g.tabs.clear();
+                    g.active = None;
+                    g.client = Some(c.clone());
+                    g.stale = true;
+                }
+                changed
+            })
+            .unwrap_or(false);
+        if changed {
+            self.spawn_sync(&s.id);
+        }
+        Ok(c)
+    }
+
+    /// Open a page target, attach it and make it the session's active tab.
+    async fn user_new_tab(
+        &self,
+        s: &BrowserSession,
+        c: &CdpClient,
+        url: &str,
+    ) -> Result<TabHandle, BrowserError> {
+        let r = c.call("Target.createTarget", json!({"url": url})).await?;
+        let target = str_at(&r, &["targetId"]).unwrap_or("").to_string();
+        let sid = attach_page(c, &target).await?;
+        let h = s
+            .with(|g| {
+                g.next_tab += 1;
+                let h = TabHandle {
+                    tab_id: format!("t{}", g.next_tab),
+                    target_id: target.clone(),
+                    cdp_session: sid.clone(),
+                };
+                g.tabs.push(h.clone());
+                g.active = Some(h.tab_id.clone());
+                h
+            })
+            .ok_or_else(|| BrowserError::Invalid("browser state poisoned".into()))?;
+        self.sync_casts(&s.id).await;
+        Ok(h)
+    }
+
+    /// Attach a pop-up the user opened and show it, unless something adopted it first.
+    async fn adopt_user_popup(&self, s: &BrowserSession, target: &str) {
+        let Some(c) = s.client().filter(|c| !c.is_closed()) else {
+            return;
+        };
+        let sid = match attach_page(&c, target).await {
+            Ok(sid) => sid,
+            Err(e) => {
+                tracing::debug!(error = %e, "pop-up attach failed");
+                return;
+            }
+        };
+        let added = s
+            .with(|g| {
+                if g.tabs.iter().any(|t| t.target_id == target) {
+                    return false;
+                }
+                g.next_tab += 1;
+                let h = TabHandle {
+                    tab_id: format!("t{}", g.next_tab),
+                    target_id: target.to_string(),
+                    cdp_session: sid.clone(),
+                };
+                g.active = Some(h.tab_id.clone());
+                g.tabs.push(h);
+                g.handed_back = true;
+                true
+            })
+            .unwrap_or(false);
+        if added {
+            self.sync_casts(&s.id).await;
+        } else {
+            c.send(None, "Target.detachFromTarget", json!({"sessionId": sid}));
+        }
+    }
+
+    /// `browser.navigate`: the address bar, back, forward and reload. The user's own
+    /// navigation never prompts (research §4.2).
+    pub async fn navigate(&self, p: &NavigateParams) -> Result<TabIdResult, BrowserError> {
+        let s = self.session(&p.session_id);
+        let url = match (&p.url, p.action) {
+            (Some(u), None) => Some(
+                normalize_url(u)
+                    .ok_or_else(|| BrowserError::Invalid(format!("`{u}` isn't a web address")))?,
+            ),
+            (None, Some(_)) => None,
+            _ => {
+                return Err(BrowserError::Invalid(
+                    "give either `url` or `action`".into(),
+                ));
+            }
+        };
+        let c = self.user_client(&s).await?;
+        let t = match &p.tab_id {
+            Some(id) => s
+                .tab(id)
+                .ok_or_else(|| BrowserError::Invalid(format!("no tab {id}")))?,
+            None => match s.active_tab() {
+                Some(t) => t,
+                // The first page: open the tab straight at the URL.
+                None => {
+                    let t = self
+                        .user_new_tab(&s, &c, url.as_deref().unwrap_or("about:blank"))
+                        .await?;
+                    self.user_acted(&s);
+                    return Ok(TabIdResult { tab_id: t.tab_id });
+                }
+            },
+        };
+        self.user_acted(&s);
+        let sid = Some(t.cdp_session.as_str());
+        match (url, p.action) {
+            (Some(u), _) => {
+                c.call_in(sid, "Page.navigate", json!({"url": u})).await?;
+            }
+            (None, Some(UserNav::Reload)) => {
+                c.call_in(sid, "Page.reload", json!({})).await?;
+            }
+            (None, Some(a)) => {
+                let h = c
+                    .call_in(sid, "Page.getNavigationHistory", json!({}))
+                    .await?;
+                let cur = h["currentIndex"].as_i64().unwrap_or(0);
+                let idx = if a == UserNav::Back { cur - 1 } else { cur + 1 };
+                // Nothing that way: a no-op, like a greyed-out button.
+                if let Some(entry) = usize::try_from(idx).ok().and_then(|i| h["entries"].get(i)) {
+                    c.call_in(
+                        sid,
+                        "Page.navigateToHistoryEntry",
+                        json!({"entryId": entry["id"]}),
+                    )
+                    .await?;
+                }
+            }
+            (None, None) => {}
+        }
+        Ok(TabIdResult { tab_id: t.tab_id })
+    }
+
+    /// `browser.tab.new`: a tab the user opened; it becomes the active (shown) tab.
+    pub async fn tab_new(&self, p: &TabNewParams) -> Result<TabIdResult, BrowserError> {
+        let url = match &p.url {
+            Some(u) => normalize_url(u)
+                .ok_or_else(|| BrowserError::Invalid(format!("`{u}` isn't a web address")))?,
+            None => "about:blank".to_string(),
+        };
+        let s = self.session(&p.session_id);
+        let c = self.user_client(&s).await?;
+        let t = self.user_new_tab(&s, &c, &url).await?;
+        self.user_acted(&s);
+        Ok(TabIdResult { tab_id: t.tab_id })
+    }
+
+    /// `browser.tab.close`: the user closed a tab; the last remaining one becomes active.
+    pub async fn tab_close(&self, p: &BrowserTabParams) -> Result<(), BrowserError> {
+        let s = self.session(&p.session_id);
+        let t = s
+            .tab(&p.tab_id)
+            .ok_or_else(|| BrowserError::Invalid(format!("no tab {}", p.tab_id)))?;
+        s.with(|g| {
+            g.tabs.retain(|x| x.tab_id != t.tab_id);
+            if g.active.as_deref() == Some(t.tab_id.as_str()) {
+                g.active = g.tabs.last().map(|x| x.tab_id.clone());
+            }
+        });
+        if let Ok(mut ops) = s.ops.try_lock() {
+            ops.tabs.remove(&t.tab_id);
+        }
+        if let Some(c) = s.client().filter(|c| !c.is_closed()) {
+            let _ = c
+                .call("Target.closeTarget", json!({"targetId": t.target_id}))
+                .await;
+        }
+        self.user_acted(&s);
+        self.sync_casts(&s.id).await;
+        Ok(())
+    }
+}
+
+/// What the user typed in the address bar → a URL to open, or `None` when it isn't a web
+/// address. Only http(s) and `about:blank` (no `file:`, `javascript:` or `chrome:`).
+pub fn normalize_url(input: &str) -> Option<String> {
+    let t = input.trim();
+    if t.is_empty() || t.chars().any(char::is_whitespace) {
+        return None;
+    }
+    if t == "about:blank" || is_web(t) {
+        return Some(t.to_string());
+    }
+    // `localhost:3000` would otherwise parse as a scheme.
+    let host = t.split(['/', '?', '#']).next().unwrap_or("");
+    let name = host.rsplit_once(':').map_or(host, |(h, port)| {
+        if port.chars().all(|c| c.is_ascii_digit()) {
+            h
+        } else {
+            host
+        }
+    });
+    let local = matches!(name, "localhost" | "127.0.0.1" | "0.0.0.0" | "[::1]")
+        || name.ends_with(".localhost");
+    if local {
+        return Some(format!("http://{t}"));
+    }
+    if t.contains("://") || name.contains(':') || !name.contains('.') || name.starts_with('.') {
+        return None;
+    }
+    Some(format!("https://{t}"))
 }
 
 pub(crate) async fn target_info(

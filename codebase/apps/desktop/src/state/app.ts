@@ -64,6 +64,8 @@ export interface UiState {
   sidebarShow: "all" | "active";
   /** Slash commands used most recently first (the `/` menu's order, D58). */
   recentCommands: string[];
+  /** Web links clicked in chat open in the Browser tab (Cmd/Ctrl-click: system browser). */
+  browserOpenLinks: boolean;
 }
 
 const DEFAULT_UI: UiState = {
@@ -92,6 +94,7 @@ const DEFAULT_UI: UiState = {
   sidebarGroupByDate: false,
   sidebarShow: "all",
   recentCommands: [],
+  browserOpenLinks: true,
 };
 
 /** Where the user is, for the title-bar back/forward buttons. */

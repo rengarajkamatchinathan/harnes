@@ -462,7 +462,13 @@ code { font-size: 0.92em; }
 .artifact__svg { max-width: 100%; }
 .browser { display: flex; flex-direction: column; height: 100%; }
 .browser__bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
-.browser__tabs { display: flex; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); }
+.browser__tabs { display: flex; align-items: stretch; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); }
+.browser__tab { display: flex; align-items: center; min-width: 0; max-width: 200px; border-right: 1px solid var(--border-subtle); }
+.browser__tab .g-tab { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: var(--space-1); }
+.browser__tab-close { opacity: 0.6; }
+.browser__tab:hover .browser__tab-close, .browser__tab[data-active="true"] .browser__tab-close { opacity: 1; }
+.browser__nav { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); }
+.browser__address { flex: 1; min-width: 0; font-size: var(--text-sm); }
 .browser__view { position: relative; flex: 1; min-height: 0; overflow: auto; }
 .browser__canvas { display: block; width: 100%; height: auto; background: var(--bg-subtle); outline: none; }
 .browser__keys { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; padding: 0; border: 0; resize: none; pointer-events: none; }

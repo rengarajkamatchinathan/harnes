@@ -124,7 +124,44 @@ pub struct TabActivateParams {
     pub tab_id: String,
 }
 
-/// `browser.copy`: one tab of a session.
+/// `browser.navigate`: the user's own navigation in the Browser tab. It never prompts
+/// (research §4.2) and launches the browser and opens a tab when none exists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NavigateParams {
+    pub session_id: String,
+    /// Defaults to the active tab (a new one when the session has none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+    /// What the user typed: a URL, `host[:port]` (https, http for localhost) or `about:blank`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Instead of `url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<NavAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavAction {
+    Back,
+    Forward,
+    Reload,
+}
+
+/// `browser.tab.new`: a tab the user opened (`about:blank` without `url`); it becomes active.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TabNewParams {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TabIdResult {
+    pub tab_id: String,
+}
+
+/// `browser.copy`, `browser.tab.close`: one tab of a session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrowserTabParams {
     pub session_id: String,

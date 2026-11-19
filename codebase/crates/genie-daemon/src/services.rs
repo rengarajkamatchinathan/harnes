@@ -491,6 +491,22 @@ impl Services {
                                 .map_err(berr)?;
                             empty()
                         }
+                        n if n == m::BrowserNavigate::NAME => to_result(
+                            &b.navigate(&params::<m::BrowserNavigate>(&r)?)
+                                .await
+                                .map_err(berr)?,
+                        ),
+                        n if n == m::BrowserTabNew::NAME => to_result(
+                            &b.tab_new(&params::<m::BrowserTabNew>(&r)?)
+                                .await
+                                .map_err(berr)?,
+                        ),
+                        n if n == m::BrowserTabClose::NAME => {
+                            b.tab_close(&params::<m::BrowserTabClose>(&r)?)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
                         n if n == m::BrowserDataClear::NAME => {
                             b.clear_data(params::<m::BrowserDataClear>(&r)?.what)
                                 .await

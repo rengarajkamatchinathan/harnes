@@ -251,7 +251,7 @@ export interface BrowserStatus {
   running: boolean;
 }
 
-/** `browser.copy`: one tab of a session. */
+/** `browser.copy`, `browser.tab.close`: one tab of a session. */
 export interface BrowserTabParams {
   session_id: string;
   tab_id: string;
@@ -1068,6 +1068,22 @@ export interface NameParams {
   name: string;
 }
 
+export type NavAction = "back" | "forward" | "reload";
+
+/**
+ * `browser.navigate`: the user's own navigation in the Browser tab. It never prompts
+ * (research §4.2) and launches the browser and opens a tab when none exists.
+ */
+export interface NavigateParams {
+  /** Instead of `url`. */
+  action?: NavAction | null;
+  session_id: string;
+  /** Defaults to the active tab (a new one when the session has none). */
+  tab_id?: string | null;
+  /** What the user typed: a URL, `host[:port]` (https, http for localhost) or `about:blank`. */
+  url?: string | null;
+}
+
 /** `{ok: true}`. */
 export interface OkResult {
   ok: boolean;
@@ -1632,11 +1648,21 @@ export interface TabActivateParams {
   tab_id: string;
 }
 
+export interface TabIdResult {
+  tab_id: string;
+}
+
 export interface TabInfo {
   active: boolean;
   tab_id: string;
   title: string;
   url: string;
+}
+
+/** `browser.tab.new`: a tab the user opened (`about:blank` without `url`); it becomes active. */
+export interface TabNewParams {
+  session_id: string;
+  url?: string | null;
 }
 
 export interface TabsResult {

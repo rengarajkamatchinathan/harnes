@@ -57,6 +57,166 @@
 
 Common patterns: **isolated profile**; **user can take over at any time** and must for logins, 2FA and CAPTCHAs; **site-level permissions plus action-level confirmations**; **visible step log**; **page content treated as untrusted**; and layered defences, because none of them claims to solve prompt injection.
 
+### 2.1 Reference target: Claude Code Desktop's browser features (added 2026-11-19)
+
+Taken from the official docs, fetched 2026-11-19. *(unconfirmed)* means the item was not found in the docs. Anthropic ships three separate browser surfaces, and only the first is the same kind of thing as Genie's Browser tab:
+
+| Surface | What it is | Profile |
+|---|---|---|
+| **A. Desktop Browser pane** | A browser built into the Claude Code Desktop app, mainly for previewing and verifying your dev server | Clean, isolated profile with no personal logins |
+| **B. Claude in Chrome** | A Chrome extension that Claude Code drives (`claude --chrome`, `/chrome`) | The user's real Chrome profile and logins |
+| **C. Computer use** | Whole-screen control of native apps (macOS CLI; Desktop on macOS and Windows) | n/a |
+
+#### A. Desktop Browser pane ([desktop docs](https://code.claude.com/docs/en/desktop))
+
+**UI**
+- Open it with **Cmd+Shift+B** (macOS) or **Ctrl+Shift+B** (Windows), or with the **Browser** button in the session title bar.
+- **Preview from chat:** in local sessions, clicking an HTML, PDF or video path in the chat opens it in the pane. HTML also works in SSH and WSL sessions.
+- **Server card → Open:** when a dev server starts, its card in the chat has an **Open** button, which brings the pane back if it was closed.
+- **Tabs:** docs and issue trackers can sit in tabs next to the running app.
+- **Dev servers** menu in the pane header: start or stop each server, or **Stop all**.
+- **⋮ menu**, with four items:
+  - **Keep cookies**
+  - **Clear browsing data**
+  - **Open links in built-in browser**
+  - **Auto-verify changes** (toggle)
+- **Minimize** button in the header (Desktop v4.0.0+, local sessions only).
+- **Outside links:**
+  - Cmd/Ctrl-click opens a link in the default browser.
+  - The first click on an outside link asks whether to use the Browser pane or the default browser.
+- **Element select:** **Cmd+Shift+S** selects an element in the Browser. What happens next (notes, sending it to chat) is *(unconfirmed)*.
+
+**What the agent does**
+- Starts dev servers automatically after edits, for frontend and backend. It reads server logs and tests API endpoints.
+- Takes screenshots, inspects the DOM, clicks elements, fills forms, and fixes what it finds.
+- **Auto-verify** (on by default): after edits, Claude takes screenshots, checks for errors, and confirms the change works before it ends the response. It can be turned off per project (`"autoVerify": false`) or in the ⋮ menu.
+- **`.claude/launch.json`** is created automatically and configures the preview servers. Fields:
+
+  | Field | Meaning |
+  |---|---|
+  | `name` | Server name |
+  | `runtimeExecutable`, `runtimeArgs` | Command that starts the server |
+  | `program`, `args` | Script to run and its arguments |
+  | `port` | Port the server listens on |
+  | `autoPort` | `true` picks a free port; `false` fails if the port is taken |
+  | `cwd`, `env` | Working directory and environment |
+  | `url` | Attach to a server that is already running |
+  | `autoVerify` | Turn auto-verify on or off for this project |
+
+- *(unconfirmed for the pane)*: reading the console, inspecting network requests, running JS, recording GIFs.
+
+**Permissions and safety**
+- Local dev servers and project files need no approval, so auto-verify never prompts.
+- **Outside sites need approval per site, including subdomains:**
+  - **Allow once**
+  - **Always allow** (saved on the device, revocable in Settings)
+  - **Deny**
+- **Safety classifiers** review write actions (click, type) in every permission mode and prompt when they flag something. Even Bypass mode still prompts on a classifier flag for outside sites.
+- Outside Auto and Bypass modes, a domain allowlist check runs before navigating to a new site.
+- Claude won't purchase, create accounts or get past CAPTCHAs without the user, even on approved sites.
+- **Settings › Code › Browser tools** switches the Browser off entirely.
+- Take-over and pause controls for the pane: *(unconfirmed, not documented)*.
+
+**Profile and logins**
+- A clean profile, separate from the user's own browser, with no saved logins or history.
+- The user can sign in inside the pane, including popup flows such as Google OAuth.
+- **Keep cookies** keeps cookies after quitting the app. In SSH sessions, cookies are always lost on quit.
+- For acting as the user on sites where they're logged in, Anthropic points to Claude in Chrome (B).
+
+**Admin settings (managed policy)**
+
+| Setting | Effect | Since |
+|---|---|---|
+| `browserExternalPageTools: "disabled"` | Claude can't read or act on outside pages. The user can still browse | |
+| `disableBrowserExternalNavigation: true` | Blocks all outside navigation. Localhost previews still work | Desktop v4.4212.0 |
+| `disableRemotePreviewScripts: true` | Turns off scripts in SSH/WSL HTML previews | Desktop v5.1231.0 |
+
+The pane also follows the Claude in Chrome allowlist and blocklist.
+
+#### B. Claude in Chrome from Claude Code ([chrome docs](https://code.claude.com/docs/en/chrome), [support article](https://support.claude.com/en/articles/12012173-getting-started-with-claude-in-chrome))
+
+**Setup and requirements**
+- Start with `claude --chrome`, or use `/chrome`. It shows status, manages permissions, reconnects, picks the browser, and can enable it by default (which costs context, because the browser tool instructions are always loaded).
+- Needs extension v1.0.36+ and `/login` with a direct Anthropic plan.
+  - API-key or `setup-token` auth keeps it off.
+  - Not available on Bedrock, Vertex or Foundry, or under Zero Data Retention. Off by default for HIPAA orgs.
+- The extension must be signed in to the same claude.ai organisation as Claude Code.
+- Works with Chrome, Edge and other Chromium browsers per the Code docs. The support article says Chrome only. This conflict is unresolved, so treat the Code docs as authoritative. Not supported on WSL.
+
+**What the agent can do**
+- Navigate, click, type, and read page and DOM state.
+- Open, close and switch tabs. Claude's tabs are grouped into a **Chrome tab group tied to the session**.
+  - `/clear` closes the group unless work is still running.
+  - `/resume`, exit, or `/clear` while work is running closes the group only if it holds nothing but empty new tabs.
+- Read console errors and messages. Network requests are listed in the support article but *(unconfirmed)* for Claude Code.
+- Fill forms, extract data to CSV or files, and run workflows across several sites.
+- **File upload** to a file input:
+  - At most 10 MB per upload.
+  - No hard-linked files.
+  - Refuses credential-named files (`.env`, `.pem`, `.key`, `.ssh`).
+  - Needs Read permission on the file.
+- Screenshots are saved to disk and reported by path.
+- **GIF recording** of browser interactions.
+- Tool names seen in the docs: `tabs_context_mcp`, `browser_batch`. The full list (via `/mcp` › `claude-in-chrome` › View tools) is *(unconfirmed)*.
+- *(unconfirmed)*: element picking, JS evaluation.
+- Side-panel-only extras that may not apply to Claude Code: saved prompt shortcuts, scheduled tasks, image uploads, downloads, workflow recording.
+
+**Control and permissions**
+- Site permissions come from the extension's settings.
+  - The prompt reads "Claude in Chrome wants to…" and offers to allow all actions on that site for the session.
+  - In auto mode, if the classifier approves a call, the extension skips its own per-site check unless a permission rule denies the site.
+- In plan mode, Claude asks before recording a GIF or opening a new tab.
+- At login pages and CAPTCHAs, Claude pauses and asks the user to handle them.
+- A JS `alert`/`confirm`/`prompt` blocks commands until the user dismisses it.
+- No stop or take-over button is documented for Claude Code.
+- Team/Enterprise admins can set allowlists and blocklists.
+
+**Error states documented:** "Browser extension is not connected", "No tab available", "Receiving end does not exist" (the extension's service worker went idle; reconnect with `/chrome`), "No browsers are connected".
+
+#### C. Computer use ([computer-use docs](https://code.claude.com/docs/en/computer-use))
+
+- **Availability:**
+  - CLI: research preview on macOS, Pro/Max/Ultra plans, interactive sessions only.
+  - Desktop: macOS and Windows, behind a Settings toggle.
+- Enable it per project with `/mcp` › `computer-use`. Needs the macOS Accessibility and Screen Recording permissions.
+- **Per-app approval** each session, with extra warnings for terminals and IDEs ("equivalent to shell access"), Finder and System Settings.
+- **Control tiers:**
+  - Browsers and trading apps: view-only
+  - Terminals and IDEs: click-only
+  - Everything else: full control
+- One session holds the lock at a time. Other apps are hidden while Claude works, and the terminal is left out of screenshots.
+- **Esc** stops it from anywhere, and so does Ctrl+C in the terminal. A notification says "press Esc to stop".
+- Tool preference order: MCP server, then Bash, then Claude in Chrome, then computer use last.
+
+#### Genie today vs the Desktop Browser pane (A)
+
+Based on reading [BrowserPanel.tsx](../codebase/apps/desktop/src/ui/panel/BrowserPanel.tsx) and the `genie-browser` crate on branch `fix/browser-panel`, 2026-11-19.
+
+| Feature | Claude Desktop | Genie |
+|---|---|---|
+| Isolated profile | ✅ | ✅ (§4.1) |
+| Live view of the page in a side panel | ✅ | ✅ Screencast to canvas |
+| Tabs | ✅ | ✅ Tab strip, shown only with more than one tab |
+| Pop out to its own window | — *(minimize only)* | ✅ |
+| Take over / Hand back / Esc | *(not documented)* | ✅ |
+| Stop | *(not documented)* | ✅ |
+| Per-site approval: once / always / deny | ✅ | ✅ `browser.sites` (§4.2) |
+| Step log | *(not documented)* | ✅ |
+| File chooser during take-over, copy/paste | *(not documented)* | ✅ |
+| Keyboard shortcut to open the pane | ✅ Cmd/Ctrl+Shift+B | ❌ |
+| Start dev servers automatically, plus a `launch.json` equivalent | ✅ | ❌ |
+| Dev servers menu (start, stop, stop all) | ✅ | ❌ |
+| Auto-verify after edits | ✅ | ❌ |
+| Open a local HTML/PDF/video path from chat in the pane | ✅ | ❌ |
+| Server card in chat with an **Open** button | ✅ | ❌ |
+| Outside link: pane or default browser (first-click prompt, Cmd-click) | ✅ | ❌ |
+| ⋮ menu: Keep cookies, Clear browsing data, Open links here, Auto-verify | ✅ | ⚠️ `browser.data.clear` exists in the API but has no panel UI |
+| Element select (Cmd+Shift+S) | ✅ | ❌ |
+| Minimize the pane | ✅ | ❌ |
+| Safety classifier on click/type | ✅ | ⚠️ Deterministic gates only; critic planned for v1.x (§4.4) |
+| Admin policy: no outside-page tools, no outside navigation | ✅ | ⚠️ Planned (ticket 28) |
+| Reading console and network, running JS | *(unconfirmed)* | ❌ Planned for the preview pane (§5) |
+
 ## 3. Architecture (v1)
 
 ```
@@ -230,6 +390,9 @@ Follow-ups for other tickets: **13** (browser rule syntax and session taint), **
 - Assistant agent mode help (takeover, watch mode, confirmations) — https://help.openai.com/en/articles/11752874-chatgpt-agent
 - Site-permission prompt pattern for a browser-extension agent (third-party guide) — https://www.verdent.ai/guides/codex-chrome-prompt-injection-protection
 - Browser-extension agent safeguards (secondary coverage) — https://moneyoval.com/article/anthropic-adds-guardrails-against-prompt-injection-in-chrome-sfm1681cuwkxa3pl3zm8xgz3
+- Claude Code Desktop Browser pane, `launch.json`, auto-verify, site approvals, managed settings (fetched 2026-11-19) — https://code.claude.com/docs/en/desktop
+- Claude in Chrome from Claude Code (fetched 2026-11-19) — https://code.claude.com/docs/en/chrome ; support article — https://support.claude.com/en/articles/12012173-getting-started-with-claude-in-chrome
+- Claude Code computer use (fetched 2026-11-19) — https://code.claude.com/docs/en/computer-use
 - In-app browser with isolated profile in a desktop coding app (secondary) — https://www.webpronews.com/anthropic-hands-claude-code-its-own-browser-the-end-of-tab-hell-for-developers/
 - IDE integrated browser driven via CDP (secondary listing) — https://mcpservers.org/agent-skills/microsoft/integrated-browser
 - Browser-level deterministic guardrails (research) — https://arxiv.org/pdf/2512.12594v1

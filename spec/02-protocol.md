@@ -226,8 +226,10 @@ Notification: `config.changed {keys, scope}`.
 | `browser.screencast.ack` | `{stream_id, frame_seq}` (flow control; CDP `screencastFrameAck`) |
 | `browser.screencast.stop` | `{stream_id}` |
 | `browser.takeover` / `browser.handback` / `browser.stop` | `{session_id}` (D21) |
-| `browser.input` | `{session_id, tab_id, event: MouseEvent|KeyEvent|WheelEvent|ImeEvent|InsertText}` (D56) |
+| `browser.input` | `{session_id, tab_id, event: MouseEvent|KeyEvent|WheelEvent|ImeEvent|InsertText}` (D56). During a turn, input other than pointer movement sets *user in control*; while no turn runs the user just uses the page, and the agent's next action gets the "user acted" note (t47) |
 | `browser.tabs` | `{session_id}` → `{tabs:[{tab_id, url, title, active}]}`; `browser.tab.activate` |
+| `browser.navigate` | `{session_id, tab_id?, url? \| action: "back"\|"forward"\|"reload"}` → `{tab_id}`: the user's own navigation (address bar). It never prompts, launches the browser, and opens a tab when the session has none. `url` is what the user typed: http(s), `host[:port]` (https; http for localhost) or `about:blank`; other schemes are rejected (t47) |
+| `browser.tab.new` / `browser.tab.close` | `{session_id, url?}` → `{tab_id}` (becomes the active tab) / `{session_id, tab_id}` (t47) |
 | `browser.popout` | `{session_id}`: show the real Chrome/Edge window (a headless browser restarts with windows; every session's tabs re-open at their URLs) |
 | `browser.copy` | `{session_id, tab_id}` → `{text}`: the page's selected text, only while the user is in control (SA-24) |
 | `browser.file_chooser.answer` | `{session_id, chooser_id, files:[path]}`: answer a `browser.file_chooser` event; empty `files` cancels |

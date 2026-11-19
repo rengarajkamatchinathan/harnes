@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::backend::BrowserError;
 use crate::cdp::{CdpClient, CdpEvent};
-use crate::host::{Control, FrameSink};
+use crate::host::FrameSink;
 use crate::session::{Browser, TabHandle};
 
 /// SA-23 defaults.
@@ -487,16 +487,17 @@ impl Browser {
             .unwrap_or_default()
     }
 
-    /// `browser.input` during take-over (05 §9, SA-24). Any input except plain pointer
-    /// movement pauses the agent (tools return `user_in_control` until Hand back).
+    /// `browser.input` (05 §9, SA-24). During a turn, any input except plain pointer
+    /// movement pauses the agent (tools return `user_in_control` until Hand back); while
+    /// the agent is idle the user can use the page directly (t47).
     pub async fn input(&self, p: &BrowserInputParams) -> Result<(), BrowserError> {
         let s = self.session(&p.session_id);
         let tab = s
             .tab(&p.tab_id)
             .ok_or_else(|| BrowserError::Launch(format!("no tab {}", p.tab_id)))?;
-        if crate::input::takes_control(&p.event) && s.control() != Control::User {
-            s.set_control(Control::User);
-            self.host.control_changed(&p.session_id, Control::User);
+        // During a turn this pauses the agent; while it's idle the user just browses.
+        if crate::input::takes_control(&p.event) {
+            self.user_acted(&s);
         }
         let client = self.client().await?;
         let (method, params) = crate::input::to_cdp(&p.event);

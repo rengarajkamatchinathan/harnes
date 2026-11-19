@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -238,6 +239,8 @@ pub struct RecordingHost {
     pub user_urls: Mutex<Vec<String>>,
     pub attachments: Mutex<HashMap<String, PathBuf>>,
     pub vision: bool,
+    /// No turn is running (default: a turn is running).
+    pub idle: AtomicBool,
 }
 
 impl RecordingHost {
@@ -293,6 +296,10 @@ impl BrowserHost for RecordingHost {
             .lock()
             .map(|g| g.iter().any(|u| u == url))
             .unwrap_or(false)
+    }
+
+    fn turn_active(&self, _session_id: &str) -> bool {
+        !self.idle.load(Ordering::SeqCst)
     }
 
     fn control_changed(&self, _session_id: &str, c: Control) {

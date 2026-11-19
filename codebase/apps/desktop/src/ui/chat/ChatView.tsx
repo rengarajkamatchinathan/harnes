@@ -69,6 +69,7 @@ function PanelButtons({ hasArtifacts }: { hasArtifacts: boolean }) {
             className={on ? "is-on" : ""}
             aria-pressed={on}
             label={t(`panel.${tab}` as Parameters<typeof t>[0])}
+            shortcut={tab === "browser" ? (/Mac/i.test(navigator.platform) ? "⌘⇧B" : "Ctrl+Shift+B") : undefined}
             onClick={() => app.setUi(on ? { panelOpen: false } : { panelOpen: true, panelTab: tab })}
           />
         );

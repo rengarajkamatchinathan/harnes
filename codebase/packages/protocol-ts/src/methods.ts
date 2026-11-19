@@ -71,6 +71,9 @@ export interface Requests {
   "browser.input": { params: T.BrowserInputParams; result: T.Empty };
   "browser.tabs": { params: T.SessionIdParams; result: T.TabsResult };
   "browser.tab.activate": { params: T.TabActivateParams; result: T.Empty };
+  "browser.navigate": { params: T.NavigateParams; result: T.TabIdResult };
+  "browser.tab.new": { params: T.TabNewParams; result: T.TabIdResult };
+  "browser.tab.close": { params: T.BrowserTabParams; result: T.Empty };
   "browser.popout": { params: T.SessionIdParams; result: T.Empty };
   "browser.copy": { params: T.BrowserTabParams; result: T.CopyResult };
   "browser.file_chooser.answer": { params: T.FileChooserAnswerParams; result: T.Empty };
@@ -233,6 +236,9 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "browser.input", direction: "request", needsLease: true },
   { name: "browser.tabs", direction: "request", needsLease: false },
   { name: "browser.tab.activate", direction: "request", needsLease: true },
+  { name: "browser.navigate", direction: "request", needsLease: true },
+  { name: "browser.tab.new", direction: "request", needsLease: true },
+  { name: "browser.tab.close", direction: "request", needsLease: true },
   { name: "browser.popout", direction: "request", needsLease: false },
   { name: "browser.copy", direction: "request", needsLease: true },
   { name: "browser.file_chooser.answer", direction: "request", needsLease: true },
@@ -348,6 +354,7 @@ export class GenieClient {
     },
     handback: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.handback", params) as Promise<T.Empty>,
     input: (params: T.BrowserInputParams): Promise<T.Empty> => this.t.request("browser.input", params) as Promise<T.Empty>,
+    navigate: (params: T.NavigateParams): Promise<T.TabIdResult> => this.t.request("browser.navigate", params) as Promise<T.TabIdResult>,
     popout: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.popout", params) as Promise<T.Empty>,
     screencast: {
       ack: (params: T.ScreencastAckParams): Promise<T.Empty> => this.t.request("browser.screencast.ack", params) as Promise<T.Empty>,
@@ -362,6 +369,8 @@ export class GenieClient {
     stop: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.stop", params) as Promise<T.Empty>,
     tab: {
       activate: (params: T.TabActivateParams): Promise<T.Empty> => this.t.request("browser.tab.activate", params) as Promise<T.Empty>,
+      close: (params: T.BrowserTabParams): Promise<T.Empty> => this.t.request("browser.tab.close", params) as Promise<T.Empty>,
+      new: (params: T.TabNewParams): Promise<T.TabIdResult> => this.t.request("browser.tab.new", params) as Promise<T.TabIdResult>,
     },
     tabs: (params: T.SessionIdParams): Promise<T.TabsResult> => this.t.request("browser.tabs", params) as Promise<T.TabsResult>,
     takeover: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.takeover", params) as Promise<T.Empty>,

@@ -8,7 +8,7 @@ import { keyAction } from "../src/ui/chat/Composer";
 import { groupByDate } from "../src/ui/Sidebar";
 import { formFields } from "../src/ui/chat/AskCard";
 import { parseArtifactMessage } from "../src/ui/panel/ArtifactPanel";
-import { bannerState, copyChord, isPasteChord, keyText, mapPoint, modifiers } from "../src/ui/panel/BrowserPanel";
+import { addressText, bannerState, copyChord, isPasteChord, keyText, mapPoint, modifiers } from "../src/ui/panel/BrowserPanel";
 import { sideBySide, splitDiff } from "../src/ui/panel/CodePanels";
 import { panelTabs } from "../src/ui/panel/RightPanel";
 import { nextStep } from "../src/ui/FirstRun";
@@ -145,6 +145,12 @@ describe("panels", () => {
     // Clamped to the viewport.
     expect(mapPoint(0, 900, { left: 50, top: 0, width: 640, height: 400 }, { w: 1280, h: 800 })).toEqual({ x: 0, y: 800 });
     expect(modifiers({ altKey: true, ctrlKey: false, metaKey: false, shiftKey: true })).toBe(9);
+  });
+
+  it("shows a blank address bar for a new tab (t47)", () => {
+    expect(addressText(undefined)).toBe("");
+    expect(addressText("about:blank")).toBe("");
+    expect(addressText("http://localhost:3000/")).toBe("http://localhost:3000/");
   });
 
   it("derives the browser banner and key text", () => {

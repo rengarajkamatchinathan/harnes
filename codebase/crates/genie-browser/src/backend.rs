@@ -26,6 +26,9 @@ pub enum BrowserError {
     Unsupported { version: String },
     #[error("couldn't start the browser: {0}")]
     Launch(String),
+    /// A bad request from the client (unknown tab, not a web address).
+    #[error("{0}")]
+    Invalid(String),
     #[error(transparent)]
     Cdp(#[from] CdpError),
 }

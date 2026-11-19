@@ -846,7 +846,7 @@
       "type": "object"
     },
     "BrowserTabParams": {
-      "description": "`browser.copy`: one tab of a session.",
+      "description": "`browser.copy`, `browser.tab.close`: one tab of a session.",
       "properties": {
         "session_id": {
           "type": "string"
@@ -3879,6 +3879,51 @@
       ],
       "type": "object"
     },
+    "NavAction": {
+      "enum": [
+        "back",
+        "forward",
+        "reload"
+      ],
+      "type": "string"
+    },
+    "NavigateParams": {
+      "description": "`browser.navigate`: the user's own navigation in the Browser tab. It never prompts\n(research §4.2) and launches the browser and opens a tab when none exists.",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NavAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Instead of `url`."
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "description": "Defaults to the active tab (a new one when the session has none).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "What the user typed: a URL, `host[:port]` (https, http for localhost) or `about:blank`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
     "OkResult": {
       "description": "`{ok: true}`.",
       "properties": {
@@ -6581,6 +6626,17 @@
       ],
       "type": "object"
     },
+    "TabIdResult": {
+      "properties": {
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tab_id"
+      ],
+      "type": "object"
+    },
     "TabInfo": {
       "properties": {
         "active": {
@@ -6601,6 +6657,24 @@
         "url",
         "title",
         "active"
+      ],
+      "type": "object"
+    },
+    "TabNewParams": {
+      "description": "`browser.tab.new`: a tab the user opened (`about:blank` without `url`); it becomes active.",
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id"
       ],
       "type": "object"
     },
