@@ -319,6 +319,11 @@ impl SitePolicy {
         if let Some(s) = g.user.get(&host) {
             return e(*s, Source::User);
         }
+        // Local dev servers need no approval (ticket 47): the agent previews and verifies
+        // the user's own app there. A user or admin block above still wins.
+        if is_loopback(&host) {
+            return e(SiteState::Act, Source::Default);
+        }
         if let Some(c) = category
             && c != Category::Messaging
         {
@@ -329,6 +334,16 @@ impl SitePolicy {
         }
         e(SiteState::Ask, Source::Default)
     }
+}
+
+/// `localhost`, `*.localhost`, `127.x.x.x` and `::1`.
+pub fn is_loopback(host: &str) -> bool {
+    let h = host.trim_start_matches('[').trim_end_matches(']');
+    h == "localhost"
+        || h.ends_with(".localhost")
+        || h == "::1"
+        || h.parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 // ---------------------------------------------------------------- exfiltration guard
@@ -437,6 +452,27 @@ mod tests {
             SiteState::Read
         );
         assert_eq!(p.effective("https://example.org").state, SiteState::Ask);
+        // Local dev servers are allowed without asking (ticket 47), unless blocked.
+        for u in [
+            "http://localhost:5173/",
+            "http://127.0.0.1:3000",
+            "http://app.localhost/",
+            "http://[::1]:8080/",
+        ] {
+            assert_eq!(p.effective(u).state, SiteState::Act, "{u}");
+        }
+        p.set(&SitePermission {
+            origin: "localhost".into(),
+            state: SiteState::Blocked,
+        });
+        assert_eq!(
+            p.effective("http://localhost:5173/").state,
+            SiteState::Blocked
+        );
+        p.set(&SitePermission {
+            origin: "localhost".into(),
+            state: SiteState::Ask,
+        });
         assert_eq!(
             p.effective("https://mail.google.com").category,
             Some(Category::Messaging)

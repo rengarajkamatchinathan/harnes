@@ -113,6 +113,18 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
 
   const emit = (m: HostMessage) => listener?.(m);
   const notify = (method: string, params: unknown) => emit({ kind: "batch", messages: [{ method, params }] });
+  const devServers = new Map<string, { name: string; state: string; url: string; port: number; command: string; pid: number }[]>();
+  const devList = (sid: unknown) => (devServers.get(String(sid)) ?? []).map((x) => ({ ...x }));
+  const startDev = async (sid: string, name: string) => {
+    const list = devList(sid).filter((x) => x.name !== name);
+    const srv = { name, state: "starting", url: "http://localhost:5173", port: 5173, command: "npm run dev", pid: 4242 };
+    devServers.set(sid, [...list, srv]);
+    notify("preview.changed", { session_id: sid, servers: devList(sid) });
+    await new Promise((r) => setTimeout(r, 600));
+    srv.state = "running";
+    notify("preview.changed", { session_id: sid, servers: devList(sid) });
+    return { ...srv };
+  };
 
   function summary(s: MockSession): SessionSummary {
     const { session_id, kind, title, status, updated_at, pinned, archived, project_id, workspace_id } = s.info;
@@ -164,7 +176,23 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       setStatus(s, "idle");
     };
     const stream = async () => {
-      if (/permission|run|shell/i.test(prompt)) {
+      if (/dev server|preview/i.test(prompt) && s.info.kind === "code") {
+        const callPart = uid("prt");
+        const call_id = uid("call");
+        const input = { name: "web", runtimeExecutable: "npm", runtimeArgs: ["run", "dev"], port: 5173 };
+        const part: Part = { type: "tool_call", id: callPart, call_id, name: "preview_start", input };
+        publish(s, { type: "part.started", kind: "tool_call", message_id: msgId, part_id: callPart }, true, turn_id);
+        assistant.parts.push(part);
+        publish(s, { type: "part.ended", part_id: callPart, part }, true, turn_id);
+        publish(s, { type: "tool.started", call_id, name: "preview_start", resource: "Bash(npm run dev)" }, true, turn_id);
+        const srv = await startDev(s.info.session_id, "web");
+        const resPart = uid("prt");
+        const result: Part = { type: "tool_result", id: resPart, call_id, content: `\`web\`: running at ${srv.url} (npm run dev), pid 4242. Saved to .genie/launch.json.`, is_error: false };
+        assistant.parts.push(result);
+        publish(s, { type: "tool.ended", call_id, outcome: "ok", result_part_id: resPart }, true, turn_id);
+        publish(s, { type: "part.ended", part_id: resPart, part: result }, true, turn_id);
+      } else if (/permission|run|shell/i.test(prompt)) {
+
         const callPart = uid("prt");
         const call_id = uid("call");
         publish(s, { type: "part.started", kind: "tool_call", message_id: msgId, part_id: callPart }, true, turn_id);
@@ -512,6 +540,16 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       if (i >= 0) projectFiles.splice(i, 1);
       return {};
     },
+    // Dev servers (ticket 47): one `web` entry per Code session; starting takes ~0.6 s.
+    "preview.list": (p) => ({ servers: devList(p.session_id), configs: ["web"], auto_verify: true }),
+    "preview.start": (p) => startDev(String(p.session_id), String(p.name)),
+    "preview.stop": (p) => {
+      const sid = String(p.session_id);
+      devServers.set(sid, p.name ? devList(sid).filter((x) => x.name !== p.name) : []);
+      notify("preview.changed", { session_id: sid, servers: devList(sid) });
+      return {};
+    },
+    "preview.logs": (p) => ({ text: devList(p.session_id).some((x) => x.name === p.name) ? "  VITE v5.4.0  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/" : "" }),
     "terminal.open": (p) => {
       const s = session(p.session_id);
       if (s.info.kind !== "code") throw err("invalid_state", "terminals belong to Code sessions", -32010);

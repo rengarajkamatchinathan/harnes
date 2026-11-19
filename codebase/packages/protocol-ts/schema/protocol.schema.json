@@ -4614,6 +4614,223 @@
         }
       ]
     },
+    "PreviewChanged": {
+      "description": "`preview.changed`: a session's dev servers changed (ticket 47); the full list.",
+      "properties": {
+        "servers": {
+          "items": {
+            "$ref": "#/$defs/PreviewServer"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "servers"
+      ],
+      "type": "object"
+    },
+    "PreviewListResult": {
+      "description": "`preview.list`.",
+      "properties": {
+        "auto_verify": {
+          "description": "The project's `autoVerify` (default on).",
+          "type": "boolean"
+        },
+        "config_error": {
+          "description": "`launch.json` exists but couldn't be read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configs": {
+          "description": "Entry names in the session's `.genie/launch.json`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "servers": {
+          "description": "Servers started in this session (running or ended), in start order.",
+          "items": {
+            "$ref": "#/$defs/PreviewServer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "servers",
+        "configs",
+        "auto_verify"
+      ],
+      "type": "object"
+    },
+    "PreviewLogsParams": {
+      "description": "`preview.logs`: the last `lines` of a server's output (default 200).",
+      "properties": {
+        "lines": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "PreviewLogsResult": {
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "PreviewServer": {
+      "description": "One dev server of a session (`.genie/launch.json`, ticket 47 phase 2).",
+      "properties": {
+        "command": {
+          "description": "The command line, for display; `None` for a `url`-only entry.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "description": "Why it failed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The `name` of its `launch.json` entry.",
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/PreviewState"
+        },
+        "url": {
+          "description": "Where to open it (`url`, or `http://localhost:<port>`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
+    "PreviewStartParams": {
+      "description": "`preview.start`: start a `launch.json` entry (no prompt: the user asked).",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "PreviewState": {
+      "description": "Where a dev server is in its life.",
+      "oneOf": [
+        {
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "starting",
+          "description": "Spawned; waiting for its port to accept connections.",
+          "type": "string"
+        },
+        {
+          "const": "running",
+          "description": "Its port accepts connections (or, for a `url`-only entry, the URL answered).",
+          "type": "string"
+        },
+        {
+          "const": "exited",
+          "description": "The process ended or was stopped.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "It never came up (spawn error, port taken, exited or timed out while starting).",
+          "type": "string"
+        }
+      ]
+    },
+    "PreviewStopParams": {
+      "description": "`preview.stop`: one server, or all of the session's without `name`.",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
     "ProjectCreateParams": {
       "properties": {
         "instructions": {

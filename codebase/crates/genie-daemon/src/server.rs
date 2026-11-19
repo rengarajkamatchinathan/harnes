@@ -339,6 +339,7 @@ impl DaemonState {
             self.leases.forget(id);
             crate::code::session_deleted(self, id);
             crate::terminal::session_deleted(self, id);
+            crate::preview::session_deleted(self, id);
             if !info.incognito {
                 self.listed(ListedChange::Deleted, info.summary.clone());
             }
@@ -927,6 +928,7 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
             state.leases.forget(&p.session_id);
             crate::code::session_deleted(state, &p.session_id);
             crate::terminal::session_deleted(state, &p.session_id);
+            crate::preview::session_deleted(state, &p.session_id);
             state.listed(ListedChange::Deleted, info.summary);
             empty()
         }),

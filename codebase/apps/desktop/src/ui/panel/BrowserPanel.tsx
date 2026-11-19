@@ -8,8 +8,9 @@
 // opened after the panel), so the panel never has to restart it.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserControl, BrowserStatus, InputEvent, TabInfo } from "@genie/protocol";
-import { Badge, Banner, Button, EmptyState, IconButton, Input, Menu } from "@genie/ui";
+import { Badge, Banner, Button, EmptyState, IconButton, Input, Menu, type MenuItem } from "@genie/ui";
 import { t } from "../../i18n";
+import { useEmitter } from "../../state/emitter";
 import { isBusy } from "../../state/sessionModel";
 import { useApp, useSession } from "../context";
 
@@ -314,6 +315,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
         <Button size="sm" variant="ghost" icon="external" disabled={popping} onClick={popOut}>
           {popping ? t("browser.popOutBusy") : t("browser.popOut")}
         </Button>
+        {app.ui.mode === "code" && <DevServersMenu sessionId={sessionId} />}
         <Menu
           label={t("browser.more")}
           align="right"
@@ -484,5 +486,65 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
         </details>
       )}
     </div>
+  );
+}
+
+/**
+ * **Dev servers** (ticket 47): each `.genie/launch.json` entry and started server with
+ * Open / Stop or Start, then Stop all. Starting one opens it in this tab once it listens
+ * (`preview.changed`, handled in the app state).
+ */
+function DevServersMenu({ sessionId }: { sessionId: string }) {
+  const app = useApp();
+  useEmitter(app.devServers);
+  useEffect(() => app.devServers.ensure(sessionId), [app, sessionId]);
+  const list = app.devServers.get(sessionId);
+  const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
+  const names = [...new Set([...list.configs, ...list.servers.map((s) => s.name)])];
+  const live = list.servers.filter((s) => s.state === "running" || s.state === "starting");
+  const items: MenuItem[] = [];
+  for (const name of names) {
+    const s = list.servers.find((x) => x.name === name);
+    const up = s?.state === "running" || s?.state === "starting";
+    const where = s?.url?.replace(/^https?:\/\//, "");
+    const state = s?.state === "running" ? t("preview.running") : s?.state === "starting" ? t("preview.starting") : s?.state === "failed" ? t("preview.failed") : t("preview.stopped");
+    const group = `${name} · ${state}${up && where ? ` · ${where}` : ""}`;
+    if (up) {
+      if (s?.url) items.push({ id: `open:${name}`, group, icon: "globe", label: t("common.open"), disabled: s.state !== "running", onSelect: () => app.openInBrowser(sessionId, s.url!) });
+      items.push({ id: `stop:${name}`, group, icon: "stop", label: t("preview.stop"), onSelect: () => void app.devServers.stop(sessionId, name).catch(fail) });
+    } else {
+      items.push({
+        id: `start:${name}`,
+        group,
+        icon: "play",
+        label: t("preview.start"),
+        title: s?.error ?? undefined,
+        onSelect: () => void app.devServers.start(sessionId, name).catch(fail),
+      });
+    }
+  }
+  if (!names.length) items.push({ id: "none", label: t("preview.none"), hint: t("preview.noneHint"), disabled: true, onSelect: () => {} });
+  if (list.config_error) items.push({ id: "error", label: t("preview.configError"), hint: list.config_error, disabled: true, danger: true, onSelect: () => {} });
+  items.push({
+    id: "stop-all",
+    icon: "stop",
+    label: t("preview.stopAll"),
+    danger: true,
+    separatorBefore: names.length > 0,
+    disabled: !live.length,
+    onSelect: () => void app.devServers.stop(sessionId).catch(fail),
+  });
+  return (
+    <Menu
+      label={t("preview.menu")}
+      align="right"
+      trigger={(p) => (
+        <Button {...p} size="sm" variant="ghost" icon="play" onClick={() => void app.devServers.refresh(sessionId)}>
+          {t("preview.menu")}
+          {live.length > 0 && <span className="devservers__count">{live.length}</span>}
+        </Button>
+      )}
+      items={items}
+    />
   );
 }

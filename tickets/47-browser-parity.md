@@ -46,7 +46,7 @@ Make Genie's Browser tab work like Claude Code Desktop's Browser pane. The featu
 - Admin policy keys: no outside-page tools, no outside navigation (ticket 28).
 
 ## Status
-- 2026-11-19: **Phase 1 done** on `fix/browser-panel` (not committed).
+- 2026-11-19: **Phase 1 done** on `fix/browser-panel` (committed).
   - **Daemon:**
     - New RPCs: `browser.navigate`, `browser.tab.new`, `browser.tab.close`.
     - `BrowserHost::turn_active`: input and navigation while idle no longer set *user in control*.
@@ -54,4 +54,12 @@ Make Genie's Browser tab work like Claude Code Desktop's Browser pane. The featu
   - **Panel:** address bar with back, forward and reload; tab strip with `+` and `×`; direct use of the page while idle; ⋮ menu (Open links in built-in browser, Clear browsing data).
   - **App:** chat links open in the Browser tab (Cmd/Ctrl-click opens the system browser); Cmd/Ctrl+Shift+B toggles the tab.
   - **Tests:** `user_browsing_needs_no_prompts`, `address_bar_input`, and `real_chrome_user_browsing` (ignored; passes against local Chrome).
-- Next: Phase 2 (dev servers).
+- 2026-11-19: **Phase 2 done** on `fix/browser-panel` (not committed).
+  - **Service** (`genie-tools/src/preview/`): `DevServers` reads and writes `.genie/launch.json` (Claude's fields; comments, trailing commas and unknown keys kept). Each server runs in its own `genie-process` kill-tree with `PORT` set, `autoPort`, `cwd` kept inside the project, and a 512 KiB output ring. It is ready when its port accepts connections, or, with no `port`, when the process tree starts listening (the ticket 43 probe). A server that exits before then fails with its last output. `url` alone attaches to a server that is already running.
+  - **Agent tools** (Code only): `preview_start` asks like `shell` (`Bash(<command>)`, so the same rules match) and saves inline entries to `launch.json`; `preview_stop`; `preview_logs`. GPT tuning now points servers at `preview_start`.
+  - **Daemon:** `preview.list/start/stop/logs`, and `preview.changed` on the workspace feed. Servers outlive turns and actor eviction; session delete and daemon exit kill them.
+  - **Site policy:** `localhost`, `*.localhost`, `127.x` and `::1` are allowed without asking. A user or admin block still wins.
+  - **UI:** a server card under `preview_start` (live state, Open, Stop or Start); a **Dev servers** menu in the Browser tab bar (Open, Stop or Start per entry, Stop all); a server that comes up in the session on screen opens in its Browser tab. The mock scripts a `preview_start` turn ("start the dev server").
+  - **Tests:** `genie-tools/tests/preview.rs` (6, real processes, need `python3`) and the `launch.json` parser unit tests.
+  - **Known gaps:** the Dev servers menu is hidden while the "No browser found" state shows. `preview.start` from the menu waits up to 60 s.
+- Next: Phase 3 (auto-verify).

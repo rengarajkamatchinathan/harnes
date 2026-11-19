@@ -10,6 +10,7 @@ import { readBlob } from "../../state/attachments";
 import type { MessageView, PartView, SessionModel, ToolView } from "../../state/sessionModel";
 import { siblingInfo } from "../../state/sessionModel";
 import type { SessionStore } from "../../state/session";
+import { useEmitter } from "../../state/emitter";
 import { useAppStatic } from "../context";
 import { GenieMark } from "../GenieMark";
 import { TextPart } from "./Markdown";
@@ -428,6 +429,9 @@ function ToolRow({ part, model, busy, compact, nested }: { part: PartView; model
         </button>
       )}
       {tool?.error && <div className="tool__error">{tool.error.message}</div>}
+      {name === "preview_start" && tool?.outcome === "ok" && (
+        <ServerCard sessionId={model.sessionId} name={str((input as Record<string, unknown> | undefined)?.name) || serverNameFrom(resultText(content))} urlHint={urlFrom(resultText(content))} />
+      )}
       {open && (
         <div className="tool__body">
           <div className="tool__label">{t("tool.arguments")}</div>
@@ -444,6 +448,62 @@ function ToolRow({ part, model, busy, compact, nested }: { part: PartView; model
             </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+const str = (v: unknown) => (typeof v === "string" ? v : "");
+/** "`web`: running at http://localhost:5173 (…)" → "web". */
+const serverNameFrom = (text: string) => /^`([^`]+)`/.exec(text)?.[1] ?? "";
+const urlFrom = (text: string) => / at (https?:\/\/[^\s,)]+)/.exec(text)?.[1] ?? null;
+
+/**
+ * The card under a `preview_start` row (ticket 47): the server's live state from
+ * `preview.list` / `preview.changed`, with Open (Browser tab) and Stop, or Start again
+ * once it has stopped.
+ */
+function ServerCard({ sessionId, name, urlHint }: { sessionId: string; name: string; urlHint: string | null }) {
+  const app = useAppStatic();
+  useEmitter(app.devServers);
+  useEffect(() => app.devServers.ensure(sessionId), [app, sessionId]);
+  const [busy, setBusy] = useState(false);
+  if (!name) return null;
+  const s = app.devServers.server(sessionId, name);
+  const url = s?.url ?? urlHint;
+  const state = s?.state ?? "exited";
+  const label = { starting: t("preview.starting"), running: t("preview.running"), exited: t("preview.stopped"), failed: t("preview.failed"), unknown: t("preview.stopped") }[state];
+  const act = (f: () => Promise<unknown>) => {
+    setBusy(true);
+    f()
+      .catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className={`server-card is-${state}`}>
+      <span className="server-card__dot" aria-hidden />
+      <span className="server-card__main">
+        <span className="server-card__name">{name}</span>
+        <span className="server-card__meta">
+          {label}
+          {url && state !== "exited" && state !== "failed" && <> · {url.replace(/^https?:\/\//, "")}</>}
+        </span>
+      </span>
+      {state === "running" || state === "starting" ? (
+        <>
+          {url && (
+            <Button size="sm" icon="globe" disabled={state !== "running"} onClick={() => app.openInBrowser(sessionId, url)}>
+              {t("common.open")}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => act(() => app.devServers.stop(sessionId, name))}>
+            {t("preview.stop")}
+          </Button>
+        </>
+      ) : (
+        <Button size="sm" icon="play" disabled={busy} onClick={() => act(() => app.devServers.start(sessionId, name))}>
+          {t("preview.start")}
+        </Button>
       )}
     </div>
   );
@@ -532,7 +592,7 @@ function visiblePart(p: PartView): boolean {
 function groupable(p: PartView): boolean {
   if (p.kind !== "tool_call") return false;
   const name = p.final?.type === "tool_call" ? p.final.name : "";
-  return !name.startsWith("memory_") && !name.startsWith("artifact_");
+  return !name.startsWith("memory_") && !name.startsWith("artifact_") && name !== "preview_start";
 }
 
 /**

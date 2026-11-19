@@ -14,6 +14,7 @@
 pub mod chat;
 pub mod code;
 pub mod output;
+pub mod preview;
 pub mod registry;
 pub mod shell;
 pub mod tool;

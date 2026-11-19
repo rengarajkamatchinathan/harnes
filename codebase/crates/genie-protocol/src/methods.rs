@@ -198,6 +198,12 @@ methods! {
     BrowserSitesSet = "browser.sites.set", Request, false, browser::SitePermission => Empty;
     BrowserDataClear = "browser.data.clear", Request, false, browser::DataClearParams => Empty;
 
+    // ---- dev servers (ticket 47 phase 2)
+    PreviewList = "preview.list", Request, false, session::SessionIdParams => browser::PreviewListResult;
+    PreviewStart = "preview.start", Request, false, browser::PreviewStartParams => browser::PreviewServer;
+    PreviewStop = "preview.stop", Request, false, browser::PreviewStopParams => Empty;
+    PreviewLogs = "preview.logs", Request, false, browser::PreviewLogsParams => browser::PreviewLogsResult;
+
     // ---- terminal (§6.7)
     TerminalOpen = "terminal.open", Request, false, browser::TerminalOpenParams => browser::TerminalIdParams;
     TerminalAttach = "terminal.attach", Request, false, browser::TerminalAttachParams => browser::TerminalAttachResult;
@@ -281,6 +287,7 @@ methods! {
     CommandsChangedNote = "commands.changed", Notification, false, mcp::CommandsChanged => ();
     UserNotification = "notification", Notification, false, workspace::UserNotification => ();
     TerminalExited = "terminal.exited", Notification, false, workspace::TerminalExited => ();
+    PreviewChangedNote = "preview.changed", Notification, false, workspace::PreviewChanged => ();
     /// Memory changed outside a turn (`memory.update/delete/reset`, Settings → Memory).
     MemoryChangedNote = "memory.changed", Notification, false, crate::event::MemoryChanged => ();
 }

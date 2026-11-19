@@ -80,6 +80,10 @@ export interface Requests {
   "browser.sites.list": { params: T.Empty; result: T.SitesListResult };
   "browser.sites.set": { params: T.SitePermission; result: T.Empty };
   "browser.data.clear": { params: T.DataClearParams; result: T.Empty };
+  "preview.list": { params: T.SessionIdParams; result: T.PreviewListResult };
+  "preview.start": { params: T.PreviewStartParams; result: T.PreviewServer };
+  "preview.stop": { params: T.PreviewStopParams; result: T.Empty };
+  "preview.logs": { params: T.PreviewLogsParams; result: T.PreviewLogsResult };
   "terminal.open": { params: T.TerminalOpenParams; result: T.TerminalIdParams };
   "terminal.attach": { params: T.TerminalAttachParams; result: T.TerminalAttachResult };
   "terminal.input": { params: T.TerminalInputParams; result: T.Empty };
@@ -158,6 +162,7 @@ export interface Notifications {
   "commands.changed": T.CommandsChanged;
   "notification": T.UserNotification;
   "terminal.exited": T.TerminalExited;
+  "preview.changed": T.PreviewChanged;
   "memory.changed": T.MemoryChanged;
 }
 
@@ -245,6 +250,10 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "browser.sites.list", direction: "request", needsLease: false },
   { name: "browser.sites.set", direction: "request", needsLease: false },
   { name: "browser.data.clear", direction: "request", needsLease: false },
+  { name: "preview.list", direction: "request", needsLease: false },
+  { name: "preview.start", direction: "request", needsLease: false },
+  { name: "preview.stop", direction: "request", needsLease: false },
+  { name: "preview.logs", direction: "request", needsLease: false },
   { name: "terminal.open", direction: "request", needsLease: false },
   { name: "terminal.attach", direction: "request", needsLease: false },
   { name: "terminal.input", direction: "request", needsLease: false },
@@ -316,6 +325,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "commands.changed", direction: "notification", needsLease: false },
   { name: "notification", direction: "notification", needsLease: false },
   { name: "terminal.exited", direction: "notification", needsLease: false },
+  { name: "preview.changed", direction: "notification", needsLease: false },
   { name: "memory.changed", direction: "notification", needsLease: false },
 ];
 
@@ -471,6 +481,12 @@ export class GenieClient {
   readonly ping = (params: T.Empty = {}): Promise<T.Empty> => this.t.request("$/ping", params) as Promise<T.Empty>;
   readonly policy = {
     effective: (params: T.Empty = {}): Promise<T.PolicyEffectiveResult> => this.t.request("policy.effective", params) as Promise<T.PolicyEffectiveResult>,
+  };
+  readonly preview = {
+    list: (params: T.SessionIdParams): Promise<T.PreviewListResult> => this.t.request("preview.list", params) as Promise<T.PreviewListResult>,
+    logs: (params: T.PreviewLogsParams): Promise<T.PreviewLogsResult> => this.t.request("preview.logs", params) as Promise<T.PreviewLogsResult>,
+    start: (params: T.PreviewStartParams): Promise<T.PreviewServer> => this.t.request("preview.start", params) as Promise<T.PreviewServer>,
+    stop: (params: T.PreviewStopParams): Promise<T.Empty> => this.t.request("preview.stop", params) as Promise<T.Empty>,
   };
   readonly project = {
     create: (params: T.ProjectCreateParams): Promise<T.ProjectIdResult> => this.t.request("project.create", params) as Promise<T.ProjectIdResult>,

@@ -938,6 +938,54 @@
     },
     {
       "direction": "request",
+      "ident": "PreviewList",
+      "name": "preview.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PreviewListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewStart",
+      "name": "preview.start",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewStartParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PreviewServer"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewStop",
+      "name": "preview.stop",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewStopParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewLogs",
+      "name": "preview.logs",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewLogsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PreviewLogsResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "TerminalOpen",
       "name": "terminal.open",
       "needs_lease": false,
@@ -1783,6 +1831,18 @@
       "needs_lease": false,
       "params": {
         "$ref": "#/$defs/TerminalExited"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "PreviewChangedNote",
+      "name": "preview.changed",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewChanged"
       },
       "result": {
         "type": "null"

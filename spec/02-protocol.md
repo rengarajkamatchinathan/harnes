@@ -235,6 +235,11 @@ Notification: `config.changed {keys, scope}`.
 | `browser.file_chooser.answer` | `{session_id, chooser_id, files:[path]}`: answer a `browser.file_chooser` event; empty `files` cancels |
 | `browser.sites.list` / `browser.sites.set` | per-site states `blocked|ask|read|act` |
 | `browser.data.clear` | `{what:"cookies"|"all"}` |
+| `preview.list` | `{session_id}` → `{servers:[PreviewServer], configs:[name], auto_verify, config_error?}`: the session's dev servers and its `.genie/launch.json` entries (t47) |
+| `preview.start` / `preview.stop` | `{session_id, name}` → `PreviewServer`, answered once the port accepts connections (or after 60 s, still `starting`) / `{session_id, name?}` (no `name`: all). The user's own start never prompts (t47) |
+| `preview.logs` | `{session_id, name, lines?}` → `{text}`: the last lines of the server's stdout+stderr, ANSI stripped (t47) |
+
+`PreviewServer`: `{name, state: "starting"|"running"|"exited"|"failed", url?, port?, command?, pid?, exit_code?, error?}`. `preview.changed {session_id, servers}` goes out on the workspace feed after every change; a server that turns `running` in the session on screen opens in its Browser tab. Servers outlive turns and actor eviction; `preview.stop`, `preview_stop`, session delete and daemon exit kill the whole process tree (t47).
 
 `browser.frame` (ephemeral): `{stream_id, frame_seq, tab_id, jpeg_b64, w, h, device_scale, ts}`; `w`/`h` are the viewport in CSS pixels (input coordinates use the same space) and `device_scale` is JPEG pixels per CSS pixel. `browser.control` (ephemeral): `{control: "agent"|"user"|"waiting_for_approval"|"handoff", reason?}`. `browser.file_chooser` (ephemeral): `{chooser_id, tab_id, multiple}`, sent when a page opens a file picker during take-over. Frames are base64 in NDJSON in v1; at ~60 KB per frame and 15 fps this is about 1.2 MB/s on a local socket, well within budget. The Tauri side decodes and hands an `ImageBitmap`-ready buffer to the webview.
 

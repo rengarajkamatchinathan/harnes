@@ -264,3 +264,87 @@ pub struct TerminalResizeParams {
     pub cols: u16,
     pub rows: u16,
 }
+
+// ---------------------------------------------------------------- dev servers (ticket 47)
+
+/// Where a dev server is in its life.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewState {
+    /// Spawned; waiting for its port to accept connections.
+    Starting,
+    /// Its port accepts connections (or, for a `url`-only entry, the URL answered).
+    Running,
+    /// The process ended or was stopped.
+    Exited,
+    /// It never came up (spawn error, port taken, exited or timed out while starting).
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
+
+/// One dev server of a session (`.genie/launch.json`, ticket 47 phase 2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewServer {
+    /// The `name` of its `launch.json` entry.
+    pub name: String,
+    pub state: PreviewState,
+    /// Where to open it (`url`, or `http://localhost:<port>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// The command line, for display; `None` for a `url`-only entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Why it failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `preview.list`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewListResult {
+    /// Servers started in this session (running or ended), in start order.
+    pub servers: Vec<PreviewServer>,
+    /// Entry names in the session's `.genie/launch.json`.
+    pub configs: Vec<String>,
+    /// The project's `autoVerify` (default on).
+    pub auto_verify: bool,
+    /// `launch.json` exists but couldn't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_error: Option<String>,
+}
+
+/// `preview.start`: start a `launch.json` entry (no prompt: the user asked).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewStartParams {
+    pub session_id: String,
+    pub name: String,
+}
+
+/// `preview.stop`: one server, or all of the session's without `name`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewStopParams {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// `preview.logs`: the last `lines` of a server's output (default 200).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewLogsParams {
+    pub session_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewLogsResult {
+    pub text: String,
+}

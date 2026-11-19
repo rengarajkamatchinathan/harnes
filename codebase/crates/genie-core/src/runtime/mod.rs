@@ -469,6 +469,15 @@ impl RuntimeBuilder {
         self
     }
 
+    /// `preview_start/stop/logs` (Code registry only, ticket 47): dev servers from
+    /// `.genie/launch.json`.
+    pub fn preview(mut self, servers: &Arc<genie_tools::preview::DevServers>) -> Self {
+        for t in genie_tools::preview::tools(servers) {
+            self.rt.code_tools.register(t);
+        }
+        self
+    }
+
     /// `web_fetch` (and a local `web_search` when `cfg.search` is set) for Chat and Code
     /// (06 §8). Results taint the turn through [`AgentRuntime::taints`].
     pub fn web(self, mut cfg: genie_tools::web::WebConfig) -> Self {

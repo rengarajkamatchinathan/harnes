@@ -8,6 +8,7 @@ import {
   type ClientRef,
   type LeaseLost,
   type ModelInfo,
+  type PreviewChanged,
   type ProjectInfo,
   type ProviderInfo,
   type SessionEventEnvelope,
@@ -24,6 +25,7 @@ import { DEFAULT_APPEARANCE, type Appearance } from "@genie/ui";
 import { errorKind, errorMessage, type HostInfo, type HostMessage, type HostStatus, type Platform } from "../platform";
 import { Emitter } from "./emitter";
 import { SessionStore } from "./session";
+import { DevServers } from "./devServers";
 import { Terminals } from "./terminals";
 
 export type View = "main" | "settings" | "project";
@@ -150,11 +152,20 @@ export class App extends Emitter {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly terminals: Terminals;
+  readonly devServers: DevServers;
 
   constructor(readonly platform: Platform) {
     super();
     this.client = new GenieClient({ request: (m, p) => platform.request(m, p) });
     this.terminals = new Terminals({ client: this.client, persistTerminals: (terminals) => this.setUi({ terminals }) });
+    this.devServers = new DevServers(this.client);
+  }
+
+  /** Show `url` in the session's Browser tab (a dev server, a server card's Open). */
+  openInBrowser(sessionId: string, url: string, quiet = false) {
+    this.setUi({ panelOpen: true, panelTab: "browser" });
+    // Quiet for automatic opens: with no browser installed the tab already says so.
+    void this.client.browser.navigate({ session_id: sessionId, url }).catch((e) => quiet || this.toast({ title: this.describeError(e), tone: "danger" }));
   }
 
   async start() {
@@ -276,6 +287,7 @@ export class App extends Emitter {
       // The relay resubscribed sessions and the workspace feed itself (02 §3.1).
       void this.refreshLists();
       this.terminals.reattachAll();
+      this.devServers.refreshAll();
       return;
     }
     this.everReady = true;
@@ -330,6 +342,14 @@ export class App extends Emitter {
       case "terminal.exited":
         this.terminals.onExited(params as TerminalExited);
         return;
+      case "preview.changed": {
+        // A dev server that comes up in the session on screen opens in its Browser tab.
+        const p = params as PreviewChanged;
+        const up = this.devServers.onChanged(p);
+        const first = up.find((s) => s.url);
+        if (first?.url && p.session_id === this.ui.activeSession) this.openInBrowser(p.session_id, first.url, true);
+        return;
+      }
       case "session.synced":
         this.open.get((params as SessionSynced).session_id)?.markSynced();
         return;

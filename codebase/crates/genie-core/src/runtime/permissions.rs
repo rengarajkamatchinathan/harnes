@@ -324,7 +324,8 @@ pub fn action_for(req: &AuthzRequest, workspace: Option<&Path>) -> Action {
         }
     };
     match name {
-        "shell" | "bash" | "powershell" => {
+        // `preview_start` runs its server's command: the same `Bash(…)` rules apply.
+        "shell" | "bash" | "powershell" | "preview_start" => {
             use genie_tools::shell::{Dialect, authz_from_request, scan};
             let map = |d: Dialect| match d {
                 Dialect::Posix => ShellDialect::Posix,

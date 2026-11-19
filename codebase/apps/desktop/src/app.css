@@ -676,3 +676,16 @@ code { font-size: 0.92em; }
   .transcript__item.is-new > *, .hero__title, .hero__inner > *, .panel, .toast, .transcript__jump, .ask, .sidebar__row.is-new, .tool__body, .composer__send { animation: none !important; }
   .sidebar__section-body, .modeswitch__thumb { transition: none; }
 }
+
+/* Dev servers (ticket 47): chat server card and the Browser tab menu's count. */
+.server-card { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-1) 0 var(--space-2) 22px; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface); max-width: 520px; }
+.server-card__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-faint); }
+.server-card.is-running .server-card__dot { background: var(--success); box-shadow: 0 0 0 3px var(--success-subtle); }
+.server-card.is-starting .server-card__dot { background: var(--warning); animation: server-pulse 1.2s var(--ease-out) infinite; }
+.server-card.is-failed .server-card__dot { background: var(--danger); }
+.server-card__main { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: var(--line-tight); }
+.server-card__name { font-weight: 500; font-size: var(--text-sm); font-family: var(--font-mono); }
+.server-card__meta { font-size: var(--text-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes server-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .server-card.is-starting .server-card__dot { animation: none; } }
+.devservers__count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 4px; padding: 0 4px; border-radius: 8px; background: var(--success-subtle); color: var(--success); font-size: 11px; font-weight: 600; }

@@ -1200,6 +1200,66 @@ export interface PolicyEffectiveResult {
 /** What the ask card shows for a permission ask. */
 export type Preview = { path: string; type: "diff"; unified: string } | ({ command: string; cwd?: string | null; type: "command" }) | { type: "url"; url: string } | { args: unknown; server: string; tool: string; type: "mcp_args" } | { text: string; type: "text" } | { type: "unknown" };
 
+/** `preview.changed`: a session's dev servers changed (ticket 47); the full list. */
+export interface PreviewChanged {
+  servers: PreviewServer[];
+  session_id: string;
+}
+
+/** `preview.list`. */
+export interface PreviewListResult {
+  /** The project's `autoVerify` (default on). */
+  auto_verify: boolean;
+  /** `launch.json` exists but couldn't be read. */
+  config_error?: string | null;
+  /** Entry names in the session's `.genie/launch.json`. */
+  configs: string[];
+  /** Servers started in this session (running or ended), in start order. */
+  servers: PreviewServer[];
+}
+
+/** `preview.logs`: the last `lines` of a server's output (default 200). */
+export interface PreviewLogsParams {
+  lines?: number | null;
+  name: string;
+  session_id: string;
+}
+
+export interface PreviewLogsResult {
+  text: string;
+}
+
+/** One dev server of a session (`.genie/launch.json`, ticket 47 phase 2). */
+export interface PreviewServer {
+  /** The command line, for display; `None` for a `url`-only entry. */
+  command?: string | null;
+  /** Why it failed. */
+  error?: string | null;
+  exit_code?: number | null;
+  /** The `name` of its `launch.json` entry. */
+  name: string;
+  pid?: number | null;
+  port?: number | null;
+  state: PreviewState;
+  /** Where to open it (`url`, or `http://localhost:<port>`). */
+  url?: string | null;
+}
+
+/** `preview.start`: start a `launch.json` entry (no prompt: the user asked). */
+export interface PreviewStartParams {
+  name: string;
+  session_id: string;
+}
+
+/** Where a dev server is in its life. */
+export type PreviewState = "unknown" | "starting" | "running" | "exited" | "failed";
+
+/** `preview.stop`: one server, or all of the session's without `name`. */
+export interface PreviewStopParams {
+  name?: string | null;
+  session_id: string;
+}
+
 export interface ProjectCreateParams {
   instructions?: string;
   name: string;

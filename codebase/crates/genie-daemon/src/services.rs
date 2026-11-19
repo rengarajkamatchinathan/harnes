@@ -44,6 +44,8 @@ pub struct Services {
     pub browser: Option<Arc<genie_browser::Browser>>,
     pub browser_backend: Option<Arc<dyn genie_browser::BrowserBackend>>,
     pub browser_host: Option<Arc<genie_core::runtime::browser::EngineBrowserHost>>,
+    /// Dev servers (ticket 47): `preview.*` methods and the agent's `preview_*` tools.
+    pub preview: Option<Arc<genie_tools::preview::DevServers>>,
     /// Artifacts (D28), projects/retrieval (D32), memory state (D31) and chunked blob
     /// uploads (02 §6.9): served by `crate::projects` / `crate::blobs`.
     pub artifacts: Option<Arc<genie_core::runtime::artifacts::ArtifactHub>>,
@@ -155,6 +157,9 @@ impl Services {
         if let Some(p) = &self.providers
             && let Some(h) = p.dispatch(state, conn, r)
         {
+            return h;
+        }
+        if let Some(h) = crate::preview::dispatch(self.preview.as_ref(), state, conn, r) {
             return h;
         }
         if r.method.starts_with("browser.") {

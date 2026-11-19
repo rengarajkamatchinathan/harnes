@@ -92,3 +92,10 @@ pub struct TerminalExited {
     pub terminal_id: String,
     pub code: Option<i32>,
 }
+
+/// `preview.changed`: a session's dev servers changed (ticket 47); the full list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewChanged {
+    pub session_id: String,
+    pub servers: Vec<crate::api::browser::PreviewServer>,
+}
