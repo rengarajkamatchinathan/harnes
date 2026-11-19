@@ -301,6 +301,8 @@ pub struct Browser {
     /// File pickers opened during take-over, waiting for `browser.file_chooser.answer`.
     choosers: StdMutex<HashMap<String, Chooser>>,
     chooser_seq: AtomicU64,
+    /// Console messages per tab (`browser_console`, auto-verify; ticket 47).
+    pub(crate) console: StdMutex<crate::console::ConsoleLog>,
 }
 
 /// A pending file picker (SA-24).
@@ -341,6 +343,12 @@ pub(crate) async fn attach_page(c: &CdpClient, target: &str) -> Result<String, C
     {
         tracing::warn!(error = %e, "file chooser interception unavailable");
     }
+    // Console messages, exceptions and browser log entries (`browser_console`).
+    for domain in ["Runtime.enable", "Log.enable"] {
+        if let Err(e) = c.call_in(Some(&sid), domain, json!({})).await {
+            tracing::warn!(error = %e, domain, "console capture unavailable");
+        }
+    }
     Ok(sid)
 }
 
@@ -366,6 +374,7 @@ impl Browser {
             casts: crate::screencast::Casts::default(),
             choosers: StdMutex::new(HashMap::new()),
             chooser_seq: AtomicU64::new(0),
+            console: StdMutex::new(crate::console::ConsoleLog::default()),
         })
     }
 
@@ -437,6 +446,21 @@ impl Browser {
     }
 
     fn on_download_event(&self, e: &CdpEvent) {
+        if let Some(cdp) = e.session_id.as_deref() {
+            if let Some(entry) = crate::console::from_event(&e.method, &e.params) {
+                if let Ok(mut log) = self.console.lock() {
+                    log.push(cdp, entry);
+                }
+                return;
+            }
+            // A new document in the tab: its log starts over.
+            if e.method == "Page.frameNavigated"
+                && e.params["frame"]["parentId"].is_null()
+                && let Ok(mut log) = self.console.lock()
+            {
+                log.clear(cdp);
+            }
+        }
         match e.method.as_str() {
             // A page opened a file picker. Only the user, while in control, answers it.
             "Page.fileChooserOpened" => {
@@ -516,6 +540,9 @@ impl Browser {
                         .find(|s| s.tabs().iter().any(|t| t.cdp_session == cdp))
                         .cloned()
                 });
+                if let Ok(mut log) = self.console.lock() {
+                    log.clear(cdp);
+                }
                 if let Some(s) = owner {
                     s.with(|g| {
                         let gone = g

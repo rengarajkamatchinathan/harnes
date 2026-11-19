@@ -163,6 +163,37 @@ impl DevServers {
         f.save(&root)
     }
 
+    /// Running servers auto-verify should check (ticket 47 phase 3): the project's
+    /// `autoVerify` is on (default) and the server's own entry doesn't turn it off.
+    pub fn verify_targets(&self, session_id: &str) -> Vec<PreviewServer> {
+        let running: Vec<PreviewServer> = self
+            .list(session_id)
+            .into_iter()
+            .filter(|s| s.state == PreviewState::Running)
+            .collect();
+        if running.is_empty() {
+            return running;
+        }
+        let Ok(f) = self.launch_file(session_id) else {
+            return running;
+        };
+        if !f.auto_verify() {
+            return Vec::new();
+        }
+        running
+            .into_iter()
+            .filter(|s| f.get(&s.name).and_then(|c| c.auto_verify) != Some(false))
+            .collect()
+    }
+
+    /// The ⋮ menu's **Auto-verify changes**: the project's `autoVerify` in `launch.json`.
+    pub fn set_auto_verify(&self, session_id: &str, on: bool) -> Result<(), String> {
+        let root = self.root(session_id)?;
+        let mut f = LaunchFile::load(&root)?;
+        f.auto_verify = if on { None } else { Some(false) };
+        f.save(&root)
+    }
+
     /// Servers of the session, in start order.
     pub fn list(&self, session_id: &str) -> Vec<PreviewServer> {
         lock(&self.servers)

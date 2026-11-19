@@ -67,6 +67,13 @@ export class DevServers extends Emitter {
     await this.client.preview.stop({ session_id: sessionId, ...(name ? { name } : {}) });
   }
 
+  /** The ⋮ menu's Auto-verify changes (the project's `autoVerify` in launch.json). */
+  async setAutoVerify(sessionId: string, enabled: boolean) {
+    await this.client.preview.auto_verify({ session_id: sessionId, enabled });
+    this.bySession.set(sessionId, { ...this.get(sessionId), auto_verify: enabled });
+    this.changed();
+  }
+
   logs(sessionId: string, name: string, lines = 200): Promise<string> {
     return this.client.preview.logs({ session_id: sessionId, name, lines }).then((r) => r.text);
   }

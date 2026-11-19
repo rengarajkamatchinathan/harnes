@@ -238,6 +238,7 @@ Notification: `config.changed {keys, scope}`.
 | `preview.list` | `{session_id}` → `{servers:[PreviewServer], configs:[name], auto_verify, config_error?}`: the session's dev servers and its `.genie/launch.json` entries (t47) |
 | `preview.start` / `preview.stop` | `{session_id, name}` → `PreviewServer`, answered once the port accepts connections (or after 60 s, still `starting`) / `{session_id, name?}` (no `name`: all). The user's own start never prompts (t47) |
 | `preview.logs` | `{session_id, name, lines?}` → `{text}`: the last lines of the server's stdout+stderr, ANSI stripped (t47) |
+| `preview.auto_verify` | `{session_id, enabled}`: the ⋮ menu's **Auto-verify changes**; writes the project's `autoVerify` to `.genie/launch.json` (t47) |
 
 `PreviewServer`: `{name, state: "starting"|"running"|"exited"|"failed", url?, port?, command?, pid?, exit_code?, error?}`. `preview.changed {session_id, servers}` goes out on the workspace feed after every change; a server that turns `running` in the session on screen opens in its Browser tab. Servers outlive turns and actor eviction; `preview.stop`, `preview_stop`, session delete and daemon exit kill the whole process tree (t47).
 

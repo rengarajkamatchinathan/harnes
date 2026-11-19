@@ -327,6 +327,17 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
               checked: app.ui.browserOpenLinks,
               onSelect: () => app.setUi({ browserOpenLinks: !app.ui.browserOpenLinks }),
             },
+            ...(app.ui.mode === "code"
+              ? [
+                  {
+                    id: "verify",
+                    label: t("preview.autoVerify"),
+                    hint: t("preview.autoVerifyHint"),
+                    checked: app.devServers.get(sessionId).auto_verify,
+                    onSelect: () => void app.devServers.setAutoVerify(sessionId, !app.devServers.get(sessionId).auto_verify).catch(fail),
+                  },
+                ]
+              : []),
             {
               id: "clear",
               label: t("browser.clearData"),

@@ -114,6 +114,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
   const emit = (m: HostMessage) => listener?.(m);
   const notify = (method: string, params: unknown) => emit({ kind: "batch", messages: [{ method, params }] });
   const devServers = new Map<string, { name: string; state: string; url: string; port: number; command: string; pid: number }[]>();
+  const noVerify = new Set<string>();
   const devList = (sid: unknown) => (devServers.get(String(sid)) ?? []).map((x) => ({ ...x }));
   const startDev = async (sid: string, name: string) => {
     const list = devList(sid).filter((x) => x.name !== name);
@@ -541,7 +542,12 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       return {};
     },
     // Dev servers (ticket 47): one `web` entry per Code session; starting takes ~0.6 s.
-    "preview.list": (p) => ({ servers: devList(p.session_id), configs: ["web"], auto_verify: true }),
+    "preview.list": (p) => ({ servers: devList(p.session_id), configs: ["web"], auto_verify: !noVerify.has(String(p.session_id)) }),
+    "preview.auto_verify": (p) => {
+      if (p.enabled) noVerify.delete(String(p.session_id));
+      else noVerify.add(String(p.session_id));
+      return {};
+    },
     "preview.start": (p) => startDev(String(p.session_id), String(p.name)),
     "preview.stop": (p) => {
       const sid = String(p.session_id);

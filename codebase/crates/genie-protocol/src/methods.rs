@@ -203,6 +203,7 @@ methods! {
     PreviewStart = "preview.start", Request, false, browser::PreviewStartParams => browser::PreviewServer;
     PreviewStop = "preview.stop", Request, false, browser::PreviewStopParams => Empty;
     PreviewLogs = "preview.logs", Request, false, browser::PreviewLogsParams => browser::PreviewLogsResult;
+    PreviewAutoVerify = "preview.auto_verify", Request, false, browser::PreviewAutoVerifyParams => Empty;
 
     // ---- terminal (§6.7)
     TerminalOpen = "terminal.open", Request, false, browser::TerminalOpenParams => browser::TerminalIdParams;

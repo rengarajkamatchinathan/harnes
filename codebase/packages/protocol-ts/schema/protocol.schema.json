@@ -4614,6 +4614,22 @@
         }
       ]
     },
+    "PreviewAutoVerifyParams": {
+      "description": "`preview.auto_verify`: the ⋮ menu's **Auto-verify changes** for the session's project\n(`autoVerify` in `.genie/launch.json`).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "enabled"
+      ],
+      "type": "object"
+    },
     "PreviewChanged": {
       "description": "`preview.changed`: a session's dev servers changed (ticket 47); the full list.",
       "properties": {

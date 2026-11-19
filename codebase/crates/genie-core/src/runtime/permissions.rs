@@ -414,8 +414,8 @@ pub fn action_for(req: &AuthzRequest, workspace: Option<&Path>) -> Action {
                 site: host_of(&resource.unwrap_or_default()),
                 action: match act {
                     "navigate" | "open" => BrowserAction::Navigate,
-                    "read" | "snapshot" | "screenshot" | "find" | "tabs" | "downloads" | "wait"
-                    | "scroll" | "" => BrowserAction::Read,
+                    "read" | "snapshot" | "screenshot" | "console" | "find" | "tabs"
+                    | "downloads" | "wait" | "scroll" | "" => BrowserAction::Read,
                     other => BrowserAction::Act(other.to_string()),
                 },
             }

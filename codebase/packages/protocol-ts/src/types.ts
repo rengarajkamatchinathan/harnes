@@ -1200,6 +1200,15 @@ export interface PolicyEffectiveResult {
 /** What the ask card shows for a permission ask. */
 export type Preview = { path: string; type: "diff"; unified: string } | ({ command: string; cwd?: string | null; type: "command" }) | { type: "url"; url: string } | { args: unknown; server: string; tool: string; type: "mcp_args" } | { text: string; type: "text" } | { type: "unknown" };
 
+/**
+ * `preview.auto_verify`: the ⋮ menu's **Auto-verify changes** for the session's project
+ * (`autoVerify` in `.genie/launch.json`).
+ */
+export interface PreviewAutoVerifyParams {
+  enabled: boolean;
+  session_id: string;
+}
+
 /** `preview.changed`: a session's dev servers changed (ticket 47); the full list. */
 export interface PreviewChanged {
   servers: PreviewServer[];

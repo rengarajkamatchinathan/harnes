@@ -376,6 +376,8 @@ const en = {
   "preview.none": "No dev servers yet",
   "preview.noneHint": "Ask Genie to start your app; it is saved to .genie/launch.json.",
   "preview.configError": "launch.json couldn't be read",
+  "preview.autoVerify": "Auto-verify changes",
+  "preview.autoVerifyHint": "After edits, Genie checks the running app before it finishes",
   "browser.clearData": "Clear browsing data",
   "browser.cleared": "Browsing data cleared",
   "browser.idleControlHint": "You can use the page directly while Genie is idle.",

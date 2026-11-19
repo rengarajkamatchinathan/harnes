@@ -54,7 +54,7 @@ Make Genie's Browser tab work like Claude Code Desktop's Browser pane. The featu
   - **Panel:** address bar with back, forward and reload; tab strip with `+` and `×`; direct use of the page while idle; ⋮ menu (Open links in built-in browser, Clear browsing data).
   - **App:** chat links open in the Browser tab (Cmd/Ctrl-click opens the system browser); Cmd/Ctrl+Shift+B toggles the tab.
   - **Tests:** `user_browsing_needs_no_prompts`, `address_bar_input`, and `real_chrome_user_browsing` (ignored; passes against local Chrome).
-- 2026-11-19: **Phase 2 done** on `fix/browser-panel` (not committed).
+- 2026-11-19: **Phase 2 done** on `fix/browser-panel` (committed, `50c15af`).
   - **Service** (`genie-tools/src/preview/`): `DevServers` reads and writes `.genie/launch.json` (Claude's fields; comments, trailing commas and unknown keys kept). Each server runs in its own `genie-process` kill-tree with `PORT` set, `autoPort`, `cwd` kept inside the project, and a 512 KiB output ring. It is ready when its port accepts connections, or, with no `port`, when the process tree starts listening (the ticket 43 probe). A server that exits before then fails with its last output. `url` alone attaches to a server that is already running.
   - **Agent tools** (Code only): `preview_start` asks like `shell` (`Bash(<command>)`, so the same rules match) and saves inline entries to `launch.json`; `preview_stop`; `preview_logs`. GPT tuning now points servers at `preview_start`.
   - **Daemon:** `preview.list/start/stop/logs`, and `preview.changed` on the workspace feed. Servers outlive turns and actor eviction; session delete and daemon exit kill them.
@@ -62,4 +62,12 @@ Make Genie's Browser tab work like Claude Code Desktop's Browser pane. The featu
   - **UI:** a server card under `preview_start` (live state, Open, Stop or Start); a **Dev servers** menu in the Browser tab bar (Open, Stop or Start per entry, Stop all); a server that comes up in the session on screen opens in its Browser tab. The mock scripts a `preview_start` turn ("start the dev server").
   - **Tests:** `genie-tools/tests/preview.rs` (6, real processes, need `python3`) and the `launch.json` parser unit tests.
   - **Known gaps:** the Dev servers menu is hidden while the "No browser found" state shows. `preview.start` from the menu waits up to 60 s.
-- Next: Phase 3 (auto-verify).
+- 2026-11-19: **Phase 3 done** on `fix/browser-panel` (not committed).
+  - **Console capture** (`genie-browser/src/console.rs`): each attached tab enables `Runtime` and `Log`. Console calls, uncaught exceptions and browser log entries are kept per tab: 300 entries, cleared when the main frame navigates, favicon 404s dropped. A new read tool, `browser_console {tab_id?, level?}`, returns them as untrusted page text, so there are now 19 browser tools.
+  - **Auto-verify** (`genie-core` turn loop): when a Code turn is about to end after a successful file edit with no page check since (screenshot, snapshot, console or read), and a session dev server is running with `autoVerify` on, the engine adds one hidden note (`hidden/auto_verify.md`) asking the agent to check the app. At most once per turn.
+  - **Off switch:** `"autoVerify": false` in `launch.json`, for the project or per server, or the ⋮ menu's **Auto-verify changes** (`preview.auto_verify`).
+  - **Tests:**
+    - `genie-core/tests/auto_verify.rs` (4).
+    - Console parser unit tests.
+    - `real_chrome_console` (ignored): passes against local Chrome, along with the other three real-Chrome tests when run with `--test-threads=1`. In parallel, `real_chrome_user_browsing` can fail because several Chromes start at once.
+- Next: Phase 4 (element select, local file previews, minimize, keep cookies, outside-link prompt, policy keys).

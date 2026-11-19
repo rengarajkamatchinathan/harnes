@@ -986,6 +986,18 @@
     },
     {
       "direction": "request",
+      "ident": "PreviewAutoVerify",
+      "name": "preview.auto_verify",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewAutoVerifyParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "TerminalOpen",
       "name": "terminal.open",
       "needs_lease": false,

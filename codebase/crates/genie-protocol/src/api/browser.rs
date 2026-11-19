@@ -348,3 +348,11 @@ pub struct PreviewLogsParams {
 pub struct PreviewLogsResult {
     pub text: String,
 }
+
+/// `preview.auto_verify`: the ⋮ menu's **Auto-verify changes** for the session's project
+/// (`autoVerify` in `.genie/launch.json`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PreviewAutoVerifyParams {
+    pub session_id: String,
+    pub enabled: bool,
+}

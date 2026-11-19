@@ -84,6 +84,7 @@ export interface Requests {
   "preview.start": { params: T.PreviewStartParams; result: T.PreviewServer };
   "preview.stop": { params: T.PreviewStopParams; result: T.Empty };
   "preview.logs": { params: T.PreviewLogsParams; result: T.PreviewLogsResult };
+  "preview.auto_verify": { params: T.PreviewAutoVerifyParams; result: T.Empty };
   "terminal.open": { params: T.TerminalOpenParams; result: T.TerminalIdParams };
   "terminal.attach": { params: T.TerminalAttachParams; result: T.TerminalAttachResult };
   "terminal.input": { params: T.TerminalInputParams; result: T.Empty };
@@ -254,6 +255,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "preview.start", direction: "request", needsLease: false },
   { name: "preview.stop", direction: "request", needsLease: false },
   { name: "preview.logs", direction: "request", needsLease: false },
+  { name: "preview.auto_verify", direction: "request", needsLease: false },
   { name: "terminal.open", direction: "request", needsLease: false },
   { name: "terminal.attach", direction: "request", needsLease: false },
   { name: "terminal.input", direction: "request", needsLease: false },
@@ -483,6 +485,7 @@ export class GenieClient {
     effective: (params: T.Empty = {}): Promise<T.PolicyEffectiveResult> => this.t.request("policy.effective", params) as Promise<T.PolicyEffectiveResult>,
   };
   readonly preview = {
+    auto_verify: (params: T.PreviewAutoVerifyParams): Promise<T.Empty> => this.t.request("preview.auto_verify", params) as Promise<T.Empty>,
     list: (params: T.SessionIdParams): Promise<T.PreviewListResult> => this.t.request("preview.list", params) as Promise<T.PreviewListResult>,
     logs: (params: T.PreviewLogsParams): Promise<T.PreviewLogsResult> => this.t.request("preview.logs", params) as Promise<T.PreviewLogsResult>,
     start: (params: T.PreviewStartParams): Promise<T.PreviewServer> => this.t.request("preview.start", params) as Promise<T.PreviewServer>,

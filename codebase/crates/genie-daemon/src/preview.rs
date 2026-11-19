@@ -96,6 +96,12 @@ pub(crate) fn dispatch(
                 .ok_or_else(|| RpcError::new(ErrorKind::NotFound, "dev server not found"))?;
             to_result(&PreviewLogsResult { text })
         }),
+        n if n == m::PreviewAutoVerify::NAME => params::<m::PreviewAutoVerify>(r).and_then(|p| {
+            known_session(state, &p.session_id)?;
+            dev.set_auto_verify(&p.session_id, p.enabled)
+                .map_err(state_err)?;
+            to_result(&Empty {})
+        }),
         n if n == m::PreviewStart::NAME => {
             // Waits for the port: answered from a task.
             let p = match params::<m::PreviewStart>(r)

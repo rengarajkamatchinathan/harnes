@@ -189,7 +189,7 @@ async fn eventually(mut f: impl FnMut() -> bool) {
 async fn tool_set() {
     let r = rig();
     let names: Vec<&str> = r.tools.iter().map(|t| t.name()).collect();
-    assert_eq!(names.len(), 18);
+    assert_eq!(names.len(), 19);
     for n in [
         "browser_open",
         "browser_navigate",
@@ -1626,6 +1626,111 @@ async fn real_chrome_user_browsing() {
         .navigate(&nav(None, Some(NavAction::Back)))
         .await
         .unwrap();
+    browser.end_session(SESSION).await;
+    genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
+}
+
+/// Ticket 47 phase 3: `browser_console` against a real browser — console calls, an uncaught
+/// exception and a failed resource load; the log starts over on reload.
+#[tokio::test]
+#[ignore = "needs a local Chrome, Edge or Chromium"]
+async fn real_chrome_console() {
+    use genie_browser::{SystemChromeBackend, SystemChromeConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    if genie_browser::discover::find_installed().await.is_empty() {
+        eprintln!("no browser installed; skipping");
+        return;
+    }
+    let tasks = TaskTracker::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tasks.spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut buf = [0u8; 2048];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let (status, body) = if req.starts_with("GET / ") {
+                (
+                    "200 OK",
+                    "<html><head><title>Console</title></head><body><h1>App</h1>\
+                     <img src='/missing.png'>\
+                     <script>console.log('hello', 42); console.warn('careful');\
+                     console.error('boom');\
+                     setTimeout(() => { throw new TypeError('kaboom'); }, 0);</script></body></html>",
+                )
+            } else {
+                ("404 Not Found", "nope")
+            };
+            let resp = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = s.write_all(resp.as_bytes()).await;
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(SystemChromeBackend::new(
+        SystemChromeConfig::new(dir.path()),
+        tasks.clone(),
+    ));
+    let browser = Browser::new(
+        backend.clone(),
+        Arc::new(RecordingHost::default()),
+        Arc::new(SitePolicy::new()),
+        BrowserConfig::default(),
+        tasks.clone(),
+    );
+    let ts = tools(&browser);
+    let gate = Arc::new(Gate::default());
+    let events = Arc::new(Events::default());
+    let ctx = |tool: &str| ToolCtx {
+        env: Arc::new(ToolEnv::new(SESSION, SessionKind::Code)),
+        turn_id: "t".into(),
+        call_id: "c".into(),
+        tool_name: tool.into(),
+        cancel: CancellationToken::new(),
+        detach: CancellationToken::new(),
+        permissions: gate.clone(),
+        events: events.clone(),
+    };
+    let call = |name: &'static str, input: Value| {
+        let t = ts.iter().find(|t| t.name() == name).unwrap().clone();
+        let c = ctx(name);
+        async move { t.execute(input, c).await.unwrap().to_text() }
+    };
+    // `localhost` needs no site approval (the gate would record an ask).
+    let out = call(
+        "browser_navigate",
+        json!({"url": format!("http://localhost:{port}/")}),
+    )
+    .await;
+    assert!(out.contains("status: ok"), "{out}");
+    assert!(
+        gate.asked.lock().unwrap().is_empty(),
+        "localhost asked for approval"
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let out = call("browser_console", json!({})).await;
+    println!("{out}");
+    assert!(out.contains("[error] boom"), "{out}");
+    assert!(out.contains("[warning] careful"), "{out}");
+    assert!(out.contains("Uncaught TypeError: kaboom"), "{out}");
+    assert!(out.contains("missing.png"), "{out}");
+    assert!(!out.contains("favicon.ico"), "{out}");
+    assert!(
+        !out.contains("hello 42"),
+        "log level hidden by default: {out}"
+    );
+    let all = call("browser_console", json!({"level": "all"})).await;
+    assert!(all.contains("[log] hello 42"), "{all}");
+
+    // A reload starts the log over (the page logs the same things again, once).
+    call("browser_navigate", json!({"action": "reload"})).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let out = call("browser_console", json!({"level": "error"})).await;
+    assert_eq!(out.matches("[error] boom").count(), 1, "{out}");
     browser.end_session(SESSION).await;
     genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
 }

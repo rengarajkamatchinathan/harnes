@@ -112,7 +112,7 @@ Implements the D29 scope warning ("the spec phase must estimate effort and confi
 |---|---|---|---|---|
 | 4.01 | Browser backend: CDP client over `--remote-debugging-pipe`, Chrome/Edge/Chromium detection on 3 OSes, Genie profile, `BrowserBackend` | 3–4 | 2.01 | M |
 | 4.02 | Snapshot serializer: AX tree + DOMSnapshot, refs, hidden-text stripping, diffs, `browser_read`, screenshots | 3–4 | 4.01 | M |
-| 4.03 | 18 `browser_*` tools, site permissions, sensitive-action gates, URL exfiltration guard, **taint**, step caps, audit log | 4–5 | 4.02, 2.02 | H |
+| 4.03 | 19 `browser_*` tools, site permissions, sensitive-action gates, URL exfiltration guard, **taint**, step caps, audit log | 4–5 | 4.02, 2.02 | H |
 | 4.04 | **Browser tab (D56):** screencast canvas, take-over input forwarding, IME/clipboard/file chooser, tab strip, banner, confirmation cards, pop-out, Settings → browser | 4–6 | 4.01 | H |
 | 4.05 | Injection red-team suite + cross-OS browser QA | 2–3 | 4.03 | M |
 | | *Browser subtotal: 16–22 ew = research B-only 14–18 + ~2–4 for D56 in-window screencast* | | | |
