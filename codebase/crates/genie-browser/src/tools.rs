@@ -1252,8 +1252,9 @@ async fn downloads(op: &mut Op<'_>, _i: DownloadsInput) -> R {
 async fn handoff(op: &mut Op<'_>, i: HandoffInput) -> R {
     let sid = op.ctx.env.session_id.clone();
     op.s.set_control(crate::host::Control::User);
+    // One banner event carrying the reason ("handoff" is a user-in-control state); a
+    // following `control_changed(User)` would replace it and lose the reason.
     op.b.host.handoff(&sid, &i.reason);
-    op.b.host.control_changed(&sid, crate::host::Control::User);
     Ok(Outcome::status(
         Status::UserInControl,
         format!(

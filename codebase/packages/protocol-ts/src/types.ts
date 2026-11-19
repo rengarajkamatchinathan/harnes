@@ -212,14 +212,28 @@ export interface BrowserControl {
   reason?: string | null;
 }
 
+/**
+ * A file picker the page opened during take-over (SA-24). The client shows a native file
+ * dialog and answers with `browser.file_chooser.answer`.
+ */
+export interface BrowserFileChooser {
+  chooser_id: string;
+  /** The input accepts several files. */
+  multiple: boolean;
+  tab_id: string;
+}
+
 export interface BrowserFrame {
+  /** JPEG pixels per CSS pixel. */
   device_scale: number;
   frame_seq: number;
+  /** Viewport height in CSS pixels. */
   h: number;
   jpeg_b64: string;
   stream_id: string;
   tab_id: string;
   ts: string;
+  /** Viewport width in CSS pixels (`browser.input` coordinates are in `0..w`). */
   w: number;
 }
 
@@ -235,6 +249,12 @@ export interface BrowserStatus {
   installed: InstalledBrowser[];
   profile_path: string;
   running: boolean;
+}
+
+/** `browser.copy`: one tab of a session. */
+export interface BrowserTabParams {
+  session_id: string;
+  tab_id: string;
 }
 
 export interface BudgetSetParams {
@@ -429,6 +449,11 @@ export interface ConnectedClient {
   connection_id: number;
   /** Served in degraded mode because the daemon is older and busy (01 §4.2). */
   degraded?: boolean;
+}
+
+export interface CopyResult {
+  /** The page's selected text (empty when nothing is selected). */
+  text: string;
 }
 
 /** Cost in US dollars, as estimated from the catalog prices (D27). */
@@ -652,6 +677,13 @@ export interface FileChange {
   /** `added` | `modified` | `deleted`. */
   change: string;
   path: string;
+}
+
+/** `browser.file_chooser.answer`: the files the user picked; empty cancels. */
+export interface FileChooserAnswerParams {
+  chooser_id: string;
+  files?: string[];
+  session_id: string;
 }
 
 export interface FileIdResult {
@@ -1376,7 +1408,7 @@ export interface SessionError {
 }
 
 /** 02 §4. Discriminated by `type`. */
-export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "browser.control" } & BrowserControl) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
+export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "browser.control" } & BrowserControl) | ({ type: "browser.file_chooser" } & BrowserFileChooser) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
 
 /** 02 §3.3. */
 export interface SessionEventEnvelope {

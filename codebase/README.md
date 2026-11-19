@@ -89,16 +89,51 @@ cargo xtask dist --channel beta            # release archive + SBOM + notices + 
 Release, feeds and operations: see [release/README.md](release/README.md) and
 [feeds/README.md](feeds/README.md).
 
-Desktop (pnpm workspace in this folder: `apps/desktop`, `packages/*`):
+Desktop (Bun workspace in this folder: `apps/desktop`, `packages/*`). Needs
+[Bun](https://bun.sh) and Rust ([rustup](https://rustup.rs)). Run from `codebase/`:
 
 ```sh
-pnpm install
-pnpm --filter @genie/artifact-runtime build   # React artifact runtime → packages/artifact-runtime/dist
-pnpm -r typecheck                          # tsc --noEmit for apps/desktop and packages/*
-pnpm -r test                               # vitest (the artifact sandbox test needs Chrome/Edge + the runtime build)
-cd apps/desktop && pnpm dev                # UI in a browser against the in-memory mock engine
-cd apps/desktop && pnpm tauri dev          # the real app (GENIE_DAEMON_PATH=<genie binary> if not on PATH)
+bun i                    # install JS dependencies
+bun start                # the real app (same as `bun tauri dev` / `bun dev`)
 ```
+
+`bun start` builds what the app needs before launching, skipping anything already up to date:
+the React artifact runtime (`packages/artifact-runtime/dist`) and the `genie` daemon binary
+(`cargo build -p genie-cli`, found next to `target/debug/genie-desktop`; set
+`GENIE_DAEMON_PATH=<genie binary>` to use another one). The first run compiles the Rust
+workspace and takes a while.
+
+```sh
+bun run web              # UI only, in a browser against the in-memory mock engine (no Rust)
+bun tauri build          # release installers, with the genie daemon bundled (see below)
+bun run prep             # just build the artifact runtime + daemon
+bun run build:runtime    # just rebuild the React artifact runtime
+bun run typecheck        # tsc --noEmit for apps/desktop and packages/*
+bun run test             # vitest (the artifact sandbox test needs Chrome/Edge + the runtime build)
+```
+
+### Installers (`bun tauri build`)
+
+`bun tauri build` builds the `genie` daemon in release mode, copies it to
+`apps/desktop/src-tauri/binaries/genie-<target triple>` and bundles it as a Tauri sidecar
+(`tauri.sidecar.conf.json`), so it installs next to `genie-desktop` where the app looks for it.
+Output lands in `target/release/bundle/`. Build on the OS you are packaging for.
+
+**Windows (.exe):** on a Windows 10/11 x64 machine, install
+[Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with
+"Desktop development with C++", [Rust](https://rustup.rs) (MSVC toolchain, the default) and
+[Bun](https://bun.sh) (`powershell -c "irm bun.sh/install.ps1 | iex"`). WebView2 ships with
+Windows 10/11. Then, from the repo root or `codebase/`:
+
+```powershell
+bun i
+bun tauri build --bundles nsis   # → target\release\bundle\nsis\Genie_0.1.0_x64-setup.exe
+bun tauri build --bundles msi    # → target\release\bundle\msi\Genie_0.1.0_x64_en-US.msi
+```
+
+The setup .exe is unsigned, so SmartScreen warns on first run ("More info" → "Run anyway").
+Signed release builds go through `cargo xtask dist --desktop` and `cargo xtask sign windows`
+([release/README.md](release/README.md)).
 
 On Linux the webview needs the WebKitGTK 4.1 development packages, so `genie-desktop` only
 compiles its Tauri shell with `--features linux-webview`; without it the crate builds the relay

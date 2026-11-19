@@ -463,7 +463,10 @@ code { font-size: 0.92em; }
 .browser { display: flex; flex-direction: column; height: 100%; }
 .browser__bar { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; }
 .browser__tabs { display: flex; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); }
-.browser__canvas { width: 100%; height: auto; background: var(--bg-subtle); outline: none; }
+.browser__view { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.browser__canvas { display: block; width: 100%; height: auto; background: var(--bg-subtle); outline: none; }
+.browser__keys { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; padding: 0; border: 0; resize: none; pointer-events: none; }
+.browser__hint { margin: 0; padding: var(--space-1) var(--space-2); font-size: var(--text-xs); color: var(--text-muted); border-top: 1px solid var(--border-subtle); }
 .browser__canvas.is-controlled { outline: 2px solid var(--warning); cursor: default; }
 .browser__steps { padding: var(--space-2); font-size: var(--text-xs); }
 .file-diff summary { cursor: pointer; display: flex; align-items: center; gap: var(--space-2); }

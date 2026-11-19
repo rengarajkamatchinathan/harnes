@@ -1,5 +1,5 @@
 // In-memory engine behind the Platform adapter, for tests and for running the UI in a
-// plain browser (`pnpm dev` without Tauri). It speaks the same protocol shapes as the
+// plain browser (`bun run web` without Tauri). It speaks the same protocol shapes as the
 // daemon for the methods the UI uses; anything else fails with `method_not_found`, the
 // same way an unserved method fails on the real daemon.
 import type {
@@ -22,6 +22,7 @@ export interface MockOptions {
   reply?: (prompt: string) => string;
   /** What the native pickers return (default: a folder / a save path). */
   pickFolder?: string | null;
+  pickFiles?: string[] | null;
   /** Replay ring size of mock terminals (bytes); default 64 KiB. */
   terminalRing?: number;
 }
@@ -599,6 +600,9 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     },
     async pickSavePath(name) {
       return `/tmp/${name}`;
+    },
+    async pickFiles() {
+      return opts.pickFiles === undefined ? ["/tmp/mock-file.txt"] : opts.pickFiles;
     },
     async notify(title, body) {
       notifications.push({ title, body });

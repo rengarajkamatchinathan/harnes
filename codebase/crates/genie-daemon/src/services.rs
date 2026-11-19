@@ -462,6 +462,26 @@ impl Services {
                             }
                             empty()
                         }
+                        n if n == m::BrowserPopout::NAME => {
+                            b.popout(&params::<m::BrowserPopout>(&r)?.session_id)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserCopy::NAME => {
+                            let p = params::<m::BrowserCopy>(&r)?;
+                            let text = b
+                                .copy_selection(&p.session_id, &p.tab_id)
+                                .await
+                                .map_err(berr)?;
+                            to_result(&genie_protocol::api::browser::CopyResult { text })
+                        }
+                        n if n == m::BrowserFileChooserAnswer::NAME => {
+                            b.file_chooser_answer(&params::<m::BrowserFileChooserAnswer>(&r)?)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
                         n if n == m::BrowserTabs::NAME => {
                             to_result(&b.tabs(&params::<m::BrowserTabs>(&r)?.session_id).await)
                         }

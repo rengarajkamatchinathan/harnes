@@ -10,7 +10,7 @@
     ".": "./src/compile.ts"
   },
   "scripts": {
-    "build": "node build.mjs",
+    "build": "bun build.mjs",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run"
   },

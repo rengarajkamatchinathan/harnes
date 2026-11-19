@@ -725,9 +725,31 @@
       ],
       "type": "object"
     },
+    "BrowserFileChooser": {
+      "description": "A file picker the page opened during take-over (SA-24). The client shows a native file\ndialog and answers with `browser.file_chooser.answer`.",
+      "properties": {
+        "chooser_id": {
+          "type": "string"
+        },
+        "multiple": {
+          "description": "The input accepts several files.",
+          "type": "boolean"
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "chooser_id",
+        "tab_id",
+        "multiple"
+      ],
+      "type": "object"
+    },
     "BrowserFrame": {
       "properties": {
         "device_scale": {
+          "description": "JPEG pixels per CSS pixel.",
           "format": "double",
           "type": "number"
         },
@@ -737,6 +759,7 @@
           "type": "integer"
         },
         "h": {
+          "description": "Viewport height in CSS pixels.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -754,6 +777,7 @@
           "type": "string"
         },
         "w": {
+          "description": "Viewport width in CSS pixels (`browser.input` coordinates are in `0..w`).",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -818,6 +842,22 @@
         "installed",
         "running",
         "profile_path"
+      ],
+      "type": "object"
+    },
+    "BrowserTabParams": {
+      "description": "`browser.copy`: one tab of a session.",
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id"
       ],
       "type": "object"
     },
@@ -1471,6 +1511,18 @@
         "client_kind",
         "client_version",
         "client_instance_id"
+      ],
+      "type": "object"
+    },
+    "CopyResult": {
+      "properties": {
+        "text": {
+          "description": "The page's selected text (empty when nothing is selected).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
       ],
       "type": "object"
     },
@@ -2232,6 +2284,29 @@
       ],
       "type": "object"
     },
+    "FileChooserAnswerParams": {
+      "description": "`browser.file_chooser.answer`: the files the user picked; empty cancels.",
+      "properties": {
+        "chooser_id": {
+          "type": "string"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "chooser_id"
+      ],
+      "type": "object"
+    },
     "FileIdResult": {
       "properties": {
         "file_id": {
@@ -2725,10 +2800,12 @@
               "type": "string"
             },
             "x": {
+              "description": "CSS pixels of the viewport (`0..BrowserFrame.w`).",
               "format": "double",
               "type": "number"
             },
             "y": {
+              "description": "CSS pixels of the viewport (`0..BrowserFrame.h`).",
               "format": "double",
               "type": "number"
             }
@@ -5686,6 +5763,20 @@
           "properties": {
             "type": {
               "const": "browser.control",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/BrowserFileChooser",
+          "description": "A page opened a file picker while the user is in control (SA-24), ephemeral.",
+          "properties": {
+            "type": {
+              "const": "browser.file_chooser",
               "type": "string"
             }
           },

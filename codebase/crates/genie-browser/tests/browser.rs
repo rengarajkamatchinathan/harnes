@@ -708,6 +708,256 @@ async fn screencast_flow_control_and_input() {
     assert_eq!(r.fake.calls_to("Page.stopScreencast").len(), 1);
 }
 
+fn cast_params(tab_id: Option<&str>) -> ScreencastStartParams {
+    ScreencastStartParams {
+        session_id: SESSION.into(),
+        tab_id: tab_id.map(String::from),
+        max_width: 1280,
+        max_height: 800,
+        quality: 60,
+    }
+}
+
+fn cast_frame(cdp_session: &str, n: i64) -> Value {
+    json!({"method": "Page.screencastFrame", "sessionId": cdp_session, "params": {
+        "data": "/9j/4AAQ", "sessionId": n,
+        "metadata": {"deviceWidth": 1280, "deviceHeight": 800, "pageScaleFactor": 1, "offsetTop": 0, "scrollOffsetX": 0, "scrollOffsetY": 0, "timestamp": 1795000000.0}
+    }})
+}
+
+/// The Browser tab opens before the agent browses (the panel's normal case): the stream
+/// waits without launching the browser, attaches to the first tab, follows a new active
+/// tab, and falls back when that tab closes.
+#[tokio::test]
+async fn screencast_waits_for_a_tab_and_follows_the_active_tab() {
+    let r = rig();
+    r.allow_site("shop.example");
+    let log = Arc::new(FrameLog::default());
+    let sc = r
+        .browser
+        .screencast_start(&cast_params(None), log.clone())
+        .await
+        .unwrap();
+    assert!(r.fake.calls_to("Page.startScreencast").is_empty());
+    assert!(
+        r.fake.calls().is_empty(),
+        "no browser launch for an idle panel"
+    );
+    // Acks of a waiting stream are fine.
+    r.browser
+        .screencast_ack(&ScreencastAckParams {
+            stream_id: sc.stream_id.clone(),
+            frame_seq: 0,
+        })
+        .unwrap();
+
+    // The agent opens a tab: the stream attaches to it.
+    r.call("browser_open", json!({})).await.unwrap();
+    eventually(|| r.fake.calls_to("Page.startScreencast").len() == 1).await;
+    assert_eq!(
+        r.fake.calls_to("Page.startScreencast")[0]
+            .session_id
+            .as_deref(),
+        Some("S1")
+    );
+    r.fake.emit(cast_frame("S1", 1));
+    eventually(|| log.0.lock().unwrap().len() == 1).await;
+    assert_eq!(log.0.lock().unwrap()[0].tab_id, "t1");
+    r.browser
+        .screencast_ack(&ScreencastAckParams {
+            stream_id: sc.stream_id.clone(),
+            frame_seq: 1,
+        })
+        .unwrap();
+
+    // A new tab becomes active: the stream moves there.
+    r.fake.reset("Target.createTarget");
+    r.fake.ok("Target.createTarget", json!({"targetId": "T2"}));
+    r.fake.reset("Target.attachToTarget");
+    r.fake
+        .ok("Target.attachToTarget", json!({"sessionId": "S2"}));
+    let out = r
+        .call("browser_tabs", json!({"action": "new"}))
+        .await
+        .unwrap();
+    assert!(out.contains("t2"), "{out}");
+    eventually(|| {
+        r.fake
+            .calls_to("Page.startScreencast")
+            .iter()
+            .any(|c| c.session_id.as_deref() == Some("S2"))
+    })
+    .await;
+    eventually(|| {
+        r.fake
+            .calls_to("Page.stopScreencast")
+            .iter()
+            .any(|c| c.session_id.as_deref() == Some("S1"))
+    })
+    .await;
+    r.fake.emit(cast_frame("S2", 1));
+    eventually(|| log.0.lock().unwrap().iter().any(|f| f.tab_id == "t2")).await;
+
+    // Closing it falls back to the first tab.
+    r.call("browser_tabs", json!({"action": "close", "tab_id": "t2"}))
+        .await
+        .unwrap();
+    eventually(|| {
+        r.fake
+            .calls_to("Page.startScreencast")
+            .iter()
+            .filter(|c| c.session_id.as_deref() == Some("S1"))
+            .count()
+            == 2
+    })
+    .await;
+
+    r.browser
+        .screencast_stop(&StreamIdParams {
+            stream_id: sc.stream_id,
+        })
+        .await;
+    assert!(r.browser.streams_of(SESSION).is_empty());
+}
+
+/// A stream that joins a running cast gets the newest frame at once (a static page sends
+/// no new frames), and Stop leaves the live view running.
+#[tokio::test]
+async fn late_stream_gets_latest_frame_and_stop_keeps_the_view() {
+    let r = rig();
+    r.allow_site("shop.example");
+    r.call("browser_open", json!({})).await.unwrap();
+    let a = Arc::new(FrameLog::default());
+    r.browser
+        .screencast_start(&cast_params(None), a.clone())
+        .await
+        .unwrap();
+    r.fake.emit(cast_frame("S1", 1));
+    eventually(|| a.0.lock().unwrap().len() == 1).await;
+    let b = Arc::new(FrameLog::default());
+    r.browser
+        .screencast_start(&cast_params(Some("t1")), b.clone())
+        .await
+        .unwrap();
+    assert_eq!(b.0.lock().unwrap().len(), 1);
+    assert_eq!(r.fake.calls_to("Page.startScreencast").len(), 1);
+
+    r.browser.stop(SESSION).await;
+    assert_eq!(r.browser.streams_of(SESSION).len(), 2);
+    assert!(r.fake.calls_to("Page.stopScreencast").is_empty());
+    // Stop doesn't hand the browser to the user: the agent can browse in the next turn.
+    let out = r.call("browser_snapshot", json!({})).await.unwrap();
+    assert!(!out.starts_with("status: user_in_control"), "{out}");
+}
+
+/// The banner learns "agent" from the first action, and a handoff keeps its reason.
+#[tokio::test]
+async fn banner_reports_agent_and_handoff() {
+    use genie_browser::Control;
+    let r = rig();
+    r.allow_site("shop.example");
+    r.call("browser_open", json!({})).await.unwrap();
+    r.call("browser_snapshot", json!({})).await.unwrap();
+    assert_eq!(r.host.controls.lock().unwrap().as_slice(), [Control::Agent]);
+    r.call("browser_handoff", json!({"reason": "solve the CAPTCHA"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        r.host.handoffs.lock().unwrap().as_slice(),
+        ["solve the CAPTCHA"]
+    );
+    // No `user` event after the handoff would overwrite its reason.
+    assert_eq!(r.host.controls.lock().unwrap().as_slice(), [Control::Agent]);
+    r.browser.handback(SESSION);
+    assert_eq!(
+        r.host.controls.lock().unwrap().as_slice(),
+        [Control::Agent, Control::Agent]
+    );
+}
+
+/// Take-over extras (SA-24): copy only while the user is in control; file pickers are
+/// intercepted on every tab and only the user's are sent to the client and answered.
+#[tokio::test]
+async fn copy_and_file_chooser_during_takeover() {
+    use genie_protocol::api::browser::FileChooserAnswerParams;
+    let r = rig();
+    r.allow_site("shop.example");
+    r.call("browser_open", json!({})).await.unwrap();
+    assert!(
+        r.fake
+            .calls_to("Page.setInterceptFileChooserDialog")
+            .iter()
+            .any(|c| c.session_id.as_deref() == Some("S1") && c.params["enabled"] == true)
+    );
+
+    // Copy.
+    assert!(r.browser.copy_selection(SESSION, "t1").await.is_err());
+    r.browser.takeover(SESSION);
+    r.fake.reset("Runtime.evaluate");
+    r.fake.ok(
+        "Runtime.evaluate",
+        json!({"result": {"type": "string", "value": "picked text"}}),
+    );
+    assert_eq!(
+        r.browser.copy_selection(SESSION, "t1").await.unwrap(),
+        "picked text"
+    );
+
+    // A picker opened while the agent drives is ignored.
+    let opened = |mode: &str| {
+        json!({"method": "Page.fileChooserOpened", "sessionId": "S1",
+               "params": {"frameId": "T1", "mode": mode, "backendNodeId": 42}})
+    };
+    r.browser.handback(SESSION);
+    r.fake.emit(opened("selectSingle"));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(r.host.choosers.lock().unwrap().is_empty());
+
+    // The user's picker goes to the client and is answered with real files only.
+    r.browser.takeover(SESSION);
+    r.fake.emit(opened("selectMultiple"));
+    eventually(|| r.host.choosers.lock().unwrap().len() == 1).await;
+    let ch = r.host.choosers.lock().unwrap()[0].clone();
+    assert!(ch.multiple);
+    assert_eq!(ch.tab_id, "t1");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("cv.pdf");
+    std::fs::write(&file, b"%PDF").unwrap();
+    let answer = |files: Vec<String>| FileChooserAnswerParams {
+        session_id: SESSION.into(),
+        chooser_id: ch.chooser_id.clone(),
+        files,
+    };
+    r.browser
+        .file_chooser_answer(&answer(vec![file.to_string_lossy().into_owned()]))
+        .await
+        .unwrap();
+    let set = r.fake.calls_to("DOM.setFileInputFiles");
+    assert_eq!(set.len(), 1);
+    assert_eq!(set[0].session_id.as_deref(), Some("S1"));
+    assert_eq!(set[0].params["backendNodeId"], 42);
+    // Answered once; unknown ids and non-files are refused.
+    assert!(
+        r.browser
+            .file_chooser_answer(&answer(vec![]))
+            .await
+            .is_err()
+    );
+    r.fake.emit(opened("selectSingle"));
+    eventually(|| r.host.choosers.lock().unwrap().len() == 2).await;
+    let ch2 = r.host.choosers.lock().unwrap()[1].clone();
+    let err = r
+        .browser
+        .file_chooser_answer(&FileChooserAnswerParams {
+            session_id: SESSION.into(),
+            chooser_id: ch2.chooser_id,
+            files: vec!["/definitely/not/here".into()],
+        })
+        .await;
+    assert!(err.is_err());
+    assert_eq!(r.fake.calls_to("DOM.setFileInputFiles").len(), 1);
+}
+
 /// Drives a real local Chrome/Edge/Chromium (`cargo test -p genie-browser -- --ignored`).
 #[tokio::test]
 #[ignore = "needs a local Chrome, Edge or Chromium"]
@@ -796,5 +1046,236 @@ async fn real_chrome_smoke() {
     let out = call("browser_click", json!({"ref": r_btn})).await;
     println!("{out}");
     assert!(out.contains("Hi Genie"), "{out}");
+    genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
+}
+
+/// The Browser panel against a real local Chrome/Edge/Chromium: a stream opened before the
+/// agent browses, take-over click + typing + Enter with the DOM event names the desktop
+/// sends, and Pop out (opens a real window for a moment). `-- --ignored`.
+#[tokio::test]
+#[ignore = "needs a local Chrome, Edge or Chromium; opens a window"]
+async fn real_chrome_panel_flow() {
+    use genie_browser::{SystemChromeBackend, SystemChromeConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    if genie_browser::discover::find_installed().await.is_empty() {
+        eprintln!("no browser installed; skipping");
+        return;
+    }
+    let tasks = TaskTracker::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tasks.spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut buf = [0u8; 2048];
+            let _ = s.read(&mut buf).await;
+            let body = "<html><head><title>Panel test</title></head><body style='margin:0'><h1>Hello</h1>\
+                <form onsubmit=\"event.preventDefault();document.querySelector('h1').textContent='Sent '+document.getElementById('n').value\">\
+                <input aria-label='Name' id='n' style='position:absolute;left:100px;top:100px;width:200px;height:30px'></form>\
+                <input type='file' id='f' style='position:absolute;left:100px;top:200px;width:200px;height:30px'></body></html>";
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = s.write_all(resp.as_bytes()).await;
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(SystemChromeBackend::new(
+        SystemChromeConfig::new(dir.path()),
+        tasks.clone(),
+    ));
+    let host = Arc::new(RecordingHost::default());
+    let browser = Browser::new(
+        backend.clone(),
+        host.clone(),
+        Arc::new(SitePolicy::new()),
+        BrowserConfig::default(),
+        tasks.clone(),
+    );
+    let ts = tools(&browser);
+    let gate = Arc::new(Gate::default());
+    let events = Arc::new(Events::default());
+    let call = |name: &'static str, input: Value| {
+        let t = ts.iter().find(|t| t.name() == name).unwrap().clone();
+        let c = ToolCtx {
+            env: Arc::new(ToolEnv::new(SESSION, SessionKind::Chat)),
+            turn_id: "t".into(),
+            call_id: "c".into(),
+            tool_name: name.into(),
+            cancel: CancellationToken::new(),
+            detach: CancellationToken::new(),
+            permissions: gate.clone(),
+            events: events.clone(),
+        };
+        async move { t.execute(input, c).await.unwrap().to_text() }
+    };
+    // Waits for a frame newer than `after`, acking as a client would.
+    let next_frame = |log: Arc<FrameLog>, after: usize| {
+        let b = browser.clone();
+        async move {
+            for _ in 0..300 {
+                let last = log.0.lock().unwrap().last().cloned();
+                if let Some(f) = &last {
+                    let _ = b.screencast_ack(&ScreencastAckParams {
+                        stream_id: f.stream_id.clone(),
+                        frame_seq: f.frame_seq,
+                    });
+                }
+                if log.0.lock().unwrap().len() > after {
+                    return log.0.lock().unwrap().last().cloned().unwrap();
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            panic!("no frame");
+        }
+    };
+
+    // 1. The panel opens first.
+    let log = Arc::new(FrameLog::default());
+    let sc = browser
+        .screencast_start(&cast_params(None), log.clone())
+        .await
+        .unwrap();
+    assert!(
+        !genie_browser::BrowserBackend::status(backend.as_ref())
+            .await
+            .running
+    );
+
+    // 2. The agent browses: frames arrive on the same stream.
+    let out = call(
+        "browser_navigate",
+        json!({"url": format!("http://127.0.0.1:{port}/")}),
+    )
+    .await;
+    assert!(out.contains("status: ok"), "{out}");
+    let f = next_frame(log.clone(), 0).await;
+    println!("frame {}x{} css, scale {}", f.w, f.h, f.device_scale);
+    assert_eq!(f.stream_id, sc.stream_id);
+    assert!(f.w > 0 && f.h > 0 && f.device_scale > 0.0);
+
+    // 3. Take over: click the field, type, press Enter (DOM names, as the desktop sends).
+    browser.takeover(SESSION);
+    let input = |event: InputEvent| {
+        let b = browser.clone();
+        async move {
+            b.input(&BrowserInputParams {
+                session_id: SESSION.into(),
+                tab_id: "t1".into(),
+                event,
+            })
+            .await
+            .unwrap();
+        }
+    };
+    for action in ["down", "up"] {
+        input(InputEvent::Mouse {
+            action: action.into(),
+            x: 150.0,
+            y: 115.0,
+            button: Some("left".into()),
+            click_count: 1,
+            modifiers: 0,
+        })
+        .await;
+    }
+    for (key, code, text) in [
+        ("G", "KeyG", Some("G")),
+        ("o", "KeyO", Some("o")),
+        ("Enter", "Enter", None),
+    ] {
+        for action in ["down", "up"] {
+            input(InputEvent::Key {
+                action: action.into(),
+                key: key.into(),
+                code: code.into(),
+                modifiers: 0,
+                text: if action == "down" {
+                    text.map(String::from)
+                } else {
+                    None
+                },
+            })
+            .await;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Select all (Cmd on macOS gets an explicit editing command) and copy.
+    let select_all = if cfg!(target_os = "macos") { 4 } else { 2 };
+    for action in ["down", "up"] {
+        input(InputEvent::Key {
+            action: action.into(),
+            key: "a".into(),
+            code: "KeyA".into(),
+            modifiers: select_all,
+            text: None,
+        })
+        .await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(browser.copy_selection(SESSION, "t1").await.unwrap(), "Go");
+
+    // A real file input: intercepted, sent to the client, filled with the user's file.
+    for action in ["down", "up"] {
+        input(InputEvent::Mouse {
+            action: action.into(),
+            x: 150.0,
+            y: 215.0,
+            button: Some("left".into()),
+            click_count: 1,
+            modifiers: 0,
+        })
+        .await;
+    }
+    eventually(|| !host.choosers.lock().unwrap().is_empty()).await;
+    let ch = host.choosers.lock().unwrap()[0].clone();
+    let upload = dir.path().join("hello.txt");
+    std::fs::write(&upload, b"hi").unwrap();
+    browser
+        .file_chooser_answer(&genie_protocol::api::browser::FileChooserAnswerParams {
+            session_id: SESSION.into(),
+            chooser_id: ch.chooser_id,
+            files: vec![upload.to_string_lossy().into_owned()],
+        })
+        .await
+        .unwrap();
+    let tab = browser.session(SESSION).tab("t1").unwrap();
+    let c = browser.client().await.unwrap();
+    let v = c
+        .call_in(
+            Some(&tab.cdp_session),
+            "Runtime.evaluate",
+            json!({"expression": "document.getElementById('f').files[0]?.name", "returnByValue": true}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(v["result"]["value"], "hello.txt");
+
+    browser.handback(SESSION);
+    let snap = call("browser_snapshot", json!({})).await;
+    println!("{snap}");
+    assert!(snap.contains("Sent Go"), "{snap}");
+
+    // 4. Pop out: a real window, same tab id and page, the stream keeps going.
+    let n = log.0.lock().unwrap().len();
+    browser.popout(SESSION).await.unwrap();
+    assert!(genie_browser::BrowserBackend::headed(backend.as_ref()));
+    let tabs = browser.tabs(SESSION).await.tabs;
+    assert_eq!(tabs.len(), 1, "{tabs:?}");
+    assert_eq!(tabs[0].tab_id, "t1");
+    assert!(tabs[0].url.contains(&port.to_string()), "{tabs:?}");
+    let f = next_frame(log.clone(), n).await;
+    assert_eq!(f.stream_id, sc.stream_id);
+    let out = call("browser_snapshot", json!({})).await;
+    assert!(out.contains("note: the user acted"), "{out}");
+    assert!(out.contains("heading \"Hello\""), "{out}");
+
+    browser
+        .screencast_stop(&StreamIdParams {
+            stream_id: sc.stream_id,
+        })
+        .await;
     genie_browser::BrowserBackend::shutdown(backend.as_ref()).await;
 }

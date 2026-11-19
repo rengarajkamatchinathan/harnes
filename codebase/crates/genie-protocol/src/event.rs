@@ -114,6 +114,9 @@ pub enum SessionEvent {
     /// Who drives the agent browser (05 §9 banner), ephemeral.
     #[serde(rename = "browser.control")]
     BrowserControl(BrowserControl),
+    /// A page opened a file picker while the user is in control (SA-24), ephemeral.
+    #[serde(rename = "browser.file_chooser")]
+    BrowserFileChooser(BrowserFileChooser),
     #[serde(rename = "terminal.output")]
     TerminalOutput(TerminalOutput),
 
@@ -133,6 +136,7 @@ impl SessionEvent {
                 | SessionEvent::Status(_)
                 | SessionEvent::BrowserFrame(_)
                 | SessionEvent::BrowserControl(_)
+                | SessionEvent::BrowserFileChooser(_)
                 | SessionEvent::TerminalOutput(_)
                 | SessionEvent::Unknown
         )
@@ -174,6 +178,7 @@ impl SessionEvent {
             SessionEvent::Status(_) => "status",
             SessionEvent::BrowserFrame(_) => "browser.frame",
             SessionEvent::BrowserControl(_) => "browser.control",
+            SessionEvent::BrowserFileChooser(_) => "browser.file_chooser",
             SessionEvent::TerminalOutput(_) => "terminal.output",
             SessionEvent::Unknown => "unknown",
         }
@@ -564,14 +569,27 @@ pub struct BrowserControl {
     pub reason: Option<String>,
 }
 
+/// A file picker the page opened during take-over (SA-24). The client shows a native file
+/// dialog and answers with `browser.file_chooser.answer`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BrowserFileChooser {
+    pub chooser_id: String,
+    pub tab_id: String,
+    /// The input accepts several files.
+    pub multiple: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BrowserFrame {
     pub stream_id: String,
     pub frame_seq: u64,
     pub tab_id: String,
     pub jpeg_b64: String,
+    /// Viewport width in CSS pixels (`browser.input` coordinates are in `0..w`).
     pub w: u32,
+    /// Viewport height in CSS pixels.
     pub h: u32,
+    /// JPEG pixels per CSS pixel.
     pub device_scale: f64,
     pub ts: String,
 }

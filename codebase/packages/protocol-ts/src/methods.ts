@@ -72,6 +72,8 @@ export interface Requests {
   "browser.tabs": { params: T.SessionIdParams; result: T.TabsResult };
   "browser.tab.activate": { params: T.TabActivateParams; result: T.Empty };
   "browser.popout": { params: T.SessionIdParams; result: T.Empty };
+  "browser.copy": { params: T.BrowserTabParams; result: T.CopyResult };
+  "browser.file_chooser.answer": { params: T.FileChooserAnswerParams; result: T.Empty };
   "browser.sites.list": { params: T.Empty; result: T.SitesListResult };
   "browser.sites.set": { params: T.SitePermission; result: T.Empty };
   "browser.data.clear": { params: T.DataClearParams; result: T.Empty };
@@ -232,6 +234,8 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "browser.tabs", direction: "request", needsLease: false },
   { name: "browser.tab.activate", direction: "request", needsLease: true },
   { name: "browser.popout", direction: "request", needsLease: false },
+  { name: "browser.copy", direction: "request", needsLease: true },
+  { name: "browser.file_chooser.answer", direction: "request", needsLease: true },
   { name: "browser.sites.list", direction: "request", needsLease: false },
   { name: "browser.sites.set", direction: "request", needsLease: false },
   { name: "browser.data.clear", direction: "request", needsLease: false },
@@ -335,8 +339,12 @@ export class GenieClient {
     },
   };
   readonly browser = {
+    copy: (params: T.BrowserTabParams): Promise<T.CopyResult> => this.t.request("browser.copy", params) as Promise<T.CopyResult>,
     data: {
       clear: (params: T.DataClearParams): Promise<T.Empty> => this.t.request("browser.data.clear", params) as Promise<T.Empty>,
+    },
+    file_chooser: {
+      answer: (params: T.FileChooserAnswerParams): Promise<T.Empty> => this.t.request("browser.file_chooser.answer", params) as Promise<T.Empty>,
     },
     handback: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.handback", params) as Promise<T.Empty>,
     input: (params: T.BrowserInputParams): Promise<T.Empty> => this.t.request("browser.input", params) as Promise<T.Empty>,

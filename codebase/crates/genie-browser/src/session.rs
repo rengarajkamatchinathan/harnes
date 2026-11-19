@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 
 use genie_protocol::api::browser::{
-    BrowserStatus, ClearWhat, SiteState, TabActivateParams, TabInfo, TabsResult,
+    BrowserStatus, ClearWhat, FileChooserAnswerParams, SiteState, TabActivateParams, TabInfo,
+    TabsResult,
 };
 use genie_protocol::ask::{BrowserConfirm, Preview, SaveSuggestion};
 use genie_protocol::common::{Mode, RuleScope, SessionKind};
@@ -179,6 +180,8 @@ struct Shared {
     active: Option<String>,
     control: Option<Control>,
     handed_back: bool,
+    /// Tabs were re-created on a new connection (pop out): drop per-tab refs.
+    stale: bool,
     next_tab: u32,
     client: Option<CdpClient>,
 }
@@ -239,6 +242,11 @@ impl BrowserSession {
         self.with(|s| s.control = Some(c));
     }
 
+    /// The connection this session's tabs live on.
+    pub(crate) fn client(&self) -> Option<CdpClient> {
+        self.with(|s| s.client.clone()).flatten()
+    }
+
     pub fn tabs(&self) -> Vec<TabHandle> {
         self.with(|s| s.tabs.clone()).unwrap_or_default()
     }
@@ -290,6 +298,50 @@ pub struct Browser {
     downloads: StdMutex<Vec<Download>>,
     download_seq: AtomicU64,
     pub(crate) casts: crate::screencast::Casts,
+    /// File pickers opened during take-over, waiting for `browser.file_chooser.answer`.
+    choosers: StdMutex<HashMap<String, Chooser>>,
+    chooser_seq: AtomicU64,
+}
+
+/// A pending file picker (SA-24).
+struct Chooser {
+    session_id: String,
+    cdp_session: String,
+    backend_node: i64,
+}
+
+/// The most text `browser.copy` returns.
+const MAX_COPY_CHARS: usize = 1_000_000;
+
+/// The selection, or the selected part of a focused text field (`getSelection` doesn't see
+/// inside inputs).
+const SELECTION_JS: &str = "(() => { const a = document.activeElement; \
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && typeof a.selectionStart === 'number') \
+      return a.value.slice(a.selectionStart, a.selectionEnd); \
+    return String(window.getSelection() || ''); })()";
+
+/// Attach to a page target (flat session), enable page events and intercept file pickers
+/// (they are answered by the user during take-over, never by the agent).
+pub(crate) async fn attach_page(c: &CdpClient, target: &str) -> Result<String, CdpError> {
+    let a = c
+        .call(
+            "Target.attachToTarget",
+            json!({"targetId": target, "flatten": true}),
+        )
+        .await?;
+    let sid = str_at(&a, &["sessionId"]).unwrap_or("").to_string();
+    c.call_in(Some(&sid), "Page.enable", json!({})).await?;
+    if let Err(e) = c
+        .call_in(
+            Some(&sid),
+            "Page.setInterceptFileChooserDialog",
+            json!({"enabled": true}),
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "file chooser interception unavailable");
+    }
+    Ok(sid)
 }
 
 impl Browser {
@@ -312,6 +364,8 @@ impl Browser {
             downloads: StdMutex::new(Vec::new()),
             download_seq: AtomicU64::new(0),
             casts: crate::screencast::Casts::default(),
+            choosers: StdMutex::new(HashMap::new()),
+            chooser_seq: AtomicU64::new(0),
         })
     }
 
@@ -331,6 +385,10 @@ impl Browser {
 
     fn existing(&self, session_id: &str) -> Option<Arc<BrowserSession>> {
         self.sessions.lock().ok()?.get(session_id).cloned()
+    }
+
+    pub(crate) fn existing_session(&self, session_id: &str) -> Option<Arc<BrowserSession>> {
+        self.existing(session_id)
     }
 
     /// `browser.status`.
@@ -373,6 +431,72 @@ impl Browser {
 
     fn on_download_event(&self, e: &CdpEvent) {
         match e.method.as_str() {
+            // A page opened a file picker. Only the user, while in control, answers it.
+            "Page.fileChooserOpened" => {
+                let Some(cdp) = e.session_id.as_deref() else {
+                    return;
+                };
+                let found = self.sessions.lock().ok().and_then(|g| {
+                    g.values().find_map(|s| {
+                        s.tabs()
+                            .into_iter()
+                            .find(|t| t.cdp_session == cdp)
+                            .map(|t| (s.clone(), t))
+                    })
+                });
+                let Some((s, tab)) = found else { return };
+                if s.control() != Control::User {
+                    tracing::debug!(tab = %tab.tab_id, "file chooser opened by the agent ignored");
+                    return;
+                }
+                let Some(node) = e.params["backendNodeId"].as_i64() else {
+                    return;
+                };
+                let id = format!("fc{}", self.chooser_seq.fetch_add(1, Ordering::SeqCst) + 1);
+                if let Ok(mut g) = self.choosers.lock() {
+                    g.insert(
+                        id.clone(),
+                        Chooser {
+                            session_id: s.id.clone(),
+                            cdp_session: cdp.to_string(),
+                            backend_node: node,
+                        },
+                    );
+                }
+                self.host.file_chooser(
+                    &s.id,
+                    genie_protocol::event::BrowserFileChooser {
+                        chooser_id: id,
+                        tab_id: tab.tab_id,
+                        multiple: e.params["mode"] == "selectMultiple",
+                    },
+                );
+            }
+            // A tab went away outside our tools (closed in the popped-out window, crashed).
+            "Target.detachedFromTarget" => {
+                let Some(cdp) = str_at(&e.params, &["sessionId"]) else {
+                    return;
+                };
+                let owner = self.sessions.lock().ok().and_then(|g| {
+                    g.values()
+                        .find(|s| s.tabs().iter().any(|t| t.cdp_session == cdp))
+                        .cloned()
+                });
+                if let Some(s) = owner {
+                    s.with(|g| {
+                        let gone = g
+                            .tabs
+                            .iter()
+                            .find(|t| t.cdp_session == cdp)
+                            .map(|t| t.tab_id.clone());
+                        g.tabs.retain(|t| t.cdp_session != cdp);
+                        if g.active.is_some() && g.active == gone {
+                            g.active = g.tabs.last().map(|t| t.tab_id.clone());
+                        }
+                    });
+                    self.spawn_sync(&s.id);
+                }
+            }
             "Browser.downloadWillBegin" => {
                 let frame = str_at(&e.params, &["frameId"]).unwrap_or("").to_string();
                 let session = self.sessions.lock().ok().and_then(|g| {
@@ -448,11 +572,23 @@ impl Browser {
         self.host.control_changed(session_id, Control::Agent);
     }
 
-    /// `browser.stop`: the agent stops driving (the daemon also interrupts the turn);
-    /// screencasts of the session end. Tabs stay open for the user.
+    /// `browser.stop`: the agent stops driving. The daemon interrupts the turn, which
+    /// cancels the running browser tool; tabs and the live view stay so the user can look
+    /// at the page or take over. A pending approval card is answered by the interrupt.
     pub async fn stop(&self, session_id: &str) {
-        self.takeover(session_id);
-        crate::screencast::stop_session(self, session_id).await;
+        let s = self.session(session_id);
+        let was_waiting = s
+            .with(|g| {
+                let w = g.control == Some(Control::WaitingForApproval);
+                if w {
+                    g.control = Some(Control::Agent);
+                }
+                w
+            })
+            .unwrap_or(false);
+        if was_waiting {
+            self.host.control_changed(session_id, Control::Agent);
+        }
     }
 
     /// Close the session's tabs (session deleted or evicted).
@@ -472,6 +608,166 @@ impl Browser {
                     .await;
             }
         }
+    }
+
+    /// `browser.copy` (SA-24): the selected text of a tab, only while the user is in
+    /// control (a user keypress in the take-over view asks for it).
+    pub async fn copy_selection(
+        &self,
+        session_id: &str,
+        tab_id: &str,
+    ) -> Result<String, BrowserError> {
+        let s = self.session(session_id);
+        if s.control() != Control::User {
+            return Err(BrowserError::Launch(
+                "copying from the page needs you in control (Take over)".into(),
+            ));
+        }
+        let (Some(t), Some(c)) = (s.tab(tab_id), s.client()) else {
+            return Err(BrowserError::Launch(format!("no tab {tab_id}")));
+        };
+        let r = c
+            .call_in(
+                Some(&t.cdp_session),
+                "Runtime.evaluate",
+                json!({"expression": SELECTION_JS, "returnByValue": true}),
+            )
+            .await?;
+        let text = r["result"]["value"].as_str().unwrap_or("");
+        Ok(text.chars().take(MAX_COPY_CHARS).collect())
+    }
+
+    /// `browser.file_chooser.answer`: put the user's files into the input that opened the
+    /// picker (empty `files` cancels).
+    pub async fn file_chooser_answer(
+        &self,
+        p: &FileChooserAnswerParams,
+    ) -> Result<(), BrowserError> {
+        let ch = self
+            .choosers
+            .lock()
+            .ok()
+            .and_then(|mut g| g.remove(&p.chooser_id))
+            .filter(|c| c.session_id == p.session_id)
+            .ok_or_else(|| BrowserError::Launch(format!("no file picker {}", p.chooser_id)))?;
+        if p.files.is_empty() {
+            return Ok(());
+        }
+        if let Some(bad) = p.files.iter().find(|f| !std::path::Path::new(f).is_file()) {
+            return Err(BrowserError::Launch(format!("not a file: {bad}")));
+        }
+        let c = self
+            .session(&p.session_id)
+            .client()
+            .ok_or_else(|| BrowserError::Launch("the browser isn't running".into()))?;
+        c.call_in(
+            Some(&ch.cdp_session),
+            "DOM.setFileInputFiles",
+            json!({"files": p.files, "backendNodeId": ch.backend_node}),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// `browser.popout` (05 §9): show the real browser window. A headless browser is
+    /// restarted with windows and every session's tabs are re-opened at their URLs; the
+    /// profile keeps cookies, so sign-ins survive (unsaved form input doesn't). The next
+    /// tool result tells the agent the page may have changed.
+    pub async fn popout(&self, session_id: &str) -> Result<(), BrowserError> {
+        if !self.backend.headed() {
+            let sessions: Vec<Arc<BrowserSession>> = self
+                .sessions
+                .lock()
+                .map(|g| g.values().cloned().collect())
+                .unwrap_or_default();
+            let mut open = Vec::new();
+            for s in &sessions {
+                let Some(c) = s.client().filter(|c| !c.is_closed()) else {
+                    continue;
+                };
+                let mut tabs = Vec::new();
+                for t in s.tabs() {
+                    let url = target_info(&c, &t.target_id)
+                        .await
+                        .map(|(u, _)| u)
+                        .unwrap_or_default();
+                    tabs.push((t.tab_id, url));
+                }
+                open.push((s.clone(), tabs, s.active_tab().map(|t| t.tab_id)));
+            }
+            let c = self.backend.relaunch_headed().await?;
+            // The new window opens on its own blank tab; ours replace it.
+            let initial: Vec<String> = c
+                .call("Target.getTargets", json!({}))
+                .await?
+                .get("targetInfos")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|t| t["type"] == "page")
+                .filter_map(|t| t["targetId"].as_str().map(String::from))
+                .collect();
+            for (s, tabs, active) in open {
+                let mut handles = Vec::new();
+                for (tab_id, url) in tabs {
+                    let url = if is_web(&url) {
+                        url
+                    } else {
+                        "about:blank".into()
+                    };
+                    let r = c.call("Target.createTarget", json!({"url": url})).await?;
+                    let target = str_at(&r, &["targetId"]).unwrap_or("").to_string();
+                    let sid = attach_page(&c, &target).await?;
+                    handles.push(TabHandle {
+                        tab_id,
+                        target_id: target,
+                        cdp_session: sid,
+                    });
+                }
+                s.with(|g| {
+                    let keep = active.filter(|a| handles.iter().any(|t| &t.tab_id == a));
+                    g.active = keep.or_else(|| handles.last().map(|t| t.tab_id.clone()));
+                    g.tabs = handles;
+                    g.client = Some(c.clone());
+                    g.stale = true;
+                    g.handed_back = true;
+                });
+            }
+            if self.session(session_id).tabs().is_empty() {
+                // Nothing of this session was open: keep the window's own tab instead.
+                let s = self.session(session_id);
+                if let Some(target) = initial.first() {
+                    let sid = attach_page(&c, target).await?;
+                    s.with(|g| {
+                        g.next_tab += 1;
+                        let h = TabHandle {
+                            tab_id: format!("t{}", g.next_tab),
+                            target_id: target.clone(),
+                            cdp_session: sid,
+                        };
+                        g.active = Some(h.tab_id.clone());
+                        g.tabs = vec![h];
+                        g.client = Some(c.clone());
+                    });
+                }
+            } else {
+                for t in &initial {
+                    let _ = c.call("Target.closeTarget", json!({"targetId": t})).await;
+                }
+            }
+            // Re-arm the download watcher on the new connection.
+            self.client().await?;
+            for s in &sessions {
+                self.sync_casts(&s.id).await;
+            }
+            self.sync_casts(session_id).await;
+        }
+        let s = self.session(session_id);
+        if let (Some(t), Some(c)) = (s.active_tab(), s.client()) {
+            c.call_in(Some(&t.cdp_session), "Page.bringToFront", json!({}))
+                .await?;
+        }
+        Ok(())
     }
 
     /// `browser.tabs`.
@@ -504,10 +800,11 @@ impl Browser {
             return Err(BrowserError::Launch(format!("no tab {}", p.tab_id)));
         };
         s.with(|g| g.active = Some(t.tab_id.clone()));
-        if let Some(c) = s.with(|g| g.client.clone()).flatten() {
+        if let Some(c) = s.client() {
             c.call("Target.activateTarget", json!({"targetId": t.target_id}))
                 .await?;
         }
+        self.sync_casts(&p.session_id).await;
         Ok(())
     }
 
@@ -605,7 +902,7 @@ impl<'a> Op<'a> {
             .await
             .map_err(|e| Stop::Err(ToolError::failed(e.to_string())))?;
         let mut ops = ops;
-        let changed = s
+        let (changed, stale) = s
             .with(|g| {
                 let changed = !g.client.as_ref().is_some_and(|x| x.same_connection(&c));
                 if changed {
@@ -613,11 +910,25 @@ impl<'a> Op<'a> {
                     g.active = None;
                     g.client = Some(c.clone());
                 }
-                changed
+                (changed, std::mem::take(&mut g.stale))
+            })
+            .unwrap_or((false, false));
+        if changed || stale {
+            ops.tabs.clear();
+        }
+        if changed {
+            b.spawn_sync(&ctx.env.session_id);
+        }
+        // The banner shows "Genie is browsing" from the first action on.
+        let announce = s
+            .with(|g| {
+                let a = g.control != Some(Control::Agent);
+                g.control = Some(Control::Agent);
+                a
             })
             .unwrap_or(false);
-        if changed {
-            ops.tabs.clear();
+        if announce {
+            b.host.control_changed(&ctx.env.session_id, Control::Agent);
         }
         let fresh = s
             .with(|g| std::mem::take(&mut g.handed_back))
@@ -712,19 +1023,7 @@ impl<'a> Op<'a> {
 
     /// Attach to a page target and register it as a tab of this session.
     pub(crate) async fn adopt(&mut self, target: &str) -> Result<TabHandle, Stop> {
-        let a = self
-            .c
-            .call(
-                "Target.attachToTarget",
-                json!({"targetId": target, "flatten": true}),
-            )
-            .await
-            .map_err(cdp_stop)?;
-        let sid = str_at(&a, &["sessionId"]).unwrap_or("").to_string();
-        self.c
-            .call_in(Some(&sid), "Page.enable", json!({}))
-            .await
-            .map_err(cdp_stop)?;
+        let sid = attach_page(&self.c, target).await.map_err(cdp_stop)?;
         let handle = self
             .s
             .with(|g| {
@@ -740,6 +1039,7 @@ impl<'a> Op<'a> {
             })
             .ok_or_else(|| Stop::Err(ToolError::failed("browser state poisoned")))?;
         self.tab_id = Some(handle.tab_id.clone());
+        self.b.spawn_sync(&self.s.id);
         Ok(handle)
     }
 
@@ -760,6 +1060,8 @@ impl<'a> Op<'a> {
                 self.s.with(|g| g.active.clone_from(&active));
             }
         }
+        // Adopting moved the active tab for a moment; make the live view settle on it.
+        self.b.spawn_sync(&self.s.id);
         Ok(())
     }
 
@@ -775,16 +1077,27 @@ impl<'a> Op<'a> {
             }
         });
         self.ops.tabs.remove(&t.tab_id);
+        self.b.spawn_sync(&self.s.id);
         Ok(())
     }
 
     pub(crate) fn activate(&mut self, t: &TabHandle) {
-        self.s.with(|g| g.active = Some(t.tab_id.clone()));
+        let changed = self
+            .s
+            .with(|g| {
+                let c = g.active.as_deref() != Some(t.tab_id.as_str());
+                g.active = Some(t.tab_id.clone());
+                c
+            })
+            .unwrap_or(false);
         self.c.send(
             None,
             "Target.activateTarget",
             json!({"targetId": t.target_id}),
         );
+        if changed {
+            self.b.spawn_sync(&self.s.id);
+        }
     }
 
     // -------------------------------------------------------------- page state

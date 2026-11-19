@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Screenshot harness for the desktop UI (mock platform in plain Chrome, driven over CDP).
 //
-//   pnpm dev                       # in another terminal (http://localhost:5173)
-//   pnpm ui:shots [outDir] [--widths=1440x900,1000x760,760x760] [--theme=dark|light|both]
+//   bun run web                    # in another terminal (http://localhost:5173)
+//   bun run ui:shots [outDir] [--widths=1440x900,1000x760,760x760] [--theme=dark|light|both]
 //
 // Walks the main states (empty chat, a streamed reply, model menu, settings + dropdown,
 // collapsed sidebar, drawer, Code mode + right panel) at each width and writes PNGs, so the

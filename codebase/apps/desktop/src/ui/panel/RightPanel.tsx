@@ -71,7 +71,7 @@ export function RightPanel() {
         ) : tab === "artifact" ? (
           <ArtifactPanel sessionId={sid} />
         ) : tab === "browser" ? (
-          <BrowserPanel sessionId={sid} />
+          <BrowserPanel key={sid} sessionId={sid} />
         ) : tab === "changes" ? (
           <ChangesPanel sessionId={sid} />
         ) : tab === "files" ? (

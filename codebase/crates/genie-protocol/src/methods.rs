@@ -189,6 +189,8 @@ methods! {
     BrowserTabs = "browser.tabs", Request, false, session::SessionIdParams => browser::TabsResult;
     BrowserTabActivate = "browser.tab.activate", Request, true, browser::TabActivateParams => Empty;
     BrowserPopout = "browser.popout", Request, false, session::SessionIdParams => Empty;
+    BrowserCopy = "browser.copy", Request, true, browser::BrowserTabParams => browser::CopyResult;
+    BrowserFileChooserAnswer = "browser.file_chooser.answer", Request, true, browser::FileChooserAnswerParams => Empty;
     BrowserSitesList = "browser.sites.list", Request, false, Empty => browser::SitesListResult;
     BrowserSitesSet = "browser.sites.set", Request, false, browser::SitePermission => Empty;
     BrowserDataClear = "browser.data.clear", Request, false, browser::DataClearParams => Empty;

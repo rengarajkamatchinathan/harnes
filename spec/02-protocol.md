@@ -222,17 +222,19 @@ Notification: `config.changed {keys, scope}`.
 | method | params → result |
 |---|---|
 | `browser.status` | → `{installed:[{kind:"chrome"|"edge"|"chromium", version, path}], running, profile_path}` |
-| `browser.screencast.start` | `{session_id, tab_id?, max_width, max_height, quality}` → `{stream_id}` |
+| `browser.screencast.start` | `{session_id, tab_id?, max_width, max_height, quality}` → `{stream_id}`. Without `tab_id` the stream follows the session's active tab and may start before any tab exists; it never launches the browser |
 | `browser.screencast.ack` | `{stream_id, frame_seq}` (flow control; CDP `screencastFrameAck`) |
 | `browser.screencast.stop` | `{stream_id}` |
 | `browser.takeover` / `browser.handback` / `browser.stop` | `{session_id}` (D21) |
 | `browser.input` | `{session_id, tab_id, event: MouseEvent|KeyEvent|WheelEvent|ImeEvent|InsertText}` (D56) |
 | `browser.tabs` | `{session_id}` → `{tabs:[{tab_id, url, title, active}]}`; `browser.tab.activate` |
-| `browser.popout` | `{session_id}`: show the real Chrome/Edge window |
+| `browser.popout` | `{session_id}`: show the real Chrome/Edge window (a headless browser restarts with windows; every session's tabs re-open at their URLs) |
+| `browser.copy` | `{session_id, tab_id}` → `{text}`: the page's selected text, only while the user is in control (SA-24) |
+| `browser.file_chooser.answer` | `{session_id, chooser_id, files:[path]}`: answer a `browser.file_chooser` event; empty `files` cancels |
 | `browser.sites.list` / `browser.sites.set` | per-site states `blocked|ask|read|act` |
 | `browser.data.clear` | `{what:"cookies"|"all"}` |
 
-`browser.frame` (ephemeral): `{stream_id, frame_seq, tab_id, jpeg_b64, w, h, device_scale, ts}`. Frames are base64 in NDJSON in v1; at ~60 KB per frame and 15 fps this is about 1.2 MB/s on a local socket, well within budget. The Tauri side decodes and hands an `ImageBitmap`-ready buffer to the webview.
+`browser.frame` (ephemeral): `{stream_id, frame_seq, tab_id, jpeg_b64, w, h, device_scale, ts}`; `w`/`h` are the viewport in CSS pixels (input coordinates use the same space) and `device_scale` is JPEG pixels per CSS pixel. `browser.control` (ephemeral): `{control: "agent"|"user"|"waiting_for_approval"|"handoff", reason?}`. `browser.file_chooser` (ephemeral): `{chooser_id, tab_id, multiple}`, sent when a page opens a file picker during take-over. Frames are base64 in NDJSON in v1; at ~60 KB per frame and 15 fps this is about 1.2 MB/s on a local socket, well within budget. The Tauri side decodes and hands an `ImageBitmap`-ready buffer to the webview.
 
 ### 6.7 Terminal (Code tab, D55)
 

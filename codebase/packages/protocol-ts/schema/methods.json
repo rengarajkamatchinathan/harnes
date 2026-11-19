@@ -842,6 +842,30 @@
     },
     {
       "direction": "request",
+      "ident": "BrowserCopy",
+      "name": "browser.copy",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/BrowserTabParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CopyResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserFileChooserAnswer",
+      "name": "browser.file_chooser.answer",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/FileChooserAnswerParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "BrowserSitesList",
       "name": "browser.sites.list",
       "needs_lease": false,

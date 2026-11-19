@@ -7,6 +7,7 @@ import type {
   Ask,
   BrowserAction,
   BrowserControl,
+  BrowserFileChooser,
   BrowserFrame,
   ClientRef,
   ErrorInfo,
@@ -94,7 +95,7 @@ export interface SessionModel {
   /** Tokens and cost per turn from `step.ended` events seen by this client (hover card). */
   turnUsage: Map<string, TurnUsage>;
   subagents: Map<string, SubagentView>;
-  browser: { control: BrowserControl | null; frame: BrowserFrame | null; actions: BrowserAction[] };
+  browser: { control: BrowserControl | null; frame: BrowserFrame | null; actions: BrowserAction[]; fileChooser: BrowserFileChooser | null };
   /** Set by `branch.switched`: the caller reloads with `session.get`. */
   needsReload: boolean;
   synced: boolean;
@@ -130,7 +131,7 @@ export function emptyModel(sessionId: string): SessionModel {
     artifacts: [],
     turnUsage: new Map(),
     subagents: new Map(),
-    browser: { control: null, frame: null, actions: [] },
+    browser: { control: null, frame: null, actions: [], fileChooser: null },
     needsReload: false,
     synced: false,
     rev: 0,
@@ -415,6 +416,9 @@ export function applyEvent(model: SessionModel, env: SessionEventEnvelope): bool
       break;
     case "browser.control":
       model.browser = { ...model.browser, control: e };
+      break;
+    case "browser.file_chooser":
+      model.browser = { ...model.browser, fileChooser: e };
       break;
     default:
       // terminal.output and unknown event types (02 §10) are ignored here.

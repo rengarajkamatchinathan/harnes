@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "pnpm --filter @genie/artifact-runtime build && vite build",
+    "build": "bun run --cwd ../../packages/artifact-runtime build && vite build",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "tauri": "tauri",

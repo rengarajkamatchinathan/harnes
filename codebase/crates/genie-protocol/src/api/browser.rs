@@ -60,7 +60,9 @@ pub enum InputEvent {
     Mouse {
         /// `pressed` | `released` | `moved`.
         action: String,
+        /// CSS pixels of the viewport (`0..BrowserFrame.w`).
         x: f64,
+        /// CSS pixels of the viewport (`0..BrowserFrame.h`).
         y: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         button: Option<String>,
@@ -120,6 +122,28 @@ pub struct TabsResult {
 pub struct TabActivateParams {
     pub session_id: String,
     pub tab_id: String,
+}
+
+/// `browser.copy`: one tab of a session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BrowserTabParams {
+    pub session_id: String,
+    pub tab_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CopyResult {
+    /// The page's selected text (empty when nothing is selected).
+    pub text: String,
+}
+
+/// `browser.file_chooser.answer`: the files the user picked; empty cancels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FileChooserAnswerParams {
+    pub session_id: String,
+    pub chooser_id: String,
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

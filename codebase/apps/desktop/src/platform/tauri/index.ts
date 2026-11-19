@@ -31,6 +31,11 @@ export function createTauriPlatform(): Platform {
       const r = await open({ directory: true, multiple: false, title });
       return typeof r === "string" ? r : null;
     },
+    async pickFiles({ multiple, title }) {
+      const r = await open({ directory: false, multiple, title });
+      if (r === null) return null;
+      return Array.isArray(r) ? r : [r];
+    },
     async pickSavePath(defaultName, filters) {
       return (await save({ defaultPath: defaultName, filters })) ?? null;
     },
