@@ -16,6 +16,7 @@ import {
   type TextareaHTMLAttributes,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import * as RMenu from "@radix-ui/react-dropdown-menu";
 import * as RSelect from "@radix-ui/react-select";
 import * as RTooltip from "@radix-ui/react-tooltip";
@@ -295,8 +296,22 @@ export function Dialog({
       }
     }
   };
-  return (
-    <div className="g-dialog__backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+  // Portalled to <body> so a dialog opened from inside a clipped, masked or transformed
+  // container (e.g. a sidebar row's ⋯ menu) still covers the whole window. React events still
+  // bubble to the owner through a portal, so stop them at the backdrop: a right-click or click
+  // inside the dialog must not trigger the row's own handlers.
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  const node = (
+    <div
+      className="g-dialog__backdrop"
+      onMouseDown={(e) => {
+        stop(e);
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onClick={stop}
+      onContextMenu={stop}
+      onPointerDown={stop}
+    >
       <div
         ref={ref}
         className="g-dialog"
@@ -315,6 +330,8 @@ export function Dialog({
       </div>
     </div>
   );
+  // No DOM (server render in tests): render in place.
+  return typeof document === "undefined" ? node : createPortal(node, document.body);
 }
 
 export interface TabItem {
@@ -392,6 +409,11 @@ export interface MenuItem {
   external?: boolean;
   /** Draws a separator above this item (without a group label). */
   separatorBefore?: boolean;
+  /**
+   * The action moves focus elsewhere (an inline editor, a dialog): don't hand focus back to the
+   * trigger when the menu closes, or it would blur (and so cancel) what the action just opened.
+   */
+  keepFocus?: boolean;
   onSelect: () => void;
 }
 
@@ -426,12 +448,17 @@ export function Menu({
   const [own, setOwn] = useState(false);
   const open = openProp ?? own;
   const setOpen = (v: boolean) => (onOpenChange ? onOpenChange(v) : setOwn(v));
+  const keepFocus = useRef(false);
   return (
     <div className="g-menu">
       <RMenu.Root open={open} onOpenChange={setOpen} modal={false}>
         <RMenu.Trigger asChild>{trigger({ "aria-expanded": open, "aria-haspopup": "menu" })}</RMenu.Trigger>
         <RMenu.Portal>
           <RMenu.Content
+            onCloseAutoFocus={(e) => {
+              if (keepFocus.current) e.preventDefault();
+              keepFocus.current = false;
+            }}
             className={cx("g-menu__list", className)}
             side={placement === "up" ? "top" : "bottom"}
             align={align === "right" ? "end" : "start"}
@@ -450,7 +477,7 @@ export function Menu({
                   </>
                 )}
                 {it.separatorBefore && i > 0 && <RMenu.Separator className="g-menu__sep" />}
-                <RMenu.Item className={cx("g-menu__item", it.danger && "g-menu__item--danger")} disabled={it.disabled} title={it.title} onSelect={() => it.onSelect()}>
+                <RMenu.Item className={cx("g-menu__item", it.danger && "g-menu__item--danger")} disabled={it.disabled} title={it.title} onSelect={() => ((keepFocus.current = !!it.keepFocus), it.onSelect())}>
                   {it.icon && it.icon !== "check" && <Icon name={it.icon} />}
                   <span className="g-menu__text">
                     <span className="g-menu__label-text">{it.label}</span>

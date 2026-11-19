@@ -567,7 +567,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     async connect(onMessage) {
       listener = onMessage;
       onMessage({ kind: "status", state: "ready", engine_version: "0.1.0-mock" });
-      const info: HostInfo = { client_instance_id: "desktop_mock", os: "mock", app_version: "0.1.0", batch_ms: 8, user_name: "Sam Rivera" };
+      const info: HostInfo = { client_instance_id: "desktop_mock", os: "mock", app_version: "0.1.0", batch_ms: 8, user_name: "Genie" };
       return info;
     },
     async request(method, params) {

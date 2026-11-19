@@ -5,8 +5,90 @@ import { Badge, Icon, IconButton, Menu, Progress, Textarea } from "@genie/ui";
 import { t } from "../i18n";
 import { formatBytes, uploadBlob } from "../state/attachments";
 import { useApp } from "./context";
-import { TitlebarControls } from "./Sidebar";
+import { NewProject, TitlebarControls } from "./Sidebar";
 import { useShell } from "./shell";
+
+/** Projects overview: every project as a card, with search and "New project". */
+export function ProjectsPage() {
+  const shell = useShell();
+  const app = useApp();
+  const [q, setQ] = useState("");
+  const [creating, setCreating] = useState(false);
+  const counts = new Map<string, { n: number; last: string | null }>();
+  for (const s of app.sessions.values()) {
+    if (!s.project_id || s.archived) continue;
+    const c = counts.get(s.project_id) ?? { n: 0, last: null };
+    c.n += 1;
+    if (!c.last || s.updated_at > c.last) c.last = s.updated_at;
+    counts.set(s.project_id, c);
+  }
+  const needle = q.trim().toLowerCase();
+  const list = [...app.projects]
+    .filter((p) => !needle || p.name.toLowerCase().includes(needle))
+    .sort((a, b) => Number(!!b.starred) - Number(!!a.starred) || a.name.localeCompare(b.name));
+  const chatsLabel = (n: number) => (n === 0 ? t("projects.noChats") : n === 1 ? t("projects.oneChat") : t("projects.chats", { n }));
+
+  return (
+    <div className="chat">
+      <header className={`chat__header ${shell.sidebarHidden ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
+        {shell.sidebarHidden && <TitlebarControls />}
+      </header>
+      <div className="page">
+        <div className="page__inner projects">
+          <div className="projects__head">
+            <h1 className="projects__title">{t("sidebar.projects")}</h1>
+            <button className="g-btn g-btn--primary projects__new" onClick={() => setCreating(true)}>
+              <Icon name="plus" />
+              <span>{t("sidebar.newProject")}</span>
+            </button>
+          </div>
+
+          {app.projects.length > 0 && (
+            <label className="projects__search">
+              <Icon name="search" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("projects.search")} aria-label={t("projects.search")} />
+            </label>
+          )}
+
+          {app.projects.length === 0 ? (
+            <div className="projects__empty">
+              <span className="project__icon" aria-hidden>
+                <Icon name="projects" size={18} />
+              </span>
+              <strong>{t("projects.empty")}</strong>
+              <p className="muted">{t("projects.emptyHint")}</p>
+            </div>
+          ) : list.length === 0 ? (
+            <p className="muted projects__none">{t("sidebar.noResults")}</p>
+          ) : (
+            <div className="projects__grid">
+              {list.map((p) => {
+                const c = counts.get(p.project_id);
+                return (
+                  <button key={p.project_id} className="projects__card" onClick={() => app.setUi({ view: "project", activeProject: p.project_id })}>
+                    <div className="projects__card-head">
+                      <span className="project__icon" aria-hidden>
+                        <Icon name="folder" size={16} />
+                      </span>
+                      <span className="projects__name">{p.name}</span>
+                      {p.starred && <span className="projects__star" aria-label={t("project.unstar")}>★</span>}
+                    </div>
+                    {p.instructions?.trim() && <p className="projects__desc muted">{p.instructions}</p>}
+                    <span className="projects__meta muted">
+                      {chatsLabel(c?.n ?? 0)}
+                      {c?.last && ` · ${new Date(c.last).toLocaleDateString()}`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      {creating && <NewProject onClose={() => setCreating(false)} />}
+    </div>
+  );
+}
 
 export function ProjectPage({ id }: { id: string }) {
   const shell = useShell();
@@ -47,7 +129,9 @@ export function ProjectPage({ id }: { id: string }) {
     <div className="chat">
       <header className={`chat__header ${shell.sidebarHidden ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
         {shell.sidebarHidden && <TitlebarControls />}
-        <span className="chat__title chat__title--muted">{t("sidebar.projects")}</span>
+        <button className="chat__title chat__title--muted projects__crumb" onClick={() => app.setUi({ view: "project", activeProject: null })}>
+          {t("sidebar.projects")}
+        </button>
       </header>
       <div className="page">
         <div className="page__inner project">

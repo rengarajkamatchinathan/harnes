@@ -16,7 +16,8 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "react": "^19"
+    "react": "^19",
+    "react-dom": "^19"
   },
   "devDependencies": {
     "@types/node": "^24",
@@ -30,6 +31,7 @@
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "2.1.16",
     "@radix-ui/react-select": "2.2.6",
-    "@radix-ui/react-tooltip": "1.2.8"
+    "@radix-ui/react-tooltip": "1.2.8",
+    "lucide-react": "1.74.0"
   }
 }

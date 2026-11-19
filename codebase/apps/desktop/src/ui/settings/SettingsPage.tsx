@@ -88,7 +88,7 @@ export function SettingsPage() {
   );
 }
 
-const SECTION_ICON: Record<SectionId, IconName> = {
+export const SECTION_ICON: Record<SectionId, IconName> = {
   general: "settings",
   appearance: "palette",
   genie: "memory",

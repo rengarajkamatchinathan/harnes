@@ -10,7 +10,7 @@ import { ChatView } from "./chat/ChatView";
 import { RightPanel } from "./panel/RightPanel";
 import { SettingsPage } from "./settings/SettingsPage";
 import { FirstRun } from "./FirstRun";
-import { ProjectPage } from "./ProjectPage";
+import { ProjectPage, ProjectsPage } from "./ProjectPage";
 
 export function Root() {
   const app = useApp();
@@ -126,7 +126,7 @@ function Shell() {
             <Banner tone="neutral">{t("conn.degraded")}</Banner>
           </div>
         )}
-        {ui.view === "project" && ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />}
+        {ui.view === "project" ? (ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ProjectsPage />) : <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />}
       </main>
       {panelShown && <RightPanel />}
       {ui.view === "settings" && <SettingsPage />}

@@ -36,6 +36,6 @@ describe("components", () => {
 
   it("renders a closed dialog as nothing and every icon", () => {
     expect(renderToStaticMarkup(<Dialog open={false} title="t" onClose={() => {}}>x</Dialog>)).toBe("");
-    for (const n of ICON_NAMES) expect(renderToStaticMarkup(<Icon name={n} />)).toContain("<path");
+    for (const n of ICON_NAMES) expect(renderToStaticMarkup(<Icon name={n} />)).toMatch(/^<svg[^>]*class="[^"]*g-icon/);
   });
 });

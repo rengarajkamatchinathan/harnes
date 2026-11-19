@@ -1,15 +1,25 @@
 // Composer (05 §2.3): Enter sends, Shift+Enter newline; while a turn runs Enter steers and
 // Alt+Enter queues (SA-06); attachments via blob.put; model + effort pickers; "+" menu;
+<<<<<<< Updated upstream
 // context meter ring (D32); queued items as chips; the `/` menu (D58).
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CommandInfo, Delivery, InputPart, McpServerInfo, ModelInfo } from "@genie/protocol";
+=======
+// context meter ring (D32); queued items as chips.
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import type { Delivery, InputPart, McpServerInfo, ModelInfo, SkillInfo } from "@genie/protocol";
+>>>>>>> Stashed changes
 import { Button, Chip, Dialog, Icon, IconButton, Menu, Ring, Switch } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
 import { formatBytes, guessMime, rejectReason, uploadBlob, type Attachment } from "../../state/attachments";
 import type { SessionStore } from "../../state/session";
 import { useApp } from "../context";
+<<<<<<< Updated upstream
 import { providerMeta } from "../settings/ProvidersSection";
 import { RewindDialog } from "../code/CodeExtras";
+=======
+import { useDictation } from "./dictation";
+>>>>>>> Stashed changes
 import { McpPromptPicker, McpResourcePicker, type McpResource } from "./McpPickers";
 import { findCommand, hintAfter, needsArgs, parseSlash, pushRecent, rankCommands, slashQuery } from "./slash";
 import { ChoiceDialog, CommandPicker, HelpDialog, SlashMenu, runClientCommand, useCommands, type CommandDialog } from "./SlashMenu";
@@ -44,6 +54,33 @@ export function groupModels(models: ModelInfo[]) {
 
 let keySeq = 0;
 
+/**
+ * When `key` changes, glide the element from its previous width to its new one (FLIP with the
+ * Web Animations API), so neighbours slide instead of jumping. Skipped under reduced motion.
+ */
+function useWidthGlide(ref: RefObject<HTMLElement | null>, key: unknown, ms = 260) {
+  const last = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const next = el.getBoundingClientRect().width;
+    const prev = last.current;
+    last.current = next;
+    if (prev == null || Math.abs(prev - next) < 1 || typeof el.animate !== "function") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const overflow = el.style.overflow;
+    el.style.overflow = "hidden";
+    const anim = el.animate([{ width: `${prev}px` }, { width: `${next}px` }], { duration: ms, easing: "cubic-bezier(0.16, 1, 0.3, 1)" });
+    const done = () => {
+      el.style.overflow = overflow;
+      if (ref.current) last.current = ref.current.getBoundingClientRect().width;
+    };
+    anim.onfinish = done;
+    anim.oncancel = done;
+    return () => anim.cancel();
+  }, [key, ref, ms]);
+}
+
 /** Model + effort as quiet text buttons ("Genie Small  Medium ⌄"), like the reference. */
 export function ModelPicker({ store }: { store: SessionStore | null }) {
   const app = useApp();
@@ -61,6 +98,7 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
     app.setUi({ effort: e });
     if (store) void app.client.session.update({ session_id: store.id, effort: e }).catch(fail);
   };
+<<<<<<< Updated upstream
   // Only models from connected providers; a session keeps showing the model it already uses.
   const usable = app.usableModels;
   if (!currentModel)
@@ -72,17 +110,38 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
       </span>
     );
   const multi = new Set(usable.map((x) => x.provider)).size > 1;
+=======
+  // Switching model can change the name's width and add/remove the effort picker: glide it.
+  const boxRef = useRef<HTMLSpanElement>(null);
+  useWidthGlide(boxRef, `${currentModel}|${effortLevels.length > 0}|${effort}`);
+>>>>>>> Stashed changes
   return (
-    <span className="modelpick">
+    <span className="modelpick" ref={boxRef}>
       <Menu
         label={t("composer.model")}
         placement="up"
         align="right"
         className="modelpick__list"
+<<<<<<< Updated upstream
         items={usable.map((m) => ({ id: m.id, label: m.name || m.id, group: multi ? providerName(m.provider) : undefined, checked: m.id === currentModel, onSelect: () => setModel(m.id) }))}
+=======
+        items={app.models.map((m) => ({
+          id: m.id,
+          label: m.name || m.id,
+          hint: m.context_window ? t("composer.modelContext", { n: formatTokens(m.context_window) }) : undefined,
+          group: new Set(app.models.map((x) => x.provider)).size > 1 ? m.provider : undefined,
+          checked: m.id === currentModel,
+          onSelect: () => setModel(m.id),
+        }))}
+>>>>>>> Stashed changes
         trigger={(p) => (
-          <button className="textbtn" aria-label={t("composer.model")} {...p}>
-            {modelInfo?.name || currentModel || "—"}
+          <button className="modelbtn" aria-label={t("composer.modelChoose", { name: modelInfo?.name || currentModel || "—" })} {...p}>
+            <Icon key={`spark-${currentModel}`} name="sparkle" size={14} />
+            {/* Keyed on the model so a new choice re-runs the settle-in animation. */}
+            <span key={currentModel} className="modelbtn__name">
+              {modelInfo?.name || currentModel || "—"}
+            </span>
+            <Icon name="chevronDown" size={12} />
           </button>
         )}
       />
@@ -93,7 +152,7 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
           align="right"
           items={effortLevels.map((e) => ({ id: e, label: e[0].toUpperCase() + e.slice(1), checked: e === effort, onSelect: () => setEffort(e) }))}
           trigger={(p) => (
-            <button className="textbtn textbtn--muted" aria-label={t("composer.effort")} {...p}>
+            <button key={currentModel} className="textbtn textbtn--muted modelpick__effort" aria-label={t("composer.effort")} {...p}>
               {effort ? effort[0].toUpperCase() + effort.slice(1) : ""}
               <Icon name="chevronDown" size={12} />
             </button>
@@ -178,6 +237,23 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
   const tokenLen = typedCmd ? 1 + (typed?.name.length ?? 0) : 0;
   const mirrorRef = useRef<HTMLDivElement>(null);
 
+  // Voice input: dictates into the box after whatever is already typed.
+  const dictation = useDictation(
+    (spoken) => setText(spoken),
+    (kind, detail) =>
+      app.toast({
+        title: kind === "unsupported" ? t("composer.voiceUnsupported") : kind === "denied" ? t("composer.voiceDenied") : t("composer.voiceFailed", { error: detail ?? "" }),
+        tone: kind === "failed" ? "danger" : "info",
+      }),
+  );
+  const toggleVoice = () => {
+    if (dictation.listening) dictation.stop();
+    else {
+      dictation.start(text);
+      taRef.current?.focus();
+    }
+  };
+
   // Autosize.
   useEffect(() => {
     const ta = taRef.current;
@@ -236,6 +312,7 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
     const body = (override ?? text).trim();
     const ready = atts.filter((a) => a.state === "ready" && a.blobId);
     if ((!body && !ready.length) || sending || atts.some((a) => a.state === "uploading")) return;
+    if (dictation.listening) dictation.stop();
     const parts: InputPart[] = [];
     const slash = parseSlash(body);
     const cmd = slash ? findCommand(commands ?? [], slash.name) : undefined;
@@ -395,10 +472,10 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
           trigger={(p) => <IconButton icon="plus" size="sm" label={t("composer.plus")} {...p} />}
           items={[
             { id: "attach", label: t("composer.attach"), icon: "paperclip", onSelect: () => fileRef.current?.click() },
-            { id: "resource", label: t("composer.mcpResource"), icon: "layers", onSelect: () => setMcpPick("resource") },
-            { id: "skills", label: t("composer.skills"), icon: "sparkle", onSelect: () => setSkillPick(true) },
-            { id: "prompt", label: t("composer.mcpPrompt"), icon: "layers", onSelect: () => setMcpPick("prompt") },
-            { id: "connectors", label: t("composer.connectors"), icon: "layers", disabled: !store, onSelect: () => setConnectors(true) },
+            { id: "resource", label: t("composer.mcpResource"), icon: "layers", keepFocus: true, onSelect: () => setMcpPick("resource") },
+            { id: "skills", label: t("composer.skills"), icon: "sparkle", keepFocus: true, onSelect: () => setSkillPick(true) },
+            { id: "prompt", label: t("composer.mcpPrompt"), icon: "layers", keepFocus: true, onSelect: () => setMcpPick("prompt") },
+            { id: "connectors", label: t("composer.connectors"), icon: "layers", disabled: !store, keepFocus: true, onSelect: () => setConnectors(true) },
             { id: "web", label: webSearch ? t("composer.webSearchOn") : t("composer.webSearchOff"), icon: "globe", disabled: !store, onSelect: () => void toggle("web_search", !webSearch) },
             { id: "code", label: codeExec ? t("composer.codeExecOn") : t("composer.codeExecOff"), icon: "code", disabled: !store, onSelect: () => (codeExec ? void toggle("code_execution", false) : app.ui.codeExecNoticeSeen ? void toggle("code_execution", true) : setCodeNotice(true)) },
             { id: "browser", label: t("composer.browser"), icon: "globe", onSelect: () => app.setUi({ panelOpen: true, panelTab: "browser" }) },
@@ -407,6 +484,14 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
         {layout === "hero" ? <span className="grow" /> : textarea}
         {layout === "hero" && <ModelPicker store={store} />}
+        <IconButton
+          icon="mic"
+          size="sm"
+          className={`composer__voice ${dictation.listening ? "is-listening" : ""}`}
+          aria-pressed={dictation.listening}
+          label={dictation.listening ? t("composer.voiceStop") : dictation.supported ? t("composer.voice") : t("composer.voiceUnsupported")}
+          onClick={toggleVoice}
+        />
         {!busy && !text.trim() && !atts.length ? null : busy && !text.trim() ? (
           <IconButton icon="stop" size="sm" variant="secondary" className="composer__send" onClick={() => void store?.interrupt()} label={t("composer.stop")} />
         ) : (

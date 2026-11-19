@@ -12,6 +12,10 @@ import { App } from "./state/app";
 import { AppContext } from "./ui/context";
 import { Root } from "./ui/Root";
 
+// Host OS from the webview itself (the engine's `os` is "mock" in the browser preview), so
+// CSS can size type for Windows' thinner font rendering from the first paint.
+if (/Windows/i.test(navigator.userAgent)) document.documentElement.dataset.platform = "windows";
+
 async function boot() {
   const platform = await detectPlatform();
   const app = new App(platform);

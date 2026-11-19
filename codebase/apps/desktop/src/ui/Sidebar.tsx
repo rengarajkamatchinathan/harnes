@@ -4,11 +4,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { SessionSummary } from "@genie/protocol";
-import { Badge, Button, Dialog, Icon, IconButton, Input, Menu, Select, Switch, Tooltip, type MenuItem } from "@genie/ui";
+import { Badge, Button, Dialog, Icon, IconButton, Input, Menu, Switch, Tooltip, type MenuItem } from "@genie/ui";
 import { t } from "../i18n";
 import type { App } from "../state/app";
 import { useApp } from "./context";
 import { NewCodeSession } from "./code/NewCodeSession";
+import { CommandPalette, modKey } from "./CommandPalette";
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useShell } from "./shell";
 
 export type DateGroup = "pinned" | "today" | "yesterday" | "week" | "older";
@@ -57,7 +58,7 @@ export function TitlebarControls() {
         {(["chat", "code"] as const).map((m) => (
           <Tooltip key={m} content={t(`mode.${m}`)}>
             <button className="modeswitch__btn" aria-pressed={ui.mode === m} aria-label={t(`mode.${m}`)} onClick={() => ui.mode !== m && app.setUi({ mode: m, activeSession: null, view: "main", activeProject: null })}>
-              <Icon name={m === "chat" ? "chat" : "code"} />
+              <Icon name={m === "chat" ? "modeChat" : "modeCode"} />
             </button>
           </Tooltip>
         ))}
@@ -216,9 +217,9 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
 
       <div className="sidebar__nav">
         <NavRow icon="plus" label={t("sidebar.new")} onClick={startNew} active={isNew} />
-        <NavRow icon="search" label={t("sidebar.search")} onClick={() => setSearch(true)} />
-        {ui.mode === "chat" && <NavRow icon="projects" label={t("sidebar.projects")} onClick={() => (app.projects.length ? app.setUi({ foldedSections: ui.foldedSections.filter((x) => x !== "projects") }) : setNewProject(true))} active={ui.view === "project"} />}
-        <NavRow icon="customize" label={t("sidebar.customize")} onClick={() => app.openDeepLink(ui.mode === "code" ? "genie://settings/permissions" : "genie://settings/capabilities")} />
+        <NavRow icon="search" label={t("sidebar.search")} onClick={() => setSearch(true)} badge={<kbd className="nav-row__kbd">{modKey()}K</kbd>} />
+        {ui.mode === "chat" && <NavRow icon="projects" label={t("sidebar.projects")} onClick={() => app.setUi({ view: "project", activeProject: null, activeSession: null })} active={ui.view === "project" && !ui.activeProject} />}
+        <NavRow icon="customize" label={t("sidebar.customize")} onClick={() => app.openDeepLink("genie://settings/general")} />
         {app.pendingAsks > 0 && (
           <div className="sidebar__asks">
             <Badge tone="warning">
@@ -260,7 +261,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
       </div>
 
       {!shell.overlay && <SidebarResize />}
-      {search && <SearchDialog onClose={() => setSearch(false)} />}
+      {search && <CommandPalette onClose={() => setSearch(false)} onNewProject={() => setNewProject(true)} onNewCode={() => setNewCode("")} />}
       {newCode !== null && <NewCodeSession initialPath={newCode || undefined} onClose={() => setNewCode(null)} />}
       {newProject && <NewProject onClose={() => setNewProject(false)} />}
     </nav>
@@ -354,69 +355,6 @@ function CodeList({ items, app, onNew }: { items: SessionSummary[]; app: App; on
   );
 }
 
-/** ⌘K palette over titles and content (FTS, D24). */
-function SearchDialog({ onClose }: { onClose: () => void }) {
-  const app = useApp();
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<string[] | null>(null);
-  const [sel, setSel] = useState(0);
-  useEffect(() => {
-    if (!query.trim()) {
-      setHits(null);
-      return;
-    }
-    const h = setTimeout(() => {
-      app.client.session
-        .search({ query, scope: "all" })
-        .then((r) => setHits([...new Set(r.hits.map((x) => x.session_id))]))
-        .catch(() => setHits([...app.sessions.values()].filter((s) => (s.title ?? "").toLowerCase().includes(query.toLowerCase())).map((s) => s.session_id)));
-    }, 150);
-    return () => clearTimeout(h);
-  }, [query, app]);
-  const list = (hits ?? [...app.sessions.values()].filter((s) => !s.archived).sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map((s) => s.session_id))
-    .map((id) => app.sessions.get(id))
-    .filter((s): s is SessionSummary => !!s)
-    .slice(0, 30);
-  const pick = (s: SessionSummary | undefined) => {
-    if (!s) return;
-    app.selectSession(s.session_id);
-    onClose();
-  };
-  return (
-    <div className="g-dialog__backdrop palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-modal="true" aria-label={t("search.title")}>
-        <label className="palette__input">
-          <Icon name="search" />
-          <input
-            autoFocus
-            value={query}
-            placeholder={t("search.placeholder")}
-            aria-label={t("search.title")}
-            onChange={(e) => (setQuery(e.target.value), setSel(0))}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") onClose();
-              else if (e.key === "ArrowDown") (e.preventDefault(), setSel((x) => Math.min(list.length - 1, x + 1)));
-              else if (e.key === "ArrowUp") (e.preventDefault(), setSel((x) => Math.max(0, x - 1)));
-              else if (e.key === "Enter") pick(list[sel]);
-            }}
-          />
-        </label>
-        <div className="palette__list" role="listbox">
-          {!query && list.length > 0 && <div className="palette__group">{t("search.recent")}</div>}
-          {list.map((s, i) => (
-            <button key={s.session_id} role="option" aria-selected={i === sel} className={`palette__item ${i === sel ? "is-active" : ""}`} onMouseEnter={() => setSel(i)} onClick={() => pick(s)}>
-              <Icon name={s.kind === "code" ? "code" : "chat"} />
-              <span className="sidebar__title">{s.title || t("sidebar.untitled")}</span>
-              <span className="muted palette__when">{new Date(s.updated_at).toLocaleDateString()}</span>
-            </button>
-          ))}
-          {list.length === 0 && <div className="muted palette__empty">{query ? t("sidebar.noResults") : t("sidebar.empty")}</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SessionRow({ s, app, code, fresh }: { s: SessionSummary; app: App; code?: boolean; fresh?: boolean }) {
   const [renaming, setRenaming] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -451,14 +389,15 @@ function SessionRow({ s, app, code, fresh }: { s: SessionSummary; app: App; code
       app.toast({ title: app.describeError(e), tone: "danger" });
     }
   };
+  const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
   const items: MenuItem[] = [
-    { id: "pin", label: s.pinned ? t("row.unpin") : t("row.pin"), icon: "pin", onSelect: () => void app.client.session.update({ session_id: s.session_id, pinned: !s.pinned }) },
-    { id: "rename", label: t("row.rename"), icon: "edit", onSelect: startRename },
-    ...(code ? [{ id: "archive", label: t("row.archive"), icon: "folder" as const, onSelect: () => void app.client.session.update({ session_id: s.session_id, archived: true }) }] : []),
-    ...(!code ? [{ id: "move", label: t("row.moveToProject"), icon: "folder" as const, onSelect: () => setMoving(true) }] : []),
+    { id: "pin", label: s.pinned ? t("row.unpin") : t("row.pin"), icon: "pin", onSelect: () => void app.client.session.update({ session_id: s.session_id, pinned: !s.pinned }).catch(fail) },
+    { id: "rename", label: t("row.rename"), icon: "edit", keepFocus: true, onSelect: startRename },
+    ...(code ? [{ id: "archive", label: t("row.archive"), icon: "folder" as const, onSelect: () => void app.client.session.update({ session_id: s.session_id, archived: true }).catch(fail) }] : []),
+    ...(!code ? [{ id: "move", label: t("row.moveToProject"), icon: "folder" as const, keepFocus: true, onSelect: () => setMoving(true) }] : []),
     { id: "md", label: t("row.exportMd"), icon: "download", separatorBefore: true, onSelect: () => void exportAs("markdown") },
     { id: "json", label: t("row.exportJson"), icon: "download", onSelect: () => void exportAs("json") },
-    { id: "delete", label: t("row.delete"), icon: "trash", danger: true, separatorBefore: true, onSelect: () => setConfirm(true) },
+    { id: "delete", label: t("row.delete"), icon: "trash", danger: true, separatorBefore: true, keepFocus: true, onSelect: () => setConfirm(true) },
   ];
 
   return (
@@ -518,24 +457,83 @@ function SessionRow({ s, app, code, fresh }: { s: SessionSummary; app: App; code
       >
         {t("row.deleteConfirm", { title: s.title || untitled })}
       </Dialog>
-      <Dialog open={moving} title={t("row.moveToProject")} onClose={() => setMoving(false)} footer={<Button onClick={() => setMoving(false)}>{t("common.close")}</Button>}>
-        <Select
-          value={s.project_id ?? ""}
-          options={[{ value: "", label: t("row.noProject") }, ...app.projects.map((p) => ({ value: p.project_id, label: p.name }))]}
-          aria-label={t("row.moveToProject")}
-          onChange={(v) =>
-            void app.moveToProject(s.session_id, v || null).then(
-              () => (setMoving(false), app.toast({ title: v ? t("row.moved", { project: app.projects.find((p) => p.project_id === v)?.name ?? v }) : t("row.movedOut"), tone: "success" })),
-              (e) => app.toast({ title: app.describeError(e), tone: "danger" }),
-            )
-          }
-        />
-      </Dialog>
+      {moving && <MoveToProject s={s} onClose={() => setMoving(false)} />}
     </div>
   );
 }
 
-function NewProject({ onClose }: { onClose: () => void }) {
+/** "Move to project": one click on a project moves the chat; or create a project and move into it. */
+function MoveToProject({ s, onClose }: { s: SessionSummary; onClose: () => void }) {
+  const app = useApp();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const current = s.project_id ?? null;
+  const move = async (projectId: string | null, label?: string) => {
+    if (busy || projectId === current) return onClose();
+    setBusy(true);
+    try {
+      await app.moveToProject(s.session_id, projectId);
+      app.toast({ title: projectId ? t("row.moved", { project: label ?? app.projects.find((p) => p.project_id === projectId)?.name ?? projectId }) : t("row.movedOut"), tone: "success" });
+      onClose();
+    } catch (e) {
+      app.toast({ title: app.describeError(e), tone: "danger" });
+      setBusy(false);
+    }
+  };
+  const createAndMove = async () => {
+    const n = name.trim();
+    if (!n || busy) return;
+    setBusy(true);
+    try {
+      const r = await app.client.project.create({ name: n, instructions: "" });
+      await app.refreshLists();
+      setBusy(false);
+      await move(r.project_id, n);
+    } catch (e) {
+      app.toast({ title: app.describeError(e), tone: "danger" });
+      setBusy(false);
+    }
+  };
+  const projects = [...app.projects].sort((a, b) => Number(!!b.starred) - Number(!!a.starred) || a.name.localeCompare(b.name));
+  return (
+    <Dialog open title={t("row.moveToProject")} onClose={onClose} footer={<Button onClick={onClose}>{t("common.cancel")}</Button>}>
+      <div className="moveto">
+        <p className="muted moveto__sub">{t("row.moveHint", { title: s.title || t("sidebar.untitled") })}</p>
+        <div className="moveto__list" role="listbox" aria-label={t("row.moveToProject")}>
+          {projects.length === 0 && <p className="muted moveto__empty">{t("row.noProjectsYet")}</p>}
+          {projects.map((p) => (
+            <button key={p.project_id} role="option" aria-selected={p.project_id === current} className={`moveto__item ${p.project_id === current ? "is-current" : ""}`} disabled={busy} onClick={() => void move(p.project_id, p.name)}>
+              <Icon name="folder" />
+              <span className="moveto__name">{p.name}</span>
+              {p.starred && <span className="muted" aria-hidden>★</span>}
+              {p.project_id === current && <Icon name="check" />}
+            </button>
+          ))}
+          {current && (
+            <button className="moveto__item moveto__item--out" disabled={busy} onClick={() => void move(null)}>
+              <Icon name="x" />
+              <span className="moveto__name">{t("project.moveOut")}</span>
+            </button>
+          )}
+        </div>
+        <form
+          className="moveto__new"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void createAndMove();
+          }}
+        >
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("row.newProjectName")} aria-label={t("row.newProjectName")} disabled={busy} />
+          <Button type="submit" variant="primary" disabled={!name.trim() || busy}>
+            {t("row.createAndMove")}
+          </Button>
+        </form>
+      </div>
+    </Dialog>
+  );
+}
+
+export function NewProject({ onClose }: { onClose: () => void }) {
   const app = useApp();
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");

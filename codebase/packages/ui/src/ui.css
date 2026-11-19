@@ -445,17 +445,40 @@ body {
   from { opacity: 0; transform: scale(0.96) translateY(4px); }
   to { opacity: 1; transform: none; }
 }
+/* Popovers (menus, select lists): grow out of the trigger side with a short slide + scale and
+   leave the same way, so opening and closing read as one smooth motion. */
 @keyframes g-pop-down {
-  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  from { opacity: 0; transform: translateY(-6px) scale(0.96); }
   to { opacity: 1; transform: none; }
 }
 @keyframes g-pop-up {
-  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes g-pop-left {
+  from { opacity: 0; transform: translateX(6px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes g-pop-right {
+  from { opacity: 0; transform: translateX(-6px) scale(0.96); }
   to { opacity: 1; transform: none; }
 }
 @keyframes g-pop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.97); }
+}
+@keyframes g-fade-out {
   from { opacity: 1; }
-  to { opacity: 0; transform: scale(0.98); }
+  to { opacity: 0; }
+}
+@keyframes g-tip-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+/* A value that just changed (e.g. the chosen model's name) settles in. */
+@keyframes g-swap-in {
+  from { opacity: 0; transform: translateY(3px); filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: none; }
 }
 
 /* ---------- Tabs ---------- */
@@ -528,9 +551,11 @@ body {
   transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-select-content-transform-origin));
   outline: none;
 }
-.g-menu__list[data-state="open"][data-side="bottom"] { animation: g-pop-down var(--dur-fast) var(--ease-out); }
-.g-menu__list[data-state="open"][data-side="top"] { animation: g-pop-up var(--dur-fast) var(--ease-out); }
-.g-menu__list[data-state="closed"] { animation: g-pop-out var(--dur-instant) var(--ease-in); }
+.g-menu__list[data-state="open"] { animation: g-pop-down calc(var(--dur-base) * 0.6) var(--ease-out); }
+.g-menu__list[data-state="open"][data-side="top"] { animation-name: g-pop-up; }
+.g-menu__list[data-state="open"][data-side="left"] { animation-name: g-pop-left; }
+.g-menu__list[data-state="open"][data-side="right"] { animation-name: g-pop-right; }
+.g-menu__list[data-state="closed"] { animation: g-pop-out var(--dur-instant) var(--ease-in) forwards; pointer-events: none; }
 .g-menu__item {
   position: relative;
   display: flex;
@@ -549,8 +574,11 @@ body {
   cursor: pointer;
   outline: none;
   user-select: none;
+  transition: background-color var(--dur-instant) var(--ease), color var(--dur-instant) var(--ease);
 }
-.g-menu__item > .g-icon { color: var(--text-muted); }
+.g-menu__item > .g-icon { color: var(--text-muted); transition: color var(--dur-fast) var(--ease); }
+.g-menu__item[data-highlighted] > .g-icon { color: var(--text); }
+.g-menu__list[data-state="open"] .g-menu__check { animation: g-tip-in var(--dur-fast) var(--ease-out) both; animation-delay: 30ms; }
 .g-menu__item[data-highlighted] {
   background: var(--surface-hover);
 }
@@ -631,8 +659,9 @@ body {
   box-shadow: var(--shadow);
   user-select: none;
   transform-origin: var(--radix-tooltip-content-transform-origin);
-  animation: g-fade var(--dur-fast) var(--ease-out);
+  animation: g-tip-in var(--dur-instant) var(--ease-out);
 }
+.g-tooltip[data-state="closed"] { animation: g-fade-out calc(var(--dur-instant) * 0.75) var(--ease-in) forwards; }
 .g-tooltip__kbd {
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
