@@ -65,6 +65,7 @@ impl Registry {
         parent: Option<String>,
         extra: Extra,
     ) -> SessionInfo {
+        let folder = extra.workspace.as_ref().map(|w| w.display().to_string());
         self.extra
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -79,7 +80,8 @@ impl Registry {
                 pinned: false,
                 archived: false,
                 project_id: p.project_id.clone(),
-                workspace_id: None,
+                // The folder a Code session works in, so clients can group sessions by project.
+                workspace_id: folder,
                 updated_at: now.clone(),
             },
             model: p.model.clone(),
@@ -183,6 +185,18 @@ impl Registry {
         {
             x.workspace = workspace;
         }
+    }
+
+    /// The project folder clients group a session under (`summary.workspace_id`): the folder the
+    /// user opened, even when the session runs in a worktree of it (D50).
+    pub fn set_project_folder(&self, id: &str, folder: &std::path::Path) {
+        let summary = {
+            let mut map = self.lock();
+            let Some(s) = map.get_mut(id) else { return };
+            s.summary.workspace_id = Some(folder.display().to_string());
+            s.summary.clone()
+        };
+        self.notify(ListedChange::Updated, summary);
     }
 
     /// Newest first. Incognito sessions are never listed (D24).

@@ -367,6 +367,8 @@ fn create_with_worktree(
                 if let Some(w) = created
                     && let Ok(cr) = serde_json::from_value::<CreateResult>(v.clone())
                 {
+                    // Listed under the folder the user opened, not the worktree path.
+                    me.registry.set_project_folder(&cr.session_id, &ws);
                     me.set_worktree(&cr.session_id, Some(w));
                 }
                 Ok(v)

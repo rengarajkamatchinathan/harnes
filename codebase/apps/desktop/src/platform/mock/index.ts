@@ -13,6 +13,8 @@ import type {
   SessionSummary,
 } from "@genie/protocol";
 import type { HostInfo, HostMessage, Platform, WireError } from "../types";
+import { azureConfig, azureModelId, azureStream, type AzureConfig, type ChatMessage } from "./azure";
+import { testReply } from "./testModel";
 
 export interface MockOptions {
   /** Delay between streamed deltas (ms). 0 in tests. */
@@ -86,7 +88,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
   let nextReq = 1;
   const pendingAsks = new Map<number, (answer: unknown) => void>();
   let state: Record<string, unknown> = opts.firstRun ? {} : { firstRunDone: true };
-  const config: Record<string, unknown> = { model: "mock/genie-small", theme: "system", "memory.enabled": true };
+  const config: Record<string, unknown> = { model: azureConfig ? azureModelId(azureConfig) : "mock/genie-small", theme: "system", "memory.enabled": true };
   const projects = [{ project_id: "prj_demo", name: "Demo project", instructions: "", starred: true }];
   const memory = [{ memory_id: "mem_1", scope: "user", text: "Prefers TypeScript examples.", updated_at: now() }];
   const providers: { id: string; kind: string; status: string; credentials: { credential_id: string; kind: string; label: string; active: boolean; hint: string }[]; endpoint?: string }[] = [
@@ -94,7 +96,9 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     { id: "anthropic", kind: "anthropic", status: "needs_auth", credentials: [] },
     { id: "openai", kind: "openai", status: "needs_auth", credentials: [] },
     { id: "google", kind: "google", status: "needs_auth", credentials: [] },
-    { id: "azure-foundry", kind: "azure-foundry", status: "needs_auth", credentials: [] },
+    azureConfig
+      ? { id: "azure-foundry", kind: "azure-foundry", status: "ready", credentials: [{ credential_id: "cred_azure", kind: "key", label: "Azure key (.env.local)", active: true, hint: "env" }], endpoint: "(set in .env.local)" }
+      : { id: "azure-foundry", kind: "azure-foundry", status: "needs_auth", credentials: [] },
     { id: "openrouter", kind: "openrouter", status: "needs_auth", credentials: [] },
     { id: "ollama", kind: "ollama", status: "ready", credentials: [], endpoint: "http://localhost:11434" },
   ];
@@ -145,9 +149,68 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     });
   }
 
-  function runTurn(s: MockSession, prompt: string, userMsgId: string) {
+  /** A turn answered by the real Azure OpenAI deployment (dev preview with `.env.local`). */
+  function runAzureTurn(s: MockSession, cfg: AzureConfig, userMsgId: string) {
     const turn_id = uid("trn");
-    const text = opts.reply ? opts.reply(prompt) : SAMPLE;
+    const ctrl = new AbortController();
+    s.running = { cancel: () => ctrl.abort() };
+    publish(s, { type: "turn.started", turn_id, message_id: userMsgId }, true, turn_id);
+    setStatus(s, "running");
+
+    // Conversation so far, up to and including the prompting user message.
+    const upto = s.messages.findIndex((m) => m.id === userMsgId);
+    const history: ChatMessage[] = s.messages
+      .slice(0, upto < 0 ? undefined : upto + 1)
+      .map((m) => ({ role: m.role === "assistant" ? ("assistant" as const) : ("user" as const), content: m.parts.map((p) => (p.type === "text" ? p.text : "")).join("") }))
+      .filter((m) => m.content.trim());
+
+    const msgId = uid("msg");
+    const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model };
+    s.messages.push(assistant);
+    const partId = uid("prt");
+    publish(s, { type: "part.started", kind: "text", message_id: msgId, part_id: partId }, true, turn_id);
+
+    let text = "";
+    void (async () => {
+      let status: "completed" | "cancelled" | "failed" = "completed";
+      let error: { code: string; message: string } | undefined;
+      let usage = { input_tokens: 0, output_tokens: 0 };
+      try {
+        const u = await azureStream(cfg, history, (d) => {
+          text += d;
+          publish(s, { type: "part.delta", part_id: partId, text: d }, false, turn_id);
+        }, ctrl.signal);
+        // Rough estimate when the API version doesn't report usage while streaming.
+        usage = u ?? { input_tokens: Math.ceil(history.reduce((n, m) => n + m.content.length, 0) / 4), output_tokens: Math.ceil(text.length / 4) };
+      } catch (e) {
+        if (ctrl.signal.aborted) status = "cancelled";
+        else {
+          status = "failed";
+          error = { code: "provider_error", message: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      const part: Part = { type: "text", id: partId, text };
+      assistant.parts.push(part);
+      assistant.usage = usage;
+      publish(s, { type: "part.ended", part_id: partId, part }, true, turn_id);
+      if (!s.info.title) {
+        const first = history.find((m) => m.role === "user")?.content ?? "";
+        s.info.title = first.slice(0, 40) || "New chat";
+        publish(s, { type: "session.updated", title: s.info.title }, true);
+      }
+      s.running = undefined;
+      publish(s, { type: "step.ended", finish: status === "completed" ? "stop" : status === "failed" ? "error" : "cancelled", usage, cost: { usd: 0 } }, true, turn_id);
+      publish(s, { type: "usage.updated", context_tokens: usage.input_tokens + usage.output_tokens, context_window: 400000, cost: { usd: 0 }, session: usage }, false, turn_id);
+      publish(s, { type: "turn.settled", turn_id, status, ...(error ? { error } : {}) }, true, turn_id);
+      setStatus(s, "idle");
+    })();
+  }
+
+  function runTurn(s: MockSession, prompt: string, userMsgId: string) {
+    if (!opts.reply && azureConfig && s.info.model === azureModelId(azureConfig)) return runAzureTurn(s, azureConfig, userMsgId);
+    const turn_id = uid("trn");
+    const scripted = !opts.reply && s.info.model === "mock/genie-test" ? testReply(prompt) : null;
+    const text = opts.reply ? opts.reply(prompt) : (scripted?.text ?? SAMPLE);
     let cancelled = false;
     s.running = { cancel: () => (cancelled = true) };
     publish(s, { type: "turn.started", turn_id, message_id: userMsgId }, true, turn_id);
@@ -155,11 +218,12 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     const msgId = uid("msg");
     const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model, usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } };
     s.messages.push(assistant);
-    const finish = (status: "completed" | "cancelled") => {
+    const finish = (status: "completed" | "cancelled" | "failed") => {
       s.running = undefined;
-      publish(s, { type: "step.ended", finish: status === "completed" ? "stop" : "cancelled", usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } }, true, turn_id);
+      publish(s, { type: "step.ended", finish: status === "completed" ? "stop" : status === "failed" ? "error" : "cancelled", usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } }, true, turn_id);
       publish(s, { type: "usage.updated", context_tokens: 1200 + text.length, context_window: 200000, cost: { usd: 0.0021 }, session: { input_tokens: 1200, output_tokens: 300 } }, false, turn_id);
-      publish(s, { type: "turn.settled", turn_id, status }, true, turn_id);
+      const error = status === "failed" && scripted?.error ? { code: "provider_error", message: scripted.error } : undefined;
+      publish(s, { type: "turn.settled", turn_id, status, ...(error ? { error } : {}) }, true, turn_id);
       setStatus(s, "idle");
     };
     const stream = async () => {
@@ -187,6 +251,18 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         publish(s, { type: "tool.ended", call_id, outcome: ok ? "ok" : "declined", result_part_id: resPart }, true, turn_id);
         publish(s, { type: "part.ended", part_id: resPart, part: result }, true, turn_id);
       }
+      if (scripted?.thinking && !cancelled) {
+        const rId = uid("prt");
+        publish(s, { type: "part.started", kind: "reasoning", message_id: msgId, part_id: rId }, true, turn_id);
+        for (const chunk of scripted.thinking.match(/\S+\s*/g) ?? []) {
+          if (cancelled) break;
+          await new Promise((r) => setTimeout(r, tick * 2));
+          publish(s, { type: "part.delta", part_id: rId, text: chunk }, false, turn_id);
+        }
+        const rPart: Part = { type: "reasoning", id: rId, text: scripted.thinking };
+        assistant.parts.push(rPart);
+        publish(s, { type: "part.ended", part_id: rId, part: rPart }, true, turn_id);
+      }
       const partId = uid("prt");
       publish(s, { type: "part.started", kind: "text", message_id: msgId, part_id: partId }, true, turn_id);
       const tokens = text.match(/\S+\s*|\s+/g) ?? [];
@@ -203,7 +279,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         s.info.title = prompt.slice(0, 40) || "New chat";
         publish(s, { type: "session.updated", title: s.info.title }, true);
       }
-      finish(cancelled ? "cancelled" : "completed");
+      finish(cancelled ? "cancelled" : scripted?.error ? "failed" : "completed");
     };
     void stream();
   }
@@ -372,6 +448,8 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         { id: "openai/gpt-5.2", name: "GPT-5.2", provider: "openai", context_window: 400000, effort_levels: ["low", "medium", "high"] },
         { id: "mock/genie-small", name: "Genie Small", provider: "mock", context_window: 128000, effort_levels: [] },
         { id: "mock/genie-large", name: "Genie Large", provider: "mock", context_window: 200000, effort_levels: ["low", "medium", "high"] },
+        { id: "mock/genie-test", name: "Genie Test", provider: "mock", context_window: 200000, effort_levels: [] },
+        ...(azureConfig ? [{ id: azureModelId(azureConfig), name: "GPT-5.2 (Azure)", provider: "azure-foundry", context_window: 400000, effort_levels: [] }] : []),
       ],
     }),
     "provider.list": () => ({ providers }),

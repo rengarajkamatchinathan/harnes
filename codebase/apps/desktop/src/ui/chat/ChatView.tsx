@@ -9,11 +9,11 @@ import type { MessageView } from "../../state/sessionModel";
 import { useApp, useSession } from "../context";
 import { AskCard } from "./AskCard";
 import { Composer, ContextRing, ModelPicker } from "./Composer";
-import { TitlebarControls } from "../Sidebar";
+import { CodeProjectPicker, folderName, TitlebarControls } from "../Sidebar";
 import { GenieMark } from "../GenieMark";
 import { useShell } from "../shell";
 import { effectiveTab, PANEL_ICON, panelTabs } from "../panel/RightPanel";
-import type { PanelTab } from "../../state/app";
+import { sameWorkspace, type PanelTab } from "../../state/app";
 import { Transcript } from "./Transcript";
 import { RewindDialog, WorktreeFooter } from "../code/CodeExtras";
 import { NewCodeSession } from "../code/NewCodeSession";
@@ -166,16 +166,23 @@ function EmptyHero({ noProvider }: { noProvider: boolean }) {
   );
 }
 
-const folderName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
-
-/** Code mode, nothing open: pick a folder in the centre, describe the task below (05 §3.1). */
+/** Code mode, nothing open: pick a project in the centre ("No project" by default), describe the task below (05 §3.1). */
 function EmptyCode({ noProvider }: { noProvider: boolean }) {
   const app = useApp();
-  const recent = app.ui.recentWorkspaces;
-  const [path, setPath] = useState<string>(recent[0] ?? "");
+  // Shared with the sidebar's project switcher.
+  const path = app.ui.codeWorkspace;
+  const setPath = (w: string) => app.setUi({ codeWorkspace: w });
   const [dialog, setDialog] = useState(false);
-  const pick = () => void app.platform.pickFolder(t("code.folder")).then((p) => p && setPath(p), () => {});
-  const choices = [...new Set([path, ...recent].filter(Boolean))].slice(0, 5);
+  const pick = () =>
+    void app.platform.pickFolder(t("code.folder")).then(
+      (p) => {
+        if (!p) return;
+        app.setUi({ codeWorkspace: p, recentWorkspaces: [p, ...app.ui.recentWorkspaces.filter((w) => !sameWorkspace(w, p))].slice(0, 8) });
+      },
+      () => {},
+    );
+  const choices = app.codeWorkspaces.slice(0, 5);
+  if (path && !choices.some((w) => sameWorkspace(w, path))) choices.unshift(path);
   return (
     <div className="chat">
       <Header panels={false}>
@@ -187,16 +194,21 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
             <GenieMark size={30} />
           </span>
           <div className="folder-card__box">
+            <button className="folder-card__row" onClick={() => setPath("")}>
+              <Icon name="chat" />
+              <span className="sidebar__title">{t("code.noProject")}</span>
+              {!path && <Icon name="check" />}
+            </button>
             {choices.map((w) => (
               <button key={w} className="folder-card__row" title={w} onClick={() => setPath(w)}>
                 <Icon name="folder" />
                 <span className="sidebar__title">{folderName(w)}</span>
-                {w === path && <Icon name="check" />}
+                {!!path && sameWorkspace(w, path) && <Icon name="check" />}
               </button>
             ))}
             <button className="folder-card__row folder-card__row--muted" onClick={pick}>
               <Icon name="plus" />
-              <span className="sidebar__title">{choices.length ? t("code.openFolder") : t("code.pickFolder")}</span>
+              <span className="sidebar__title">{t("code.openFolder")}</span>
             </button>
           </div>
           {noProvider && (
@@ -211,17 +223,15 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
           store={null}
           placeholder={t("code.placeholder")}
           onCreate={async () => {
-            if (!path) {
-              pick();
-              return null;
+            if (path) {
+              // Untrusted or unknown folders go through the trust dialog first (D43).
+              const trust = await app.client.trust.get({ path }).catch(() => ({ state: "trusted" as const }));
+              if (trust.state !== "trusted") {
+                setDialog(true);
+                return null;
+              }
             }
-            // Untrusted or unknown folders go through the trust dialog first (D43).
-            const trust = await app.client.trust.get({ path }).catch(() => ({ state: "trusted" as const }));
-            if (trust.state !== "trusted") {
-              setDialog(true);
-              return null;
-            }
-            const id = await app.createSession({ kind: "code", workspacePath: path });
+            const id = await app.createSession({ kind: "code", workspacePath: path || undefined });
             const s = app.session(id);
             await waitLoaded(s);
             return s;
@@ -231,11 +241,7 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
           <span className="composer-foot__item">
             <Icon name="computer" size={14} /> {t("code.thisComputer")}
           </span>
-          {path && (
-            <button className="textbtn" title={path} onClick={pick}>
-              <Icon name="folder" size={14} /> {folderName(path)}
-            </button>
-          )}
+          <CodeProjectPicker app={app} variant="inline" />
           <span className="grow" />
           <ModelPicker store={null} />
         </div>

@@ -47,6 +47,8 @@ export interface UiState {
   model: string | null;
   effort: string | null;
   recentWorkspaces: string[];
+  /** Code mode's current project folder: the sidebar lists its sessions and new sessions open in it ("" = No project). */
+  codeWorkspace: string;
   /** Open terminal ids per session, for reattach after a reload (05 §10). */
   terminals: Record<string, { id: string; title: string }[]>;
   /** OS notifications for paused asks when the window is in the background. */
@@ -66,6 +68,16 @@ export interface UiState {
   recentCommands: string[];
 }
 
+/** Folder paths compared loosely: the engine may report `\\?\C:\x` for a folder picked as `C:\x`. */
+export function workspaceKey(p: string | null | undefined): string {
+  return (p ?? "")
+    .replace(/^\\\\\?\\/, "")
+    .replace(/[\\/]+/g, "/")
+    .replace(/\/$/, "")
+    .toLowerCase();
+}
+export const sameWorkspace = (a: string | null | undefined, b: string | null | undefined) => workspaceKey(a) === workspaceKey(b);
+
 const DEFAULT_UI: UiState = {
   mode: "chat",
   view: "main",
@@ -83,6 +95,7 @@ const DEFAULT_UI: UiState = {
   model: null,
   effort: null,
   recentWorkspaces: [],
+  codeWorkspace: "",
   terminals: {},
   osNotifications: true,
   codeExecNoticeSeen: false,
@@ -229,7 +242,27 @@ export class App extends Emitter {
 
   selectSession(id: string | null) {
     const s = id ? this.sessions.get(id) : null;
-    this.setUi({ activeSession: id, view: "main", ...(s && s.kind !== "unknown" ? { mode: s.kind } : {}) });
+    this.setUi({
+      activeSession: id,
+      view: "main",
+      ...(s && s.kind !== "unknown" ? { mode: s.kind } : {}),
+      // Opening a Code session (from search, a link…) switches to its project.
+      ...(s?.kind === "code" ? { codeWorkspace: s.workspace_id ?? "" } : {}),
+    });
+  }
+
+  /** Project folders known to Code mode: recently used ones plus every folder that has sessions. */
+  get codeWorkspaces(): string[] {
+    const out: string[] = [];
+    const add = (w: string | null | undefined) => {
+      if (w && !out.some((x) => sameWorkspace(x, w))) out.push(w);
+    };
+    this.ui.recentWorkspaces.forEach(add);
+    [...this.sessions.values()]
+      .filter((s) => s.kind === "code" && !s.archived)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .forEach((s) => add(s.workspace_id));
+    return out;
   }
 
   // ---------- host messages ----------
@@ -463,6 +496,7 @@ export class App extends Emitter {
       const recent = [opts.workspacePath, ...this.ui.recentWorkspaces.filter((w) => w !== opts.workspacePath)].slice(0, 8);
       this.setUi({ recentWorkspaces: recent });
     }
+    if (opts.kind === "code") this.setUi({ codeWorkspace: opts.workspacePath ?? "" });
     this.selectSession(r.session_id);
     return r.session_id;
   }

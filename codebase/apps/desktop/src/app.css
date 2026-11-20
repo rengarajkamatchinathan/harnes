@@ -745,3 +745,24 @@ code { font-size: 0.92em; }
   .transcript__item.is-new > *, .hero__title, .hero__inner > *, .panel, .toast, .transcript__jump, .ask, .sidebar__row.is-new, .tool__body, .composer__send { animation: none !important; }
   .sidebar__section-body, .modeswitch__thumb { transition: none; }
 }
+
+/* Code mode project switcher: sidebar bar + composer-foot pill (shared selection). */
+.codeproj__bar { display: flex; align-items: center; gap: 4px; padding: var(--space-2) 8px var(--space-1); }
+.codeproj { display: inline-flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid transparent; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; cursor: pointer; transition: background-color var(--dur-instant) var(--ease), border-color var(--dur-instant) var(--ease); }
+.codeproj:hover, .codeproj[aria-expanded="true"] { background: var(--surface-hover); }
+.codeproj--sidebar { flex: 1; height: 34px; padding: 0 8px; border-color: var(--border); font-weight: 600; }
+.codeproj--inline { height: 28px; padding: 0 8px; font-size: var(--text-sm); }
+.codeproj__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.codeproj .g-icon:last-child { color: var(--text-muted); transition: transform var(--dur-fast) var(--ease); }
+.codeproj[aria-expanded="true"] .g-icon:last-child { transform: rotate(180deg); }
+.codeproj__list { min-width: 240px; max-width: 360px; }
+
+/* Code sidebar: project rows expand to show their sessions; "All sessions" rows carry the project name. */
+.codeproj-row__count { font-size: var(--text-xs); margin-left: auto; padding-left: 6px; }
+.codeproj-row__chev { display: inline-flex; color: var(--text-muted); transition: transform var(--dur-fast) var(--ease); }
+.codeproj-row.is-open .codeproj-row__chev { transform: rotate(90deg); }
+.codeproj-row__body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-base) var(--ease-out); }
+.codeproj-row.is-open .codeproj-row__body { grid-template-rows: 1fr; }
+.codeproj-row__inner { min-height: 0; overflow: hidden; padding-left: 18px; }
+.codeproj-row__inner .sidebar__empty { padding-left: 12px; }
+.sidebar__hint { flex: none; max-width: 40%; margin-left: auto; padding-left: 8px; font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,25 +1,16 @@
 // Composer (05 §2.3): Enter sends, Shift+Enter newline; while a turn runs Enter steers and
 // Alt+Enter queues (SA-06); attachments via blob.put; model + effort pickers; "+" menu;
-<<<<<<< Updated upstream
 // context meter ring (D32); queued items as chips; the `/` menu (D58).
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import type { CommandInfo, Delivery, InputPart, McpServerInfo, ModelInfo } from "@genie/protocol";
-=======
-// context meter ring (D32); queued items as chips.
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import type { Delivery, InputPart, McpServerInfo, ModelInfo, SkillInfo } from "@genie/protocol";
->>>>>>> Stashed changes
 import { Button, Chip, Dialog, Icon, IconButton, Menu, Ring, Switch } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
 import { formatBytes, guessMime, rejectReason, uploadBlob, type Attachment } from "../../state/attachments";
 import type { SessionStore } from "../../state/session";
 import { useApp } from "../context";
-<<<<<<< Updated upstream
 import { providerMeta } from "../settings/ProvidersSection";
 import { RewindDialog } from "../code/CodeExtras";
-=======
 import { useDictation } from "./dictation";
->>>>>>> Stashed changes
 import { McpPromptPicker, McpResourcePicker, type McpResource } from "./McpPickers";
 import { findCommand, hintAfter, needsArgs, parseSlash, pushRecent, rankCommands, slashQuery } from "./slash";
 import { ChoiceDialog, CommandPicker, HelpDialog, SlashMenu, runClientCommand, useCommands, type CommandDialog } from "./SlashMenu";
@@ -98,7 +89,10 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
     app.setUi({ effort: e });
     if (store) void app.client.session.update({ session_id: store.id, effort: e }).catch(fail);
   };
-<<<<<<< Updated upstream
+  // Switching model can change the name's width and add/remove the effort picker: glide it.
+  // (Hooks run before the early return below.)
+  const boxRef = useRef<HTMLSpanElement>(null);
+  useWidthGlide(boxRef, `${currentModel}|${effortLevels.length > 0}|${effort}`);
   // Only models from connected providers; a session keeps showing the model it already uses.
   const usable = app.usableModels;
   if (!currentModel)
@@ -110,11 +104,6 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
       </span>
     );
   const multi = new Set(usable.map((x) => x.provider)).size > 1;
-=======
-  // Switching model can change the name's width and add/remove the effort picker: glide it.
-  const boxRef = useRef<HTMLSpanElement>(null);
-  useWidthGlide(boxRef, `${currentModel}|${effortLevels.length > 0}|${effort}`);
->>>>>>> Stashed changes
   return (
     <span className="modelpick" ref={boxRef}>
       <Menu
@@ -122,18 +111,14 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
         placement="up"
         align="right"
         className="modelpick__list"
-<<<<<<< Updated upstream
-        items={usable.map((m) => ({ id: m.id, label: m.name || m.id, group: multi ? providerName(m.provider) : undefined, checked: m.id === currentModel, onSelect: () => setModel(m.id) }))}
-=======
-        items={app.models.map((m) => ({
+        items={usable.map((m) => ({
           id: m.id,
           label: m.name || m.id,
           hint: m.context_window ? t("composer.modelContext", { n: formatTokens(m.context_window) }) : undefined,
-          group: new Set(app.models.map((x) => x.provider)).size > 1 ? m.provider : undefined,
+          group: multi ? providerName(m.provider) : undefined,
           checked: m.id === currentModel,
           onSelect: () => setModel(m.id),
         }))}
->>>>>>> Stashed changes
         trigger={(p) => (
           <button className="modelbtn" aria-label={t("composer.modelChoose", { name: modelInfo?.name || currentModel || "—" })} {...p}>
             <Icon key={`spark-${currentModel}`} name="sparkle" size={14} />

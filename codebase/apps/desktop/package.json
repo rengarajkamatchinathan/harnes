@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "tauri": "tauri",
+    "desktop": "tauri dev --config src-tauri/tauri.bun.conf.json",
+    "desktop:mock": "VITE_GENIE_ENGINE=mock tauri dev --config src-tauri/tauri.bun.conf.json",
     "ui:shots": "node scripts/ui-shots.mjs"
   },
   "dependencies": {

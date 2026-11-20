@@ -6,7 +6,7 @@ import type React from "react";
 import type { SessionSummary } from "@genie/protocol";
 import { Badge, Button, Dialog, Icon, IconButton, Input, Menu, Switch, Tooltip, type MenuItem } from "@genie/ui";
 import { t } from "../i18n";
-import type { App } from "../state/app";
+import { sameWorkspace, type App } from "../state/app";
 import { useApp } from "./context";
 import { NewCodeSession } from "./code/NewCodeSession";
 import { CommandPalette, modKey } from "./CommandPalette";
@@ -230,7 +230,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
       </div>
 
       <div className="sidebar__list">
-        {ui.mode === "chat" ? <ChatList items={items} app={app} onNewProject={() => setNewProject(true)} /> : <CodeList items={items} app={app} onNew={(ws) => setNewCode(ws)} />}
+        {ui.mode === "chat" ? <ChatList items={items} app={app} onNewProject={() => setNewProject(true)} /> : <CodeList items={items} app={app} />}
       </div>
 
       <div className="sidebar__footer">
@@ -329,33 +329,109 @@ function ChatList({ items, app, onNewProject }: { items: SessionSummary[]; app: 
   );
 }
 
-function CodeList({ items, app, onNew }: { items: SessionSummary[]; app: App; onNew: (workspace: string) => void }) {
-  // Sessions grouped by repo (workspace) (05 §3.1).
-  const groups = new Map<string, SessionSummary[]>();
-  for (const s of [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at))) {
-    const k = s.workspace_id ?? "—";
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(s);
-  }
-  const fresh = useFreshIds(items.map((s) => s.session_id));
-  if (!items.length) return null;
+export const folderName = (p: string) => p.replace(/^\\\\\?\\/, "").split(/[\\/]/).filter(Boolean).pop() ?? p;
+
+/**
+ * Code mode's project switcher (D54): pick a project folder, or "No project". The sidebar then
+ * lists only that project's sessions, and New starts sessions in it.
+ */
+export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; variant?: "sidebar" | "inline" }) {
+  const current = app.ui.codeWorkspace;
+  const known = app.codeWorkspaces;
+  const choose = (w: string) => app.setUi({ codeWorkspace: w, activeSession: null, view: "main" });
+  const open = () =>
+    void app.platform.pickFolder(t("code.folder")).then(
+      (p) => {
+        if (!p) return;
+        app.setUi({ recentWorkspaces: [p, ...app.ui.recentWorkspaces.filter((w) => !sameWorkspace(w, p))].slice(0, 8) });
+        choose(p);
+      },
+      () => {},
+    );
+  const items: MenuItem[] = [
+    { id: "none", label: t("code.noProject"), icon: "chat", checked: !current, onSelect: () => choose("") },
+    ...known.map((w, i) => ({ id: `ws:${w}`, label: folderName(w), title: w, icon: "folder" as const, checked: !!current && sameWorkspace(current, w), separatorBefore: i === 0, onSelect: () => choose(w) })),
+    { id: "open", label: t("code.openFolder"), icon: "plus", separatorBefore: true, onSelect: open },
+  ];
+  return (
+    <Menu
+      label={t("code.project")}
+      className="codeproj__list"
+      items={items}
+      trigger={(p) => (
+        <button className={`codeproj codeproj--${variant}`} title={current || t("code.noProject")} {...p}>
+          <Icon name={current ? "folder" : "chat"} size={variant === "sidebar" ? 16 : 14} />
+          <span className="codeproj__name">{current ? folderName(current) : t("code.noProject")}</span>
+          <Icon name="chevronDown" size={12} />
+        </button>
+      )}
+    />
+  );
+}
+
+function CodeList({ items, app }: { items: SessionSummary[]; app: App }) {
+  // Projects: one row per folder; clicking a project shows its sessions beneath it.
+  // All sessions: every Code session, whatever its project.
+  const sorted = [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const projects = app.codeWorkspaces;
+  const activeWs = app.ui.activeSession ? app.sessions.get(app.ui.activeSession)?.workspace_id : null;
+  const [open, setOpen] = useState<string[]>(() => (activeWs ? [activeWs] : []));
+  const isOpen = (w: string) => open.some((x) => sameWorkspace(x, w));
+  const toggle = (w: string) => setOpen((o) => (o.some((x) => sameWorkspace(x, w)) ? o.filter((x) => !sameWorkspace(x, w)) : [...o, w]));
+  const fresh = useFreshIds(sorted.map((s) => s.session_id));
+  const newIn = (w: string) => app.setUi({ codeWorkspace: w, activeSession: null, view: "main", activeProject: null });
+  const openFolder = () =>
+    void app.platform.pickFolder(t("code.folder")).then(
+      (p) => {
+        if (!p) return;
+        app.setUi({ recentWorkspaces: [p, ...app.ui.recentWorkspaces.filter((w) => !sameWorkspace(w, p))].slice(0, 8) });
+        setOpen((o) => [...o.filter((x) => !sameWorkspace(x, p)), p]);
+        newIn(p);
+      },
+      () => {},
+    );
   return (
     <>
-      {[...groups.entries()].map(([ws, list]) => {
-        const folder = ws === "—" ? t("sidebar.noFolder") : (ws.split(/[\\/]/).filter(Boolean).pop() ?? ws);
-        return (
-          <Section key={ws} id={`ws:${ws}`} title={folder} action={<IconButton icon="plus" size="sm" label={t("sidebar.newInFolder", { folder })} onClick={() => onNew(ws === "—" ? "" : ws)} />}>
-            {list.map((s) => (
-              <SessionRow key={s.session_id} s={s} app={app} code fresh={fresh(s.session_id)} />
-            ))}
-          </Section>
-        );
-      })}
+      <Section id="code:projects" title={t("code.projects")} action={<IconButton icon="plus" size="sm" label={t("code.openFolder")} onClick={openFolder} />} persistentAction>
+        {projects.length === 0 && <div className="sidebar__empty muted">{t("code.noProjects")}</div>}
+        {projects.map((w) => {
+          const name = folderName(w);
+          const list = sorted.filter((s) => sameWorkspace(s.workspace_id, w));
+          const expanded = isOpen(w);
+          return (
+            <div key={w} className={`codeproj-row ${expanded ? "is-open" : ""}`}>
+              <div className="sidebar__row">
+                <button className="sidebar__link" title={w} aria-expanded={expanded} onClick={() => toggle(w)}>
+                  <Icon name="folder" />
+                  <span className="sidebar__title">{name}</span>
+                  <span className="codeproj-row__count muted">{list.length}</span>
+                  <span className="codeproj-row__chev" aria-hidden>
+                    <Icon name="chevronRight" size={12} />
+                  </span>
+                </button>
+                <IconButton icon="plus" size="sm" label={t("sidebar.newInFolder", { folder: name })} className="sidebar__more" onClick={() => newIn(w)} />
+              </div>
+              <div className="codeproj-row__body" inert={!expanded} aria-hidden={!expanded || undefined}>
+                <div className="codeproj-row__inner">
+                  {list.length === 0 ? <div className="sidebar__empty muted">{t("code.noSessions")}</div> : list.map((s) => <SessionRow key={s.session_id} s={s} app={app} code fresh={fresh(s.session_id)} />)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </Section>
+      <Section id="code:all" title={t("code.allSessions")}>
+        {sorted.length === 0 ? (
+          <div className="sidebar__empty muted">{t("code.noSessionsAll")}</div>
+        ) : (
+          sorted.map((s) => <SessionRow key={s.session_id} s={s} app={app} code fresh={fresh(s.session_id)} hint={s.workspace_id ? folderName(s.workspace_id) : t("code.noProject")} />)
+        )}
+      </Section>
     </>
   );
 }
 
-function SessionRow({ s, app, code, fresh }: { s: SessionSummary; app: App; code?: boolean; fresh?: boolean }) {
+function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App; code?: boolean; fresh?: boolean; hint?: string }) {
   const [renaming, setRenaming] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -439,6 +515,7 @@ function SessionRow({ s, app, code, fresh }: { s: SessionSummary; app: App; code
         >
           {STATUS_TONE[s.status] ? <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} /> : !code && <span className="bullet" aria-hidden />}
           <span className="sidebar__title">{s.title || untitled}</span>
+          {hint && <span className="sidebar__hint muted">{hint}</span>}
         </button>
       )}
       <Menu label={t("row.actions")} align="right" items={items} open={menuOpen} onOpenChange={setMenuOpen} trigger={(p) => <IconButton icon="more" size="sm" label={t("row.actions")} className="sidebar__more" {...p} />} />

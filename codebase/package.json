@@ -3,7 +3,15 @@
   "private": true,
   "packageManager": "pnpm@10.33.3",
   "scripts": {
+    "start": "cd apps/desktop && bun run dev",
+    "dev": "cd apps/desktop && bun run dev",
+    "desktop": "cd apps/desktop && bun run desktop",
+    "desktop:mock": "cd apps/desktop && bun run desktop:mock",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"
-  }
+  },
+  "workspaces": [
+    "apps/desktop",
+    "packages/*"
+  ]
 }
