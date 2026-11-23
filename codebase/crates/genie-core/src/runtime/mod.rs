@@ -129,6 +129,8 @@ pub struct AgentRuntime {
     pub taints: Arc<host::TurnTaints>,
     /// The shell tool's runtime (Code): cwd per session, background jobs.
     pub shell: Option<Arc<genie_tools::shell::ShellRuntime>>,
+    /// Dev servers (Code, ticket 47): the `preview_*` tools and auto-verify.
+    pub preview: Option<Arc<genie_tools::preview::DevServers>>,
     /// Provider-native web search policy (06 §8); `None`: never declared.
     pub web_search: Option<genie_tools::web::SearchPolicy>,
     /// Artifacts (D28): the `artifact_*` tools and their versions.
@@ -369,6 +371,7 @@ impl RuntimeBuilder {
                 mcp: None,
                 taints: Arc::new(host::TurnTaints::default()),
                 shell: None,
+                preview: None,
                 web_search: None,
                 artifacts: None,
                 projects: None,
@@ -469,6 +472,16 @@ impl RuntimeBuilder {
         self
     }
 
+    /// `preview_start/stop/logs` (Code registry only, ticket 47): dev servers from
+    /// `.genie/launch.json`.
+    pub fn preview(mut self, servers: &Arc<genie_tools::preview::DevServers>) -> Self {
+        for t in genie_tools::preview::tools(servers) {
+            self.rt.code_tools.register(t);
+        }
+        self.rt.preview = Some(servers.clone());
+        self
+    }
+
     /// `web_fetch` (and a local `web_search` when `cfg.search` is set) for Chat and Code
     /// (06 §8). Results taint the turn through [`AgentRuntime::taints`].
     pub fn web(self, mut cfg: genie_tools::web::WebConfig) -> Self {
@@ -478,7 +491,7 @@ impl RuntimeBuilder {
         self.tools(genie_tools::web::tools(cfg))
     }
 
-    /// The 18 `browser_*` tools for Chat and Code (06 §10), hidden in headless sessions
+    /// The 19 `browser_*` tools for Chat and Code (06 §10), hidden in headless sessions
     /// unless enabled.
     pub fn browser(self, b: &Arc<genie_browser::Browser>) -> Self {
         let settings = self.rt.settings.clone();

@@ -162,6 +162,14 @@ fn hidden_prompts() {
                 &[],
             ),
         ),
+        (
+            "auto_verify",
+            render(
+                fragments::AUTO_VERIFY,
+                &[("servers", "the dev server `web` (http://localhost:5173)")],
+                &[],
+            ),
+        ),
     ];
     let text: String = all.iter().map(|(k, v)| format!("=== {k}\n{v}\n")).collect();
     check("hidden", &text);

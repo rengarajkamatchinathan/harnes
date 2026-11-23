@@ -830,11 +830,95 @@
     },
     {
       "direction": "request",
+      "ident": "BrowserNavigate",
+      "name": "browser.navigate",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/NavigateParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TabIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserTabNew",
+      "name": "browser.tab.new",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/TabNewParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TabIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserTabClose",
+      "name": "browser.tab.close",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/BrowserTabParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserOpenFile",
+      "name": "browser.open_file",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/OpenFileParams"
+      },
+      "result": {
+        "$ref": "#/$defs/TabIdResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserInspect",
+      "name": "browser.inspect",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/InspectParams"
+      },
+      "result": {
+        "$ref": "#/$defs/InspectResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "BrowserPopout",
       "name": "browser.popout",
       "needs_lease": false,
       "params": {
         "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserCopy",
+      "name": "browser.copy",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/BrowserTabParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CopyResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserFileChooserAnswer",
+      "name": "browser.file_chooser.answer",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/FileChooserAnswerParams"
       },
       "result": {
         "$ref": "#/$defs/Empty"
@@ -871,6 +955,66 @@
       "needs_lease": false,
       "params": {
         "$ref": "#/$defs/DataClearParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewList",
+      "name": "preview.list",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/SessionIdParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PreviewListResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewStart",
+      "name": "preview.start",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewStartParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PreviewServer"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewStop",
+      "name": "preview.stop",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewStopParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewLogs",
+      "name": "preview.logs",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewLogsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PreviewLogsResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "PreviewAutoVerify",
+      "name": "preview.auto_verify",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewAutoVerifyParams"
       },
       "result": {
         "$ref": "#/$defs/Empty"
@@ -1723,6 +1867,18 @@
       "needs_lease": false,
       "params": {
         "$ref": "#/$defs/TerminalExited"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    {
+      "direction": "notification",
+      "ident": "PreviewChangedNote",
+      "name": "preview.changed",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/PreviewChanged"
       },
       "result": {
         "type": "null"

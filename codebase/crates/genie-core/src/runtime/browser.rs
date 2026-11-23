@@ -108,10 +108,17 @@ impl EngineBrowserHost {
     }
 
     fn banner(&self, session_id: &str, control: &str, reason: Option<String>) {
-        let ev = SessionEvent::BrowserControl(BrowserControl {
-            control: control.into(),
-            reason,
-        });
+        self.publish(
+            session_id,
+            SessionEvent::BrowserControl(BrowserControl {
+                control: control.into(),
+                reason,
+            }),
+        );
+    }
+
+    /// An ephemeral event to the session's clients, from inside or outside a turn.
+    fn publish(&self, session_id: &str, ev: SessionEvent) {
         if let Some(t) = self.turns.get(session_id) {
             t.publish_ephemeral(ev);
         } else if let Some(e) = self.engine.get() {
@@ -193,6 +200,10 @@ impl BrowserHost for EngineBrowserHost {
         })
     }
 
+    fn turn_active(&self, session_id: &str) -> bool {
+        self.turns.get(session_id).is_some()
+    }
+
     fn control_changed(&self, session_id: &str, control: Control) {
         let c = match control {
             Control::Agent => "agent",
@@ -204,5 +215,9 @@ impl BrowserHost for EngineBrowserHost {
 
     fn handoff(&self, session_id: &str, reason: &str) {
         self.banner(session_id, "handoff", Some(reason.to_string()));
+    }
+
+    fn file_chooser(&self, session_id: &str, chooser: genie_protocol::event::BrowserFileChooser) {
+        self.publish(session_id, SessionEvent::BrowserFileChooser(chooser));
     }
 }

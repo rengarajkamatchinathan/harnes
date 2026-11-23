@@ -120,9 +120,10 @@ pub fn to_cdp(ev: &InputEvent) -> (&'static str, Value) {
             click_count,
             modifiers,
         } => {
+            // `pressed|released|moved` (02 §6.6); `down|up|move` (DOM names) are accepted too.
             let t = match action.as_str() {
-                "pressed" => "mousePressed",
-                "released" => "mouseReleased",
+                "pressed" | "down" => "mousePressed",
+                "released" | "up" => "mouseReleased",
                 _ => "mouseMoved",
             };
             (
@@ -141,19 +142,34 @@ pub fn to_cdp(ev: &InputEvent) -> (&'static str, Value) {
             modifiers,
             text,
         } => {
+            let def = key_def(key);
+            // Enter needs its "\r" text or Chrome never fires keypress (no form submit, no
+            // newline); clients send text only for printable keys.
+            let command = modifiers & (CTRL | META | ALT) != 0;
+            let text = match (text, action.as_str()) {
+                (Some(t), _) => Some(t.clone()),
+                (None, "down") if !command => def.as_ref().and_then(|d| d.3.clone()),
+                _ => None,
+            };
             let t = match action.as_str() {
                 "up" => "keyUp",
                 "char" => "char",
                 _ if text.is_some() => "keyDown",
                 _ => "rawKeyDown",
             };
-            let vk = key_def(key).map(|d| d.2).unwrap_or(0);
+            let vk = def.map(|d| d.2).unwrap_or(0);
             let mut p = json!({
                 "type": t, "key": key, "code": code, "modifiers": modifiers,
                 "windowsVirtualKeyCode": vk,
             });
             if let Some(tx) = text {
+                p["unmodifiedText"] = json!(tx);
                 p["text"] = json!(tx);
+            }
+            if action == "down"
+                && let Some(cmd) = mac_command(*modifiers, key)
+            {
+                p["commands"] = json!([cmd]);
             }
             ("Input.dispatchKeyEvent", p)
         }
@@ -178,9 +194,35 @@ pub fn to_cdp(ev: &InputEvent) -> (&'static str, Value) {
     }
 }
 
+/// Cmd shortcuts on macOS: Chrome's renderer gets editing commands from the OS key
+/// bindings there, which synthetic key events skip, so they are named explicitly. Ctrl
+/// shortcuts (Windows/Linux) are handled by the renderer itself.
+fn mac_command(modifiers: u32, key: &str) -> Option<&'static str> {
+    if modifiers & META == 0 || modifiers & (CTRL | ALT) != 0 {
+        return None;
+    }
+    let shift = modifiers & SHIFT != 0;
+    Some(match (key.to_ascii_lowercase().as_str(), shift) {
+        ("a", false) => "selectAll",
+        ("c", false) => "copy",
+        ("x", false) => "cut",
+        ("v", false) => "paste",
+        ("z", false) => "undo",
+        ("z", true) => "redo",
+        ("arrowleft", false) => "moveToBeginningOfLine",
+        ("arrowright", false) => "moveToEndOfLine",
+        ("arrowleft", true) => "moveToBeginningOfLineAndModifySelection",
+        ("arrowright", true) => "moveToEndOfLineAndModifySelection",
+        ("arrowup", false) => "moveToBeginningOfDocument",
+        ("arrowdown", false) => "moveToEndOfDocument",
+        ("backspace", false) => "deleteToBeginningOfLine",
+        _ => return None,
+    })
+}
+
 /// Plain pointer movement doesn't take control away from the agent; everything else does.
 pub fn takes_control(ev: &InputEvent) -> bool {
-    !matches!(ev, InputEvent::Mouse { action, .. } if action == "moved")
+    !matches!(ev, InputEvent::Mouse { action, .. } if action == "moved" || action == "move")
 }
 
 #[cfg(test)]
@@ -243,5 +285,53 @@ mod tests {
             modifiers: 0
         }));
         assert!(takes_control(&InputEvent::InsertText { text: "x".into() }));
+    }
+
+    #[test]
+    fn dom_action_names_and_enter_text() {
+        let mouse = |action: &str| {
+            to_cdp(&InputEvent::Mouse {
+                action: action.into(),
+                x: 1.0,
+                y: 1.0,
+                button: Some("left".into()),
+                click_count: 1,
+                modifiers: 0,
+            })
+            .1["type"]
+                .clone()
+        };
+        assert_eq!(mouse("down"), "mousePressed");
+        assert_eq!(mouse("up"), "mouseReleased");
+        assert_eq!(mouse("move"), "mouseMoved");
+        assert!(!takes_control(&InputEvent::Mouse {
+            action: "move".into(),
+            x: 0.0,
+            y: 0.0,
+            button: None,
+            click_count: 0,
+            modifiers: 0
+        }));
+        let key = |k: &str, m: u32| {
+            to_cdp(&InputEvent::Key {
+                action: "down".into(),
+                key: k.into(),
+                code: k.into(),
+                modifiers: m,
+                text: None,
+            })
+            .1
+        };
+        let enter = key("Enter", 0);
+        assert_eq!(enter["type"], "keyDown");
+        assert_eq!(enter["text"], "\r");
+        assert_eq!(key("Enter", CTRL)["type"], "rawKeyDown");
+        assert_eq!(key("Backspace", 0)["type"], "rawKeyDown");
+        assert!(key("Backspace", 0).get("text").is_none());
+        // Cmd shortcuts carry editing commands; Ctrl ones don't.
+        assert_eq!(key("a", META)["commands"], json!(["selectAll"]));
+        assert_eq!(key("z", META | SHIFT)["commands"], json!(["redo"]));
+        assert!(key("a", CTRL).get("commands").is_none());
+        assert!(key("q", META).get("commands").is_none());
     }
 }

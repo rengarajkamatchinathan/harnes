@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -25,6 +26,9 @@ pub enum BrowserError {
     Unsupported { version: String },
     #[error("couldn't start the browser: {0}")]
     Launch(String),
+    /// A bad request from the client (unknown tab, not a web address).
+    #[error("{0}")]
+    Invalid(String),
     #[error(transparent)]
     Cdp(#[from] CdpError),
 }
@@ -37,6 +41,17 @@ pub trait BrowserBackend: Send + Sync {
     async fn connect(&self) -> Result<CdpClient, BrowserError>;
     /// Close the browser (daemon shutdown, `browser.data.clear`).
     async fn shutdown(&self);
+    /// The browser shows real windows (not headless).
+    fn headed(&self) -> bool {
+        false
+    }
+    /// Restart the browser with real windows (`browser.popout`). Every target of the old
+    /// connection is gone afterwards; the caller re-opens its tabs.
+    async fn relaunch_headed(&self) -> Result<CdpClient, BrowserError> {
+        Err(BrowserError::Launch(
+            "this browser can't show a window".into(),
+        ))
+    }
 }
 
 /// Profile kind (research §4.1, SA-28a).
@@ -168,7 +183,7 @@ pub fn prepare_profile(dir: &Path) -> std::io::Result<()> {
 }
 
 struct Running {
-    _tree: ProcessTree,
+    tree: ProcessTree,
     client: CdpClient,
 }
 
@@ -178,15 +193,19 @@ pub struct SystemChromeBackend {
     tasks: TaskTracker,
     installed: Mutex<Option<Vec<InstalledBrowser>>>,
     running: Mutex<Option<Running>>,
+    /// Headless right now (`cfg.headless` until popped out; back to it on the next
+    /// launch after the windowed browser went away).
+    headless: AtomicBool,
 }
 
 impl SystemChromeBackend {
     pub fn new(cfg: SystemChromeConfig, tasks: TaskTracker) -> SystemChromeBackend {
         SystemChromeBackend {
-            cfg,
             tasks,
             installed: Mutex::new(None),
             running: Mutex::new(None),
+            headless: AtomicBool::new(cfg.headless),
+            cfg,
         }
     }
 
@@ -224,8 +243,10 @@ impl SystemChromeBackend {
         prepare_profile(&profile).map_err(|e| BrowserError::Launch(e.to_string()))?;
         std::fs::create_dir_all(self.cfg.downloads_dir())
             .map_err(|e| BrowserError::Launch(e.to_string()))?;
+        let mut cfg = self.cfg.clone();
+        cfg.headless = self.headless.load(Ordering::SeqCst);
         let mut cmd = tokio::process::Command::new(&exe);
-        cmd.args(launch_args(&self.cfg))
+        cmd.args(launch_args(&cfg))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -240,11 +261,24 @@ impl SystemChromeBackend {
                 self.cfg.launch_timeout,
             )
             .await?;
-        tracing::info!(exe = %exe.display(), "browser started");
-        Ok(Running {
-            _tree: tree,
-            client,
-        })
+        tracing::info!(exe = %exe.display(), headless = cfg.headless, "browser started");
+        Ok(Running { tree, client })
+    }
+
+    /// Close gracefully (cookies are flushed), then make sure the whole tree has exited:
+    /// a new browser on the same profile would otherwise hand off to the old one and quit.
+    async fn close(r: Running) {
+        let Running { mut tree, client } = r;
+        let _ = client
+            .call_timeout(None, "Browser.close", json!({}), Duration::from_secs(3))
+            .await;
+        if tokio::time::timeout(Duration::from_secs(3), tree.wait())
+            .await
+            .is_err()
+        {
+            let _ = tree.kill_tree();
+            let _ = tokio::time::timeout(Duration::from_secs(3), tree.wait()).await;
+        }
     }
 }
 
@@ -271,21 +305,45 @@ impl BrowserBackend for SystemChromeBackend {
         {
             return Ok(r.client.clone());
         }
-        *g = None;
+        if g.take().is_some() {
+            // The browser went away (crash, or the user closed the popped-out window):
+            // start it the configured way again.
+            self.headless.store(self.cfg.headless, Ordering::SeqCst);
+        }
         let r = self.launch().await?;
         let c = r.client.clone();
         *g = Some(r);
         Ok(c)
     }
 
+    fn headed(&self) -> bool {
+        !self.headless.load(Ordering::SeqCst)
+    }
+
+    async fn relaunch_headed(&self) -> Result<CdpClient, BrowserError> {
+        let mut g = self.running.lock().await;
+        if let Some(r) = g.take() {
+            Self::close(r).await;
+        }
+        self.headless.store(false, Ordering::SeqCst);
+        match self.launch().await {
+            Ok(r) => {
+                let c = r.client.clone();
+                *g = Some(r);
+                Ok(c)
+            }
+            Err(e) => {
+                self.headless.store(self.cfg.headless, Ordering::SeqCst);
+                Err(e)
+            }
+        }
+    }
+
     async fn shutdown(&self) {
         let r = self.running.lock().await.take();
         if let Some(r) = r {
             // Graceful close lets Chrome flush cookies; the tree is killed on drop anyway.
-            let _ = r
-                .client
-                .call_timeout(None, "Browser.close", json!({}), Duration::from_secs(3))
-                .await;
+            Self::close(r).await;
         }
         if self.cfg.profile == ProfileKind::Ephemeral {
             let _ = std::fs::remove_dir_all(self.cfg.profile_dir());

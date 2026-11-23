@@ -157,6 +157,7 @@ pub(crate) async fn run(rt: Arc<AgentRuntime>, turn: Arc<TurnCtx>) -> Result<(),
         taint: taint_cell,
         step_cp: None,
         serial: Mutex::new(None),
+        verify: Verify::default(),
     };
     let res = r.go().await;
     r.rt.taints.leave(&r.sid, &r.turn.turn_id);
@@ -237,6 +238,33 @@ struct Run {
     agent: Option<crate::runtime::agents::AgentDef>,
     /// Hooks of this turn (06 §12; Code with hooks configured).
     hooks: Option<Arc<crate::runtime::hooks::TurnHooks>>,
+    /// Auto-verify bookkeeping (ticket 47 phase 3).
+    verify: Verify,
+}
+
+/// Auto-verify (ticket 47 phase 3): did this turn change files after it last looked at the
+/// running app, and has it been asked to check already?
+#[derive(Debug, Default)]
+struct Verify {
+    edited: bool,
+    asked: bool,
+}
+
+impl Verify {
+    /// Track one successful call.
+    fn saw(&mut self, tool: &str) {
+        if matches!(
+            tool,
+            "edit" | "write" | "patch" | "apply_patch" | "multi_edit"
+        ) {
+            self.edited = true;
+        } else if matches!(
+            tool,
+            "browser_screenshot" | "browser_snapshot" | "browser_console" | "browser_read"
+        ) {
+            self.edited = false;
+        }
+    }
 }
 
 impl Run {
@@ -490,6 +518,7 @@ impl Run {
                     // a `turn.end` hook may ask to continue (D48).
                     if self.wait_for_children().await?
                         || self.turn_end_hook(&mut hook_continues).await?
+                        || self.auto_verify()?
                     {
                         continue;
                     }
@@ -545,6 +574,37 @@ impl Run {
         let text = prompts::render(
             fragments::HOOK_CONTINUE.trim_end(),
             &[("message", message.trim())],
+            &[],
+        );
+        self.append_synthetic(&text)?;
+        Ok(true)
+    }
+
+    /// Auto-verify (ticket 47 phase 3): the turn is about to end after changing files while
+    /// one of the session's dev servers runs with `autoVerify` on, and it hasn't looked at
+    /// the app since. Ask once per turn to check the change there.
+    fn auto_verify(&mut self) -> Result<bool, TurnError> {
+        if self.verify.asked || !self.verify.edited || self.settings.kind != SessionKind::Code {
+            return Ok(false);
+        }
+        let Some(dev) = self.rt.preview.clone() else {
+            return Ok(false);
+        };
+        let servers = dev.verify_targets(&self.sid);
+        if servers.is_empty() {
+            return Ok(false);
+        }
+        self.verify.asked = true;
+        let names: Vec<String> = servers
+            .iter()
+            .map(|s| match &s.url {
+                Some(u) => format!("the dev server `{}` ({u})", s.name),
+                None => format!("the dev server `{}`", s.name),
+            })
+            .collect();
+        let text = prompts::render(
+            fragments::AUTO_VERIFY.trim_end(),
+            &[("servers", &names.join(" and "))],
             &[],
         );
         self.append_synthetic(&text)?;
@@ -1272,6 +1332,9 @@ impl Run {
                 part_id: pid.clone(),
                 part: wire::wire_part(pid.clone(), &p, spill_ref.clone()),
             }))?;
+            if oc == ToolOutcome::Ok {
+                self.verify.saw(&c.call.name);
+            }
             ended.push(ToolEnded {
                 call_id: c.call.id.0.clone(),
                 outcome: oc,

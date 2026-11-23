@@ -36,6 +36,13 @@ export function summarizeTool(name: string, input: unknown, outcome: ToolOutcome
   if (name.startsWith("memory_")) return { icon: "memory", title: "Memory updated", memory: true };
   if (name.startsWith("artifact_")) return { icon: "file", title: str(inp.title) || "Artifact", artifact: true };
   if (name.startsWith("browser_")) return { icon: "globe", title: `Browser · ${name.slice(8).replace(/_/g, " ")}`, browser: true };
+  if (name === "preview_start") {
+    const n = str(inp.name);
+    const cmd = [str(inp.runtimeExecutable) || str(inp.program), ...(Array.isArray(inp.runtimeArgs) ? inp.runtimeArgs.map(str) : [])].filter(Boolean).join(" ");
+    return { icon: "play", title: outcome === "error" ? `Couldn't start ${n ? `\`${n}\`` : "the dev server"}` : `${outcome ? "Started" : "Starting"} dev server ${n ? `\`${n}\`` : ""}${cmd ? ` · \`${short(cmd, 50)}\`` : ""}`.trim() };
+  }
+  if (name === "preview_stop") return { icon: "stop", title: str(inp.name) ? `Stopped dev server \`${str(inp.name)}\`` : "Stopped dev servers" };
+  if (name === "preview_logs") return { icon: "terminal", title: `Read dev server logs${str(inp.name) ? ` · \`${str(inp.name)}\`` : ""}` };
   if (name === "shell" || name === "bash") {
     const cmd = short(str(inp.command), 80);
     const failed = outcome === "error";
@@ -98,6 +105,9 @@ export function toolActivity(name: string): string {
   if (name === "web_search") return "Searching the web";
   if (name === "web_fetch") return "Reading a web page";
   if (name.startsWith("browser_")) return "Using the browser";
+  if (name === "preview_start") return "Starting a dev server";
+  if (name === "preview_stop") return "Stopping a dev server";
+  if (name === "preview_logs") return "Reading server logs";
   if (name.startsWith("memory_")) return "Updating memory";
   if (name.startsWith("artifact_")) return "Creating an artifact";
   if (name === "todo_write") return "Planning";

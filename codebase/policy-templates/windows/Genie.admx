@@ -229,6 +229,18 @@
       <enabledValue><decimal value="1" /></enabledValue>
       <disabledValue><decimal value="0" /></disabledValue>
     </policy>
+    <policy name="BrowserAgentLocalOnly" class="Machine" displayName="$(string.BrowserAgentLocalOnly)" explainText="$(string.BrowserAgentLocalOnly_Explain)" key="Software\Policies\Genie" valueName="browser.agentLocalOnly">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+    <policy name="BrowserUserLocalOnly" class="Machine" displayName="$(string.BrowserUserLocalOnly)" explainText="$(string.BrowserUserLocalOnly_Explain)" key="Software\Policies\Genie" valueName="browser.userLocalOnly">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
     <policy name="BrowserSiteAllowlist" class="Machine" displayName="$(string.BrowserSiteAllowlist)" explainText="$(string.BrowserSiteAllowlist_Explain)" key="Software\Policies\Genie" presentation="$(presentation.BrowserSiteAllowlist)">
       <parentCategory ref="Genie_Capabilities" />
       <supportedOn ref="SUPPORTED_Genie1" />

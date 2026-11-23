@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use genie_protocol::ask::BrowserConfirm;
-use genie_protocol::event::BrowserFrame;
+use genie_protocol::event::{BrowserFileChooser, BrowserFrame};
 
 /// The answer to a sensitive-action confirmation card (D21): Approve / Take over / Deny.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,11 +69,20 @@ pub trait BrowserHost: Send + Sync {
         false
     }
 
+    /// A turn is running in this session. The user's input and navigation pause the agent
+    /// only then (D56); outside a turn they just mark the page as changed.
+    fn turn_active(&self, _session_id: &str) -> bool {
+        true
+    }
+
     /// The banner state changed.
     fn control_changed(&self, _session_id: &str, _control: Control) {}
 
     /// The agent asked the user to take over (`browser_handoff`).
     fn handoff(&self, _session_id: &str, _reason: &str) {}
+
+    /// A page opened a file picker while the user is in control (`browser.file_chooser`).
+    fn file_chooser(&self, _session_id: &str, _chooser: BrowserFileChooser) {}
 }
 
 /// Receives screencast frames for one stream (02 §6.6 `browser.frame`, ephemeral).

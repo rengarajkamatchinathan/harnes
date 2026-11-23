@@ -1,0 +1,16 @@
+{
+  "name": "genie",
+  "private": true,
+  "description": "Convenience entry point: forwards to the Bun workspace in codebase/ so `bun i` and `bun start` work from the repo root.",
+  "packageManager": "bun@1.3.13",
+  "scripts": {
+    "postinstall": "bun install --cwd codebase",
+    "start": "bun run --cwd codebase start",
+    "dev": "bun run --cwd codebase dev",
+    "tauri": "bun run --cwd codebase tauri",
+    "web": "bun run --cwd codebase web",
+    "prep": "bun run --cwd codebase prep",
+    "typecheck": "bun run --cwd codebase typecheck",
+    "test": "bun run --cwd codebase test"
+  }
+}

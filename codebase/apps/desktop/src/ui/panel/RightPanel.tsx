@@ -54,6 +54,7 @@ export function RightPanel() {
         {/* The header's icon buttons switch tabs (D54); the panel just names what it shows. */}
         <h2 className="panel__title">{t(`panel.${tab}` as Parameters<typeof t>[0])}</h2>
         <span className="grow" data-tauri-drag-region />
+        <IconButton icon="chevronRight" size="sm" label={t("panel.minimize")} onClick={() => app.setUi({ panelMinimized: true })} />
         <IconButton
           icon="expand"
           size="sm"
@@ -71,7 +72,7 @@ export function RightPanel() {
         ) : tab === "artifact" ? (
           <ArtifactPanel sessionId={sid} />
         ) : tab === "browser" ? (
-          <BrowserPanel sessionId={sid} />
+          <BrowserPanel key={sid} sessionId={sid} />
         ) : tab === "changes" ? (
           <ChangesPanel sessionId={sid} />
         ) : tab === "files" ? (

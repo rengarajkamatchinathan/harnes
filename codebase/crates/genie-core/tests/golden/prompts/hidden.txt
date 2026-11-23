@@ -56,3 +56,5 @@ ready on :3000</system-update>
 <system-update>The previous reply was interrupted. Continue the task from where it stopped; check the state of files and tools before repeating actions.</system-update>
 === hook_continue
 <system-update>A project hook asked you to continue: tests failed</system-update>
+=== auto_verify
+<system-update>You changed files while the dev server `web` (http://localhost:5173) is running, and auto-verify is on for this project. Before you finish, check the change in the running app: open or reload the page with `browser_navigate`, read `browser_console` for errors, and look at the result with `browser_screenshot` (or `browser_snapshot`). If the page is blank or broken, read `preview_logs`. Fix what you find. If the change can't be seen in the app (tests, docs, build config), say so in one line instead of checking. Then finish with a short note on what you verified.</system-update>

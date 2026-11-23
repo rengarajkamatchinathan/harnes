@@ -57,23 +57,31 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="terminal-panel">
-      <div className="terminal-tabs" role="tablist" aria-label={t("panel.terminal")}>
-        {list.map((x) => (
-          <span key={x.id} className={`terminal-tab ${x.id === current?.id ? "is-active" : ""}`}>
-            <button role="tab" aria-selected={x.id === current?.id} className="list-button" onClick={() => setActive(x.id)}>
-              {x.title}
-              {x.exited && <span className="muted"> · {t("terminal.exitedShort")}</span>}
-            </button>
-            <IconButton icon="x" size="sm" label={t("terminal.close", { title: x.title })} onClick={() => close(x.id)} />
-          </span>
-        ))}
+      <div className="terminal-bar">
+        <div className="terminal-tabs" role="tablist" aria-label={t("panel.terminal")}>
+          {list.map((x) => {
+            const on = x.id === current?.id;
+            return (
+              <span key={x.id} className={`terminal-tab${on ? " is-active" : ""}${x.exited ? " is-exited" : ""}`}>
+                <button role="tab" aria-selected={on} className="terminal-tab__label" onClick={() => setActive(x.id)} title={x.exited ? `${x.title} · ${t("terminal.exitedShort")}` : x.title}>
+                  <span className="terminal-tab__dot" aria-hidden />
+                  <span className="terminal-tab__title">{x.title}</span>
+                  {x.exited && <span className="g-sr-only"> · {t("terminal.exitedShort")}</span>}
+                </button>
+                <IconButton className="terminal-tab__close" icon="x" size="sm" tooltip={false} label={t("terminal.close", { title: x.title })} onClick={() => close(x.id)} />
+              </span>
+            );
+          })}
+        </div>
         <IconButton icon="plus" size="sm" label={t("terminal.new")} disabled={busy || live >= MAX_TERMINALS} onClick={() => void open()} />
       </div>
-      {current && <TerminalView key={current.id} info={current} />}
+      <div className="terminal-body">{current && <TerminalView key={current.id} info={current} />}</div>
       {current?.exited && (
-        <div className="terminal-exit muted" role="status">
-          {current.lost ?? (current.code == null ? t("terminal.exitedNoCode") : t("terminal.exited", { code: current.code }))}
-          <Button size="sm" onClick={() => void open()} disabled={busy || live >= MAX_TERMINALS}>
+        <div className="terminal-exit" role="status">
+          <span className="terminal-exit__text">
+            {current.lost ?? (current.code == null ? t("terminal.exitedNoCode") : t("terminal.exited", { code: current.code }))}
+          </span>
+          <Button size="sm" icon="refresh" onClick={() => void open()} disabled={busy || live >= MAX_TERMINALS}>
             {t("terminal.new")}
           </Button>
         </div>
@@ -82,15 +90,37 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** Read the theme tokens so the terminal follows light/dark (05 §6). */
+// ANSI palettes tuned for each theme: xterm's defaults assume a dark background, so yellow,
+// cyan and white wash out on the light theme.
+const ANSI_LIGHT = {
+  black: "#24292f", red: "#c4314b", green: "#1a7f37", yellow: "#9a6700", blue: "#0b63c4", magenta: "#8250df", cyan: "#137a80", white: "#6e7781",
+  brightBlack: "#57606a", brightRed: "#d1242f", brightGreen: "#2da44e", brightYellow: "#bf8700", brightBlue: "#218bff", brightMagenta: "#a475f9", brightCyan: "#1b9aa0", brightWhite: "#8c959f",
+};
+const ANSI_DARK = {
+  black: "#3b3f45", red: "#f2777a", green: "#8fd18b", yellow: "#e9c46a", blue: "#6cb6ff", magenta: "#c49bff", cyan: "#5fd1d1", white: "#c9d1d9",
+  brightBlack: "#6e7681", brightRed: "#ff9492", brightGreen: "#a8e6a3", brightYellow: "#f5d76e", brightBlue: "#91cbff", brightMagenta: "#dcbdfb", brightCyan: "#8ce6e6", brightWhite: "#f0f3f6",
+};
+
+function isDark() {
+  const attr = document.documentElement.dataset.theme;
+  return attr ? attr === "dark" : !!matchMedia?.("(prefers-color-scheme: dark)").matches;
+}
+
+/** Read the theme tokens so the terminal follows light/dark (05 §6) and blends into the panel. */
 function themeFromCss(el: HTMLElement) {
   const cs = getComputedStyle(el);
   const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+  const bg = v("--bg", "#fff");
   return {
-    background: v("--code-bg", "#111"),
-    foreground: v("--text", "#ddd"),
+    ...(isDark() ? ANSI_DARK : ANSI_LIGHT),
+    background: bg,
+    foreground: v("--text", "#222"),
     cursor: v("--accent", "#2aa"),
-    selectionBackground: v("--focus-ring", "#3a6ea5"),
+    cursorAccent: bg,
+    selectionBackground: v("--accent-5", "#b6e3e6"),
+    scrollbarSliderBackground: "rgba(128,128,128,0.25)",
+    scrollbarSliderHoverBackground: "rgba(128,128,128,0.4)",
+    scrollbarSliderActiveBackground: "rgba(128,128,128,0.5)",
   };
 }
 
@@ -110,6 +140,11 @@ function TerminalView({ info }: { info: TermInfo }) {
       const term = new Terminal({
         fontFamily: getComputedStyle(el).getPropertyValue("--font-mono").trim() || "monospace",
         fontSize: 13,
+        lineHeight: 1.25,
+        fontWeightBold: "600",
+        cursorStyle: "bar",
+        cursorWidth: 2,
+        cursorInactiveStyle: "outline",
         cursorBlink: !matchMedia?.("(prefers-reduced-motion: reduce)").matches,
         screenReaderMode: true,
         scrollback: 5000,
@@ -152,9 +187,13 @@ function TerminalView({ info }: { info: TermInfo }) {
       const onResize = term.onResize(({ cols, rows }) => void app.terminals.resize(info.id, cols, rows));
       const ro = new ResizeObserver(() => fitNow());
       ro.observe(el);
+      // Follow Appearance changes while the terminal is open.
+      const mo = new MutationObserver(() => (term.options.theme = themeFromCss(el)));
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
       term.focus();
       cleanup = () => {
         ro.disconnect();
+        mo.disconnect();
         onData.dispose();
         onBinary.dispose();
         onResize.dispose();

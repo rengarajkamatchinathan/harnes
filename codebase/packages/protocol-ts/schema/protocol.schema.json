@@ -725,9 +725,31 @@
       ],
       "type": "object"
     },
+    "BrowserFileChooser": {
+      "description": "A file picker the page opened during take-over (SA-24). The client shows a native file\ndialog and answers with `browser.file_chooser.answer`.",
+      "properties": {
+        "chooser_id": {
+          "type": "string"
+        },
+        "multiple": {
+          "description": "The input accepts several files.",
+          "type": "boolean"
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "chooser_id",
+        "tab_id",
+        "multiple"
+      ],
+      "type": "object"
+    },
     "BrowserFrame": {
       "properties": {
         "device_scale": {
+          "description": "JPEG pixels per CSS pixel.",
           "format": "double",
           "type": "number"
         },
@@ -737,6 +759,7 @@
           "type": "integer"
         },
         "h": {
+          "description": "Viewport height in CSS pixels.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -754,6 +777,7 @@
           "type": "string"
         },
         "w": {
+          "description": "Viewport width in CSS pixels (`browser.input` coordinates are in `0..w`).",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -818,6 +842,22 @@
         "installed",
         "running",
         "profile_path"
+      ],
+      "type": "object"
+    },
+    "BrowserTabParams": {
+      "description": "`browser.copy`, `browser.tab.close`: one tab of a session.",
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id"
       ],
       "type": "object"
     },
@@ -1471,6 +1511,18 @@
         "client_kind",
         "client_version",
         "client_instance_id"
+      ],
+      "type": "object"
+    },
+    "CopyResult": {
+      "properties": {
+        "text": {
+          "description": "The page's selected text (empty when nothing is selected).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
       ],
       "type": "object"
     },
@@ -2232,6 +2284,29 @@
       ],
       "type": "object"
     },
+    "FileChooserAnswerParams": {
+      "description": "`browser.file_chooser.answer`: the files the user picked; empty cancels.",
+      "properties": {
+        "chooser_id": {
+          "type": "string"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "chooser_id"
+      ],
+      "type": "object"
+    },
     "FileIdResult": {
       "properties": {
         "file_id": {
@@ -2725,10 +2800,12 @@
               "type": "string"
             },
             "x": {
+              "description": "CSS pixels of the viewport (`0..BrowserFrame.w`).",
               "format": "double",
               "type": "number"
             },
             "y": {
+              "description": "CSS pixels of the viewport (`0..BrowserFrame.h`).",
               "format": "double",
               "type": "number"
             }
@@ -2975,6 +3052,93 @@
           "type": "object"
         }
       ]
+    },
+    "InspectParams": {
+      "description": "`browser.inspect`: the element at a point of the screencast (Element select, ticket 47).\n`x`/`y` are viewport CSS pixels like `browser.input`. `capture` adds a JPEG crop.",
+      "properties": {
+        "capture": {
+          "default": false,
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "InspectResult": {
+      "properties": {
+        "h": {
+          "format": "double",
+          "type": "number"
+        },
+        "html": {
+          "description": "`outerHTML`, at most 1500 characters.",
+          "type": "string"
+        },
+        "image_b64": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selector": {
+          "description": "A CSS selector for the element (unique when an id allows it).",
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "text": {
+          "description": "Visible text, at most 500 characters.",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "w": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "description": "The element's box in viewport CSS pixels.",
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "selector",
+        "tag",
+        "text",
+        "html",
+        "x",
+        "y",
+        "w",
+        "h",
+        "url"
+      ],
+      "type": "object"
     },
     "InstalledBrowser": {
       "properties": {
@@ -3802,6 +3966,51 @@
       ],
       "type": "object"
     },
+    "NavAction": {
+      "enum": [
+        "back",
+        "forward",
+        "reload"
+      ],
+      "type": "string"
+    },
+    "NavigateParams": {
+      "description": "`browser.navigate`: the user's own navigation in the Browser tab. It never prompts\n(research §4.2) and launches the browser and opens a tab when none exists.",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NavAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Instead of `url`."
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "description": "Defaults to the active tab (a new one when the session has none).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "What the user typed: a URL, `host[:port]` (https, http for localhost) or `about:blank`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
     "OkResult": {
       "description": "`{ok: true}`.",
       "properties": {
@@ -3811,6 +4020,22 @@
       },
       "required": [
         "ok"
+      ],
+      "type": "object"
+    },
+    "OpenFileParams": {
+      "description": "`browser.open_file`: preview a file of the session's folder (HTML, PDF, video, SVG) in a\nnew Browser tab; `path` is relative to the folder or absolute inside it (ticket 47).",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "path"
       ],
       "type": "object"
     },
@@ -4491,6 +4716,239 @@
           "type": "object"
         }
       ]
+    },
+    "PreviewAutoVerifyParams": {
+      "description": "`preview.auto_verify`: the ⋮ menu's **Auto-verify changes** for the session's project\n(`autoVerify` in `.genie/launch.json`).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "PreviewChanged": {
+      "description": "`preview.changed`: a session's dev servers changed (ticket 47); the full list.",
+      "properties": {
+        "servers": {
+          "items": {
+            "$ref": "#/$defs/PreviewServer"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "servers"
+      ],
+      "type": "object"
+    },
+    "PreviewListResult": {
+      "description": "`preview.list`.",
+      "properties": {
+        "auto_verify": {
+          "description": "The project's `autoVerify` (default on).",
+          "type": "boolean"
+        },
+        "config_error": {
+          "description": "`launch.json` exists but couldn't be read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "configs": {
+          "description": "Entry names in the session's `.genie/launch.json`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "servers": {
+          "description": "Servers started in this session (running or ended), in start order.",
+          "items": {
+            "$ref": "#/$defs/PreviewServer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "servers",
+        "configs",
+        "auto_verify"
+      ],
+      "type": "object"
+    },
+    "PreviewLogsParams": {
+      "description": "`preview.logs`: the last `lines` of a server's output (default 200).",
+      "properties": {
+        "lines": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "PreviewLogsResult": {
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "PreviewServer": {
+      "description": "One dev server of a session (`.genie/launch.json`, ticket 47 phase 2).",
+      "properties": {
+        "command": {
+          "description": "The command line, for display; `None` for a `url`-only entry.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "description": "Why it failed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The `name` of its `launch.json` entry.",
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/PreviewState"
+        },
+        "url": {
+          "description": "Where to open it (`url`, or `http://localhost:<port>`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
+    "PreviewStartParams": {
+      "description": "`preview.start`: start a `launch.json` entry (no prompt: the user asked).",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "PreviewState": {
+      "description": "Where a dev server is in its life.",
+      "oneOf": [
+        {
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "starting",
+          "description": "Spawned; waiting for its port to accept connections.",
+          "type": "string"
+        },
+        {
+          "const": "running",
+          "description": "Its port accepts connections (or, for a `url`-only entry, the URL answered).",
+          "type": "string"
+        },
+        {
+          "const": "exited",
+          "description": "The process ended or was stopped.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "It never came up (spawn error, port taken, exited or timed out while starting).",
+          "type": "string"
+        }
+      ]
+    },
+    "PreviewStopParams": {
+      "description": "`preview.stop`: one server, or all of the session's without `name`.",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
     },
     "ProjectCreateParams": {
       "properties": {
@@ -5695,6 +6153,20 @@
           "type": "object"
         },
         {
+          "$ref": "#/$defs/BrowserFileChooser",
+          "description": "A page opened a file picker while the user is in control (SA-24), ephemeral.",
+          "properties": {
+            "type": {
+              "const": "browser.file_chooser",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/TerminalOutput",
           "properties": {
             "type": {
@@ -6490,6 +6962,17 @@
       ],
       "type": "object"
     },
+    "TabIdResult": {
+      "properties": {
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tab_id"
+      ],
+      "type": "object"
+    },
     "TabInfo": {
       "properties": {
         "active": {
@@ -6510,6 +6993,24 @@
         "url",
         "title",
         "active"
+      ],
+      "type": "object"
+    },
+    "TabNewParams": {
+      "description": "`browser.tab.new`: a tab the user opened (`about:blank` without `url`); it becomes active.",
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id"
       ],
       "type": "object"
     },

@@ -44,6 +44,8 @@ pub struct Services {
     pub browser: Option<Arc<genie_browser::Browser>>,
     pub browser_backend: Option<Arc<dyn genie_browser::BrowserBackend>>,
     pub browser_host: Option<Arc<genie_core::runtime::browser::EngineBrowserHost>>,
+    /// Dev servers (ticket 47): `preview.*` methods and the agent's `preview_*` tools.
+    pub preview: Option<Arc<genie_tools::preview::DevServers>>,
     /// Artifacts (D28), projects/retrieval (D32), memory state (D31) and chunked blob
     /// uploads (02 §6.9): served by `crate::projects` / `crate::blobs`.
     pub artifacts: Option<Arc<genie_core::runtime::artifacts::ArtifactHub>>,
@@ -155,6 +157,9 @@ impl Services {
         if let Some(p) = &self.providers
             && let Some(h) = p.dispatch(state, conn, r)
         {
+            return h;
+        }
+        if let Some(h) = crate::preview::dispatch(self.preview.as_ref(), state, conn, r) {
             return h;
         }
         if r.method.starts_with("browser.") {
@@ -462,11 +467,57 @@ impl Services {
                             }
                             empty()
                         }
+                        n if n == m::BrowserPopout::NAME => {
+                            b.popout(&params::<m::BrowserPopout>(&r)?.session_id)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserCopy::NAME => {
+                            let p = params::<m::BrowserCopy>(&r)?;
+                            let text = b
+                                .copy_selection(&p.session_id, &p.tab_id)
+                                .await
+                                .map_err(berr)?;
+                            to_result(&genie_protocol::api::browser::CopyResult { text })
+                        }
+                        n if n == m::BrowserFileChooserAnswer::NAME => {
+                            b.file_chooser_answer(&params::<m::BrowserFileChooserAnswer>(&r)?)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
                         n if n == m::BrowserTabs::NAME => {
                             to_result(&b.tabs(&params::<m::BrowserTabs>(&r)?.session_id).await)
                         }
                         n if n == m::BrowserTabActivate::NAME => {
                             b.tab_activate(&params::<m::BrowserTabActivate>(&r)?)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserNavigate::NAME => to_result(
+                            &b.navigate(&params::<m::BrowserNavigate>(&r)?)
+                                .await
+                                .map_err(berr)?,
+                        ),
+                        n if n == m::BrowserTabNew::NAME => to_result(
+                            &b.tab_new(&params::<m::BrowserTabNew>(&r)?)
+                                .await
+                                .map_err(berr)?,
+                        ),
+                        n if n == m::BrowserInspect::NAME => to_result(
+                            &b.inspect(&params::<m::BrowserInspect>(&r)?)
+                                .await
+                                .map_err(berr)?,
+                        ),
+                        n if n == m::BrowserOpenFile::NAME => {
+                            let p = params::<m::BrowserOpenFile>(&r)?;
+                            let path = preview_file(&st, &p.session_id, &p.path)?;
+                            to_result(&b.open_file(&p.session_id, &path).await.map_err(berr)?)
+                        }
+                        n if n == m::BrowserTabClose::NAME => {
+                            b.tab_close(&params::<m::BrowserTabClose>(&r)?)
                                 .await
                                 .map_err(berr)?;
                             empty()
@@ -838,4 +889,42 @@ pub(crate) fn read_settings_file(path: &Path) -> Result<Value, String> {
         Ok(v @ Value::Object(_)) => Ok(v),
         _ => Err(format!("{}: not a JSON object", path.display())),
     }
+}
+
+/// Files the Browser tab previews from chat (ticket 47).
+const PREVIEW_EXTS: &[&str] = &["html", "htm", "pdf", "mp4", "webm", "mov", "ogv", "svg"];
+
+/// `browser.open_file`: `path` must be a previewable file inside the session's folder.
+fn preview_file(state: &DaemonState, sid: &str, path: &str) -> Result<PathBuf, RpcError> {
+    let ws = state.registry().extra(sid).workspace.ok_or_else(|| {
+        RpcError::new(
+            ErrorKind::InvalidState,
+            "file previews need a Code session's folder",
+        )
+    })?;
+    let p = Path::new(path.trim());
+    let full = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        ws.join(p)
+    };
+    let canon = std::fs::canonicalize(&full)
+        .map_err(|_| RpcError::new(ErrorKind::NotFound, format!("{path} doesn't exist")))?;
+    let root = std::fs::canonicalize(&ws).unwrap_or(ws);
+    if !canon.starts_with(&root) || !canon.is_file() {
+        return Err(RpcError::invalid_params(
+            "only files inside the session's folder can be previewed",
+        ));
+    }
+    let ext = canon
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if !PREVIEW_EXTS.contains(&ext.as_str()) {
+        return Err(RpcError::invalid_params(format!(
+            "`.{ext}` files can't be previewed (HTML, PDF, video and SVG can)"
+        )));
+    }
+    Ok(canon)
 }

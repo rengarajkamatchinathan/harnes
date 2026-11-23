@@ -18,6 +18,7 @@ mod listener;
 mod manage;
 mod observe;
 mod ops;
+mod preview;
 mod projects;
 mod providers;
 mod registry;
@@ -377,8 +378,17 @@ fn build_engine(
         )
         .with_jobs(jobs.clone()),
     ));
+    // Dev servers (ticket 47): kill-trees on their own scope, ended with the daemon.
+    let dev_scope = root.child("preview");
+    let dev = Arc::new(genie_tools::preview::DevServers::new(
+        Arc::new(genie_core::runtime::host::SettingsDirs(registry.clone())),
+        dev_scope.tracker(),
+        dev_scope.token().clone(),
+    ));
+    services.preview = Some(dev.clone());
     rb = rb
         .shell(shell.clone())
+        .preview(&dev)
         .web(genie_tools::web::WebConfig::default());
     // Code file tools on the shared path locks + shadow-git checkpoints (06 §4.2, D49).
     let code_cfg = genie_core::runtime::code::code_config(
@@ -418,6 +428,10 @@ fn build_engine(
                 p.strings("browser.siteAllowlist"),
                 p.strings("browser.siteBlocklist"),
             );
+            sites.set_local_only(
+                p.bool("browser.agentLocalOnly") == Some(true),
+                p.bool("browser.userLocalOnly") == Some(true),
+            );
             if let Some(v) = h.value(None, "browser.sites")
                 && let Ok(list) =
                     serde_json::from_value::<Vec<genie_protocol::api::browser::SitePermission>>(v)
@@ -433,6 +447,14 @@ fn build_engine(
             sites,
             genie_browser::BrowserConfig {
                 downloads_dir: Some(ep.data_dir.join("browser").join("downloads")),
+                // Settings → ⋮ Keep cookies (ticket 47); read when needed, default on.
+                keep_cookies: hub.clone().map(|h| {
+                    genie_browser::Flag(Arc::new(move || {
+                        h.value(None, "browser.keepCookies")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true)
+                    }))
+                }),
                 ..Default::default()
             },
             btasks,
@@ -522,6 +544,7 @@ fn build_engine(
     {
         let sh = shell.clone();
         let br = services.browser.clone();
+        let dev = dev.clone();
         let scope = root.child("session-end");
         let sa = subagents.clone();
         eb = eb.on_session_end(Arc::new(move |id: &str, evicted: bool| {
@@ -531,6 +554,10 @@ fn build_engine(
             // An evicted actor keeps its running jobs; they report back when done.
             if !evicted || sh.running_jobs(id).is_empty() {
                 sh.end_session(id);
+            }
+            // Dev servers outlive turns and actor eviction, not the session.
+            if !evicted {
+                dev.end_session(id);
             }
             if let Some(b) = br.clone() {
                 let id = id.to_string();
@@ -619,6 +646,21 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
         }
     }));
     state.start_background();
+    if let Some(dev) = &services.preview {
+        use genie_protocol::methods::Method as _;
+        let weak = Arc::downgrade(&state);
+        dev.set_on_change(Arc::new(move |sid, servers| {
+            if let Some(st) = weak.upgrade() {
+                st.workspace_send(
+                    genie_protocol::methods::PreviewChangedNote::NAME,
+                    &genie_protocol::workspace::PreviewChanged {
+                        session_id: sid.to_string(),
+                        servers,
+                    },
+                );
+            }
+        }));
+    }
     if let Some(h) = &services.browser_host {
         let weak = Arc::downgrade(&state);
         h.set_can_answer(Arc::new(move |sid, kind| {
@@ -674,6 +716,9 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
     engine.shutdown();
     if let Some(m) = &services.mcp {
         m.shutdown();
+    }
+    if let Some(b) = &services.browser {
+        let _ = tokio::time::timeout(SHUTDOWN_GRACE, b.before_shutdown()).await;
     }
     if let Some(b) = &services.browser_backend {
         let _ = tokio::time::timeout(SHUTDOWN_GRACE, b.shutdown()).await;

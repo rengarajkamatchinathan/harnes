@@ -86,6 +86,9 @@ const citation: TokenizerAndRendererExtension = {
 };
 
 const safeHref = (href: string) => /^(https?:|mailto:)/i.test(href);
+/** A local file the Browser tab previews (ticket 47): HTML, PDF, video or SVG, no scheme. */
+export const PREVIEW_PATH = /^(?![a-z][\w+.-]*:)[^\s<>"'`]+\.(html?|pdf|mp4|webm|mov|ogv|svg)$/i;
+const previewAttrs = (path: string) => `data-preview="${escapeHtml(path)}" title="Open ${escapeHtml(path)} in the Browser tab"`;
 
 function make(settled: boolean) {
   const m = new Marked({ gfm: true });
@@ -95,9 +98,13 @@ function make(settled: boolean) {
       html: (t: Tokens.HTML | Tokens.Tag) => escapeHtml(t.text),
       link({ href, tokens }: Tokens.Link) {
         const inner = this.parser.parseInline(tokens);
+        if (PREVIEW_PATH.test(href)) return `<a href="#" class="preview-path" ${previewAttrs(href)}>${inner}</a>`;
         return safeHref(href) ? `<a href="#" data-href="${escapeHtml(href)}" title="${escapeHtml(href)}">${inner}</a>` : inner;
       },
       image: ({ href, text }: Tokens.Image) => (safeHref(href) ? `<a href="#" data-href="${escapeHtml(href)}">${escapeHtml(text || href)}</a>` : escapeHtml(text)),
+      codespan({ text }: Tokens.Codespan) {
+        return PREVIEW_PATH.test(text) ? `<code class="preview-path" role="button" tabindex="0" ${previewAttrs(text)}>${escapeHtml(text)}</code>` : false;
+      },
       code({ text, lang }: Tokens.Code) {
         const l = (lang ?? "").trim().split(/\s+/)[0];
         if (l === "mermaid" && settled) return `<div class="mermaid-block" data-mermaid="${encodeURIComponent(text)}"><pre><code>${escapeHtml(text)}</code></pre></div>`;

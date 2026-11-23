@@ -271,7 +271,7 @@ async fn serve_artifact(app: Arc<App>, path: String) -> Response<Vec<u8>> {
             None => respond(
                 StatusCode::NOT_FOUND,
                 "text/plain",
-                b"artifact runtime not built: run `pnpm --filter @genie/artifact-runtime build`"
+                b"artifact runtime not built: run `bun run build:runtime` in codebase/"
                     .to_vec(),
             ),
         };

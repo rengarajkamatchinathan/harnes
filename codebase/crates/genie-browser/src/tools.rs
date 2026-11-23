@@ -1,4 +1,4 @@
-//! The 18 `browser_*` tools (06 §10, research §5). Every action returns a status
+//! The 19 `browser_*` tools (06 §10, research §5). Every action returns a status
 //! (`ok | blocked | needs_confirmation | user_in_control | unknown`), the URL and title,
 //! and a compact snapshot diff framed as untrusted web content.
 
@@ -45,6 +45,7 @@ pub enum Which {
     Read,
     Find,
     Screenshot,
+    Console,
     Click,
     Type,
     FillForm,
@@ -60,13 +61,14 @@ pub enum Which {
 }
 
 impl Which {
-    pub const ALL: [Which; 18] = [
+    pub const ALL: [Which; 19] = [
         Which::Open,
         Which::Navigate,
         Which::Snapshot,
         Which::Read,
         Which::Find,
         Which::Screenshot,
+        Which::Console,
         Which::Click,
         Which::Type,
         Which::FillForm,
@@ -89,6 +91,7 @@ impl Which {
             Which::Read => "browser_read",
             Which::Find => "browser_find",
             Which::Screenshot => "browser_screenshot",
+            Which::Console => "browser_console",
             Which::Click => "browser_click",
             Which::Type => "browser_type",
             Which::FillForm => "browser_fill_form",
@@ -121,6 +124,9 @@ impl Which {
             }
             Which::Screenshot => {
                 "JPEG of the viewport, the full page or one ref. Use only when the snapshot is not enough (canvas, maps, visual checks)."
+            }
+            Which::Console => {
+                "Console errors and warnings of a tab since its page loaded: uncaught exceptions, `console.error/warn`, failed resource loads. `level`: `error`, `warning` (default: errors and warnings) or `all`. Use it to check a page you changed (reload it first)."
             }
             Which::Click => {
                 "Click an element by ref. Purchases, sends, deletes and similar actions ask the user first."
@@ -165,6 +171,7 @@ impl Which {
             Which::Read => schema_of::<ReadInput>(),
             Which::Find => schema_of::<FindInput>(),
             Which::Screenshot => schema_of::<ScreenshotInput>(),
+            Which::Console => schema_of::<ConsoleInput>(),
             Which::Click => schema_of::<ClickInput>(),
             Which::Type => schema_of::<TypeInput>(),
             Which::FillForm => schema_of::<FillFormInput>(),
@@ -408,6 +415,24 @@ struct UploadInput {
     tab_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum ConsoleLevel {
+    Error,
+    #[default]
+    Warning,
+    All,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ConsoleInput {
+    #[serde(default)]
+    tab_id: Option<String>,
+    /// Lowest level shown: `error`, `warning` (default) or `all`.
+    #[serde(default)]
+    level: Option<ConsoleLevel>,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 struct DownloadsInput {}
 
@@ -447,6 +472,7 @@ impl BrowserTool {
             Which::Read => with_op!(self, ctx, input, ReadInput, read),
             Which::Find => with_op!(self, ctx, input, FindInput, find),
             Which::Screenshot => with_op!(self, ctx, input, ScreenshotInput, screenshot),
+            Which::Console => with_op!(self, ctx, input, ConsoleInput, console),
             Which::Click => with_op!(self, ctx, input, ClickInput, click),
             Which::Type => with_op!(self, ctx, input, TypeInput, type_text),
             Which::FillForm => with_op!(self, ctx, input, FillFormInput, fill_form),
@@ -708,6 +734,51 @@ async fn screenshot(op: &mut Op<'_>, i: ScreenshotInput) -> R {
         title,
         note: Some(format!("image: {image} (jpeg, {} bytes)", bytes.len())),
         body: None,
+        origin,
+    })
+}
+
+/// The most console lines returned (newest kept).
+const CONSOLE_LINES: usize = 100;
+
+async fn console(op: &mut Op<'_>, i: ConsoleInput) -> R {
+    use crate::console::Level;
+    let t = op.tab(i.tab_id.as_deref()).await?;
+    let (url, title) = op.page_info(&t).await?;
+    op.gate(&url, Need::Read).await?;
+    let min = match i.level.unwrap_or_default() {
+        ConsoleLevel::Error => Level::Error,
+        ConsoleLevel::Warning => Level::Warning,
+        ConsoleLevel::All => Level::Debug,
+    };
+    let (entries, (errors, warnings)) = match op.b.console.lock() {
+        Ok(log) => (log.entries(&t.cdp_session, min), log.counts(&t.cdp_session)),
+        Err(_) => (Vec::new(), (0, 0)),
+    };
+    let skipped = entries.len().saturating_sub(CONSOLE_LINES);
+    let mut lines: Vec<String> = entries[skipped..].iter().map(|e| e.line()).collect();
+    if skipped > 0 {
+        lines.insert(0, format!("({skipped} older entries not shown)"));
+    }
+    let body = if lines.is_empty() {
+        "(nothing logged at this level since the page loaded)".to_string()
+    } else {
+        lines.join("\n")
+    };
+    let origin = crate::snapshot::origin_of(&url);
+    // Console text comes from the page: it is untrusted like page text.
+    op.mark_read_text(&origin, &body);
+    Ok(Outcome {
+        status: Status::Ok,
+        tab_id: Some(t.tab_id.clone()),
+        url,
+        title,
+        note: Some(format!(
+            "{errors} error{}, {warnings} warning{} since the page loaded",
+            if errors == 1 { "" } else { "s" },
+            if warnings == 1 { "" } else { "s" }
+        )),
+        body: Some(body),
         origin,
     })
 }
@@ -1252,8 +1323,9 @@ async fn downloads(op: &mut Op<'_>, _i: DownloadsInput) -> R {
 async fn handoff(op: &mut Op<'_>, i: HandoffInput) -> R {
     let sid = op.ctx.env.session_id.clone();
     op.s.set_control(crate::host::Control::User);
+    // One banner event carrying the reason ("handoff" is a user-in-control state); a
+    // following `control_changed(User)` would replace it and lose the reason.
     op.b.host.handoff(&sid, &i.reason);
-    op.b.host.control_changed(&sid, crate::host::Control::User);
     Ok(Outcome::status(
         Status::UserInControl,
         format!(

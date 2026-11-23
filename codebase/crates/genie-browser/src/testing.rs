@@ -4,11 +4,12 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use genie_protocol::api::browser::BrowserStatus;
-use genie_protocol::event::BrowserFrame;
+use genie_protocol::event::{BrowserFileChooser, BrowserFrame};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_util::task::TaskTracker;
@@ -234,9 +235,12 @@ pub struct RecordingHost {
     pub images: Mutex<Vec<usize>>,
     pub controls: Mutex<Vec<Control>>,
     pub handoffs: Mutex<Vec<String>>,
+    pub choosers: Mutex<Vec<BrowserFileChooser>>,
     pub user_urls: Mutex<Vec<String>>,
     pub attachments: Mutex<HashMap<String, PathBuf>>,
     pub vision: bool,
+    /// No turn is running (default: a turn is running).
+    pub idle: AtomicBool,
 }
 
 impl RecordingHost {
@@ -294,6 +298,10 @@ impl BrowserHost for RecordingHost {
             .unwrap_or(false)
     }
 
+    fn turn_active(&self, _session_id: &str) -> bool {
+        !self.idle.load(Ordering::SeqCst)
+    }
+
     fn control_changed(&self, _session_id: &str, c: Control) {
         if let Ok(mut g) = self.controls.lock() {
             g.push(c);
@@ -303,6 +311,12 @@ impl BrowserHost for RecordingHost {
     fn handoff(&self, _session_id: &str, reason: &str) {
         if let Ok(mut g) = self.handoffs.lock() {
             g.push(reason.to_string());
+        }
+    }
+
+    fn file_chooser(&self, _session_id: &str, chooser: BrowserFileChooser) {
+        if let Ok(mut g) = self.choosers.lock() {
+            g.push(chooser);
         }
     }
 }

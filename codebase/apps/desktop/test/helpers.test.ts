@@ -8,7 +8,7 @@ import { keyAction } from "../src/ui/chat/Composer";
 import { groupByDate } from "../src/ui/Sidebar";
 import { formFields } from "../src/ui/chat/AskCard";
 import { parseArtifactMessage } from "../src/ui/panel/ArtifactPanel";
-import { mapPoint, modifiers } from "../src/ui/panel/BrowserPanel";
+import { addressText, bannerState, copyChord, isPasteChord, keyText, mapPoint, modifiers } from "../src/ui/panel/BrowserPanel";
 import { sideBySide, splitDiff } from "../src/ui/panel/CodePanels";
 import { panelTabs } from "../src/ui/panel/RightPanel";
 import { nextStep } from "../src/ui/FirstRun";
@@ -138,10 +138,40 @@ describe("panels", () => {
     expect(parseArtifactMessage("ready")).toBeNull();
   });
 
-  it("maps canvas points by device scale (SA-24)", () => {
-    const p = mapPoint(150, 100, { left: 50, top: 0, width: 640, height: 400 }, { w: 2560, h: 1600, device_scale: 2 });
+  it("maps canvas points to CSS pixels of the viewport (SA-24)", () => {
+    // A 1280×800 CSS viewport drawn 640 px wide: 2 CSS px per client px, whatever the JPEG scale.
+    const p = mapPoint(150, 100, { left: 50, top: 0, width: 640, height: 400 }, { w: 1280, h: 800 });
     expect(p).toEqual({ x: 200, y: 200 });
+    // Clamped to the viewport.
+    expect(mapPoint(0, 900, { left: 50, top: 0, width: 640, height: 400 }, { w: 1280, h: 800 })).toEqual({ x: 0, y: 800 });
     expect(modifiers({ altKey: true, ctrlKey: false, metaKey: false, shiftKey: true })).toBe(9);
+  });
+
+  it("shows a blank address bar for a new tab (t47)", () => {
+    expect(addressText(undefined)).toBe("");
+    expect(addressText("about:blank")).toBe("");
+    expect(addressText("http://localhost:3000/")).toBe("http://localhost:3000/");
+  });
+
+  it("derives the browser banner and key text", () => {
+    expect(bannerState(null, true)).toBe("idle");
+    expect(bannerState({ control: "agent" }, true)).toBe("agent");
+    expect(bannerState({ control: "agent" }, false)).toBe("idle");
+    expect(bannerState({ control: "user" }, false)).toBe("user");
+    expect(bannerState({ control: "handoff", reason: "log in" }, true)).toBe("handoff");
+    expect(bannerState({ control: "waiting_for_approval" }, true)).toBe("waiting");
+    expect(keyText({ key: "a", ctrlKey: false, metaKey: false })).toBe("a");
+    expect(keyText({ key: " ", ctrlKey: false, metaKey: false })).toBe(" ");
+    expect(keyText({ key: "a", ctrlKey: false, metaKey: true })).toBeNull();
+    expect(keyText({ key: "Enter", ctrlKey: false, metaKey: false })).toBeNull();
+    expect(isPasteChord({ key: "v", ctrlKey: false, metaKey: true })).toBe(true);
+    expect(isPasteChord({ key: "V", ctrlKey: true, metaKey: false })).toBe(true);
+    expect(isPasteChord({ key: "v", ctrlKey: false, metaKey: false })).toBe(false);
+    const k = (key: string, mods: Partial<Record<"ctrlKey" | "metaKey" | "altKey" | "shiftKey", boolean>> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
+    expect(copyChord(k("c", { metaKey: true }))).toBe("copy");
+    expect(copyChord(k("X", { ctrlKey: true }))).toBe("cut");
+    expect(copyChord(k("c", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(copyChord(k("c"))).toBeNull();
   });
 
   it("splits diffs per file and side by side", () => {

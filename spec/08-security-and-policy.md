@@ -114,7 +114,7 @@ D38; t28.
 | Permissions | `permissions.deny/ask`, `disableBypassMode`, `defaultMode` floor |
 | MCP | `mcp.allowed` (name/url/package+checksum), `mcp.directoryOnly`, `mcp.disableLocal`, `mcp.sampling: off|ask` |
 | Skills | `skills.allowed`, `skills.directoryOnly`, `skills.disableUserUpload`, `skills.scriptsAllowed` (v2) |
-| Capabilities | `webSearch.enabled` + `allowedDomains/blockedDomains`, `webFetch.enabled/domains`, `codeExecution.enabled`, `artifacts.enabled`, `browser.enabled` + `siteAllowlist/Blocklist` + `browser.profile: persistent|ephemeral`, `projectRetrieval.embeddingsProvider` |
+| Capabilities | `webSearch.enabled` + `allowedDomains/blockedDomains`, `webFetch.enabled/domains`, `codeExecution.enabled`, `artifacts.enabled`, `browser.enabled` + `siteAllowlist/Blocklist` + `browser.profile: persistent|ephemeral` + `browser.agentLocalOnly` / `browser.userLocalOnly` (t47), `projectRetrieval.embeddingsProvider` |
 | Memory & data | `memory.enabled`, `chatSearch.enabled`, `retention.maxDays`, `encryption.required`, `export.allowed`, `incognito.allowed` |
 | Trust, hooks, agents | `trust.mode`, `trust.allowedRoots`, `hooks.enabled`, `hooks.managedOnly`, `subagents.maxDepth` |
 | Telemetry & audit | `telemetry.level: off|crash-only|usage`, `audit.otlp.endpoint`, `audit.jsonl.dir`, `audit.includeContent` |

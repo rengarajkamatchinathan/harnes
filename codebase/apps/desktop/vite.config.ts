@@ -18,7 +18,7 @@ function artifactRuntime(): Plugin {
     writeBundle(options) {
       const out = options.dir ?? fileURLToPath(new URL("./dist", import.meta.url));
       if (!existsSync(runtimeDist)) {
-        this.warn("packages/artifact-runtime/dist is missing: React artifacts won't render. Run `pnpm --filter @genie/artifact-runtime build`.");
+        this.warn("packages/artifact-runtime/dist is missing: React artifacts won't render. Run `bun run build:runtime` from codebase/.");
         return;
       }
       cpSync(runtimeDist, `${out}/artifact-runtime`, { recursive: true });

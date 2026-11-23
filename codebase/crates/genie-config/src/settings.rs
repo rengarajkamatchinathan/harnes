@@ -175,6 +175,10 @@ pub struct BrowserSettings {
     /// Per-site states set in Settings → Browser (`browser.sites.set`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sites: Option<Vec<genie_protocol::api::browser::SitePermission>>,
+    /// The Browser tab's ⋮ **Keep cookies** (ticket 47); default on. Off: cookies are
+    /// cleared when the daemon exits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_cookies: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -363,6 +367,13 @@ pub const UI_META: &[KeyMeta] = &[
     KeyMeta {
         key: "browser.enabled",
         title: "Browser",
+        scopes: USER,
+        restart_required: false,
+        advanced: false,
+    },
+    KeyMeta {
+        key: "browser.keepCookies",
+        title: "Keep browser cookies",
         scopes: USER,
         restart_required: false,
         advanced: false,

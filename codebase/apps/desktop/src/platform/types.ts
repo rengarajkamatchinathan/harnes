@@ -72,6 +72,8 @@ export interface Platform {
   saveFile(name: string, content: { text: string } | { base64: string }): Promise<string>;
   /** Native folder picker (Code: new session); null when cancelled. */
   pickFolder(title?: string): Promise<string | null>;
+  /** Native file picker (a page's file input during browser take-over); null when cancelled. */
+  pickFiles(opts: { multiple: boolean; title?: string }): Promise<string[] | null>;
   /** Native save dialog; resolves with the chosen path or null. */
   pickSavePath(defaultName: string, filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   /** OS notification (paused asks, workspace `notification`) when the window is in the background. */

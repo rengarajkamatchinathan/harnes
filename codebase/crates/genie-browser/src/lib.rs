@@ -11,7 +11,7 @@
 //! - [`site`] / [`sensitive`]: per-site `blocked | ask | read | act`, categories, URL
 //!   exfiltration guard; sensitive fields and commit verbs (D21).
 //! - [`session`]: the [`Browser`] service, per-session tabs/refs/control/taint/step caps,
-//!   downloads, `browser.action` audit; [`tools`]: the 18 `browser_*` tools.
+//!   downloads, `browser.action` audit; [`tools`]: the 19 `browser_*` tools.
 //! - [`screencast`]: `browser.screencast.*` with ack flow control and `browser.input`.
 //! - [`testing`]: an in-process fake CDP endpoint that replays recorded messages.
 //!
@@ -21,6 +21,7 @@
 
 pub mod backend;
 pub mod cdp;
+pub mod console;
 pub mod discover;
 pub mod host;
 pub mod input;
@@ -40,6 +41,6 @@ pub use backend::{
 };
 pub use cdp::{CdpClient, CdpError, CdpEvent, Wire};
 pub use host::{BrowserHost, ConfirmDecision, ConfirmRequest, Control, FrameSink, NoHost};
-pub use session::{Browser, BrowserConfig, Outcome, Status};
+pub use session::{Browser, BrowserConfig, Flag, Outcome, Status};
 pub use site::SitePolicy;
 pub use tools::tools;

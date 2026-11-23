@@ -69,6 +69,7 @@ function PanelButtons({ hasArtifacts }: { hasArtifacts: boolean }) {
             className={on ? "is-on" : ""}
             aria-pressed={on}
             label={t(`panel.${tab}` as Parameters<typeof t>[0])}
+            shortcut={tab === "browser" ? (/Mac/i.test(navigator.platform) ? "⌘⇧B" : "Ctrl+Shift+B") : undefined}
             onClick={() => app.setUi(on ? { panelOpen: false } : { panelOpen: true, panelTab: tab })}
           />
         );
@@ -285,6 +286,14 @@ function SessionView({ id }: { id: string }) {
     if (m.artifacts.length && !code) app.setUi({ panelOpen: true, panelTab: "artifact" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [m.artifacts.length]);
+  // Show the Browser tab when Genie starts browsing, and whenever it needs the user there
+  // (hand-off, approval) (05 §9).
+  const browsing = m.browser.actions.length > 0;
+  const browserCtl = m.browser.control?.control;
+  useEffect(() => {
+    if (browsing || browserCtl === "handoff" || browserCtl === "waiting_for_approval") app.setUi({ panelOpen: true, panelTab: "browser" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browsing, browserCtl === "handoff" || browserCtl === "waiting_for_approval"]);
 
   const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
   const exportAs = async (format: "markdown" | "json") => {

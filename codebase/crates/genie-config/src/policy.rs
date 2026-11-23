@@ -379,6 +379,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "browser.siteAllowlist",
     "browser.siteBlocklist",
     "browser.profile",
+    "browser.agentLocalOnly",
+    "browser.userLocalOnly",
     "projectRetrieval.embeddingsProvider",
     "memory.enabled",
     "chatSearch.enabled",
@@ -450,6 +452,8 @@ const DISABLE: &[&str] = &[
     "skills.disableUserUpload",
     "hooks.managedOnly",
     "encryption.required",
+    "browser.agentLocalOnly",
+    "browser.userLocalOnly",
 ];
 const ENABLE: &[&str] = &[
     "incognito.allowed",

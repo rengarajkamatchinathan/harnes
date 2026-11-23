@@ -212,14 +212,28 @@ export interface BrowserControl {
   reason?: string | null;
 }
 
+/**
+ * A file picker the page opened during take-over (SA-24). The client shows a native file
+ * dialog and answers with `browser.file_chooser.answer`.
+ */
+export interface BrowserFileChooser {
+  chooser_id: string;
+  /** The input accepts several files. */
+  multiple: boolean;
+  tab_id: string;
+}
+
 export interface BrowserFrame {
+  /** JPEG pixels per CSS pixel. */
   device_scale: number;
   frame_seq: number;
+  /** Viewport height in CSS pixels. */
   h: number;
   jpeg_b64: string;
   stream_id: string;
   tab_id: string;
   ts: string;
+  /** Viewport width in CSS pixels (`browser.input` coordinates are in `0..w`). */
   w: number;
 }
 
@@ -235,6 +249,12 @@ export interface BrowserStatus {
   installed: InstalledBrowser[];
   profile_path: string;
   running: boolean;
+}
+
+/** `browser.copy`, `browser.tab.close`: one tab of a session. */
+export interface BrowserTabParams {
+  session_id: string;
+  tab_id: string;
 }
 
 export interface BudgetSetParams {
@@ -429,6 +449,11 @@ export interface ConnectedClient {
   connection_id: number;
   /** Served in degraded mode because the daemon is older and busy (01 §4.2). */
   degraded?: boolean;
+}
+
+export interface CopyResult {
+  /** The page's selected text (empty when nothing is selected). */
+  text: string;
 }
 
 /** Cost in US dollars, as estimated from the catalog prices (D27). */
@@ -654,6 +679,13 @@ export interface FileChange {
   path: string;
 }
 
+/** `browser.file_chooser.answer`: the files the user picked; empty cancels. */
+export interface FileChooserAnswerParams {
+  chooser_id: string;
+  files?: string[];
+  session_id: string;
+}
+
 export interface FileIdResult {
   file_id: string;
 }
@@ -798,6 +830,35 @@ export type InputEvent = ({ action: string; button?: string | null; click_count?
 
 /** What a client sends in `session.prompt` (02 §6.2). */
 export type InputPart = { text: string; type: "text" } | { blob_id: string; mime: string; name: string; type: "attachment" } | { server: string; type: "resource"; uri: string } | { id: string; type: "skill" } | { path: string; type: "file_ref" } | { args?: string; name: string; type: "command" };
+
+/**
+ * `browser.inspect`: the element at a point of the screencast (Element select, ticket 47).
+ * `x`/`y` are viewport CSS pixels like `browser.input`. `capture` adds a JPEG crop.
+ */
+export interface InspectParams {
+  capture?: boolean;
+  session_id: string;
+  tab_id: string;
+  x: number;
+  y: number;
+}
+
+export interface InspectResult {
+  h: number;
+  /** `outerHTML`, at most 1500 characters. */
+  html: string;
+  image_b64?: string | null;
+  /** A CSS selector for the element (unique when an id allows it). */
+  selector: string;
+  tag: string;
+  /** Visible text, at most 500 characters. */
+  text: string;
+  url: string;
+  w: number;
+  /** The element's box in viewport CSS pixels. */
+  x: number;
+  y: number;
+}
 
 export interface InstalledBrowser {
   kind: BrowserKind;
@@ -1036,9 +1097,34 @@ export interface NameParams {
   name: string;
 }
 
+export type NavAction = "back" | "forward" | "reload";
+
+/**
+ * `browser.navigate`: the user's own navigation in the Browser tab. It never prompts
+ * (research §4.2) and launches the browser and opens a tab when none exists.
+ */
+export interface NavigateParams {
+  /** Instead of `url`. */
+  action?: NavAction | null;
+  session_id: string;
+  /** Defaults to the active tab (a new one when the session has none). */
+  tab_id?: string | null;
+  /** What the user typed: a URL, `host[:port]` (https, http for localhost) or `about:blank`. */
+  url?: string | null;
+}
+
 /** `{ok: true}`. */
 export interface OkResult {
   ok: boolean;
+}
+
+/**
+ * `browser.open_file`: preview a file of the session's folder (HTML, PDF, video, SVG) in a
+ * new Browser tab; `path` is relative to the folder or absolute inside it (ticket 47).
+ */
+export interface OpenFileParams {
+  path: string;
+  session_id: string;
 }
 
 /** A stored message part, final value (`part.ended`). */
@@ -1151,6 +1237,75 @@ export interface PolicyEffectiveResult {
 
 /** What the ask card shows for a permission ask. */
 export type Preview = { path: string; type: "diff"; unified: string } | ({ command: string; cwd?: string | null; type: "command" }) | { type: "url"; url: string } | { args: unknown; server: string; tool: string; type: "mcp_args" } | { text: string; type: "text" } | { type: "unknown" };
+
+/**
+ * `preview.auto_verify`: the ⋮ menu's **Auto-verify changes** for the session's project
+ * (`autoVerify` in `.genie/launch.json`).
+ */
+export interface PreviewAutoVerifyParams {
+  enabled: boolean;
+  session_id: string;
+}
+
+/** `preview.changed`: a session's dev servers changed (ticket 47); the full list. */
+export interface PreviewChanged {
+  servers: PreviewServer[];
+  session_id: string;
+}
+
+/** `preview.list`. */
+export interface PreviewListResult {
+  /** The project's `autoVerify` (default on). */
+  auto_verify: boolean;
+  /** `launch.json` exists but couldn't be read. */
+  config_error?: string | null;
+  /** Entry names in the session's `.genie/launch.json`. */
+  configs: string[];
+  /** Servers started in this session (running or ended), in start order. */
+  servers: PreviewServer[];
+}
+
+/** `preview.logs`: the last `lines` of a server's output (default 200). */
+export interface PreviewLogsParams {
+  lines?: number | null;
+  name: string;
+  session_id: string;
+}
+
+export interface PreviewLogsResult {
+  text: string;
+}
+
+/** One dev server of a session (`.genie/launch.json`, ticket 47 phase 2). */
+export interface PreviewServer {
+  /** The command line, for display; `None` for a `url`-only entry. */
+  command?: string | null;
+  /** Why it failed. */
+  error?: string | null;
+  exit_code?: number | null;
+  /** The `name` of its `launch.json` entry. */
+  name: string;
+  pid?: number | null;
+  port?: number | null;
+  state: PreviewState;
+  /** Where to open it (`url`, or `http://localhost:<port>`). */
+  url?: string | null;
+}
+
+/** `preview.start`: start a `launch.json` entry (no prompt: the user asked). */
+export interface PreviewStartParams {
+  name: string;
+  session_id: string;
+}
+
+/** Where a dev server is in its life. */
+export type PreviewState = "unknown" | "starting" | "running" | "exited" | "failed";
+
+/** `preview.stop`: one server, or all of the session's without `name`. */
+export interface PreviewStopParams {
+  name?: string | null;
+  session_id: string;
+}
 
 export interface ProjectCreateParams {
   instructions?: string;
@@ -1376,7 +1531,7 @@ export interface SessionError {
 }
 
 /** 02 §4. Discriminated by `type`. */
-export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "browser.control" } & BrowserControl) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
+export type SessionEvent = ({ type: "session.created" } & SessionCreated) | ({ type: "session.updated" } & SessionUpdated) | ({ type: "message.admitted" } & MessageAdmitted) | ({ type: "inbox.changed" } & InboxChanged) | ({ type: "turn.started" } & TurnStarted) | ({ type: "step.started" } & StepStarted) | ({ type: "part.started" } & PartStarted) | ({ type: "part.ended" } & PartEnded) | ({ type: "tool.started" } & ToolStarted) | ({ type: "tool.ended" } & ToolEnded) | ({ type: "permission.asked" } & PermissionAsked) | ({ type: "permission.resolved" } & PermissionResolved) | ({ type: "step.ended" } & StepEnded) | ({ type: "retry.scheduled" } & RetryScheduled) | ({ type: "turn.settled" } & TurnSettled) | ({ type: "turn.interrupted" } & TurnInterrupted) | ({ type: "session.compacted" } & SessionCompacted) | ({ type: "artifact.versioned" } & ArtifactVersioned) | ({ type: "memory.changed" } & MemoryChanged) | ({ type: "subagent.started" } & SubagentStarted) | ({ type: "subagent.ended" } & SubagentEnded) | ({ type: "checkpoint.created" } & CheckpointCreated) | ({ type: "branch.switched" } & BranchSwitched) | ({ type: "lease.changed" } & LeaseChanged) | ({ type: "browser.action" } & BrowserAction) | ({ type: "hook.ran" } & HookRan) | ({ type: "session.error" } & SessionError) | ({ type: "part.delta" } & PartDelta) | ({ type: "tool.progress" } & ToolProgress) | ({ type: "usage.updated" } & UsageUpdated) | ({ type: "status" } & StatusEvent) | ({ type: "browser.frame" } & BrowserFrame) | ({ type: "browser.control" } & BrowserControl) | ({ type: "browser.file_chooser" } & BrowserFileChooser) | ({ type: "terminal.output" } & TerminalOutput) | { type: "Unknown" };
 
 /** 02 §3.3. */
 export interface SessionEventEnvelope {
@@ -1600,11 +1755,21 @@ export interface TabActivateParams {
   tab_id: string;
 }
 
+export interface TabIdResult {
+  tab_id: string;
+}
+
 export interface TabInfo {
   active: boolean;
   tab_id: string;
   title: string;
   url: string;
+}
+
+/** `browser.tab.new`: a tab the user opened (`about:blank` without `url`); it becomes active. */
+export interface TabNewParams {
+  session_id: string;
+  url?: string | null;
 }
 
 export interface TabsResult {

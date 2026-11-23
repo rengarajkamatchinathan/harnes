@@ -48,6 +48,7 @@ pub mod fragments {
     pub const BACKGROUND_DONE: &str = prompt!("hidden/background_done.md");
     pub const INTERRUPTED_RESUME: &str = prompt!("hidden/interrupted_resume.md");
     pub const HOOK_CONTINUE: &str = prompt!("hidden/hook_continue.md");
+    pub const AUTO_VERIFY: &str = prompt!("hidden/auto_verify.md");
 
     pub const TUNING_GPT: &str = prompt!("tuning/gpt.md");
     pub const TUNING_GEMINI: &str = prompt!("tuning/gemini.md");

@@ -71,10 +71,22 @@ export interface Requests {
   "browser.input": { params: T.BrowserInputParams; result: T.Empty };
   "browser.tabs": { params: T.SessionIdParams; result: T.TabsResult };
   "browser.tab.activate": { params: T.TabActivateParams; result: T.Empty };
+  "browser.navigate": { params: T.NavigateParams; result: T.TabIdResult };
+  "browser.tab.new": { params: T.TabNewParams; result: T.TabIdResult };
+  "browser.tab.close": { params: T.BrowserTabParams; result: T.Empty };
+  "browser.open_file": { params: T.OpenFileParams; result: T.TabIdResult };
+  "browser.inspect": { params: T.InspectParams; result: T.InspectResult };
   "browser.popout": { params: T.SessionIdParams; result: T.Empty };
+  "browser.copy": { params: T.BrowserTabParams; result: T.CopyResult };
+  "browser.file_chooser.answer": { params: T.FileChooserAnswerParams; result: T.Empty };
   "browser.sites.list": { params: T.Empty; result: T.SitesListResult };
   "browser.sites.set": { params: T.SitePermission; result: T.Empty };
   "browser.data.clear": { params: T.DataClearParams; result: T.Empty };
+  "preview.list": { params: T.SessionIdParams; result: T.PreviewListResult };
+  "preview.start": { params: T.PreviewStartParams; result: T.PreviewServer };
+  "preview.stop": { params: T.PreviewStopParams; result: T.Empty };
+  "preview.logs": { params: T.PreviewLogsParams; result: T.PreviewLogsResult };
+  "preview.auto_verify": { params: T.PreviewAutoVerifyParams; result: T.Empty };
   "terminal.open": { params: T.TerminalOpenParams; result: T.TerminalIdParams };
   "terminal.attach": { params: T.TerminalAttachParams; result: T.TerminalAttachResult };
   "terminal.input": { params: T.TerminalInputParams; result: T.Empty };
@@ -153,6 +165,7 @@ export interface Notifications {
   "commands.changed": T.CommandsChanged;
   "notification": T.UserNotification;
   "terminal.exited": T.TerminalExited;
+  "preview.changed": T.PreviewChanged;
   "memory.changed": T.MemoryChanged;
 }
 
@@ -231,10 +244,22 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "browser.input", direction: "request", needsLease: true },
   { name: "browser.tabs", direction: "request", needsLease: false },
   { name: "browser.tab.activate", direction: "request", needsLease: true },
+  { name: "browser.navigate", direction: "request", needsLease: true },
+  { name: "browser.tab.new", direction: "request", needsLease: true },
+  { name: "browser.tab.close", direction: "request", needsLease: true },
+  { name: "browser.open_file", direction: "request", needsLease: true },
+  { name: "browser.inspect", direction: "request", needsLease: false },
   { name: "browser.popout", direction: "request", needsLease: false },
+  { name: "browser.copy", direction: "request", needsLease: true },
+  { name: "browser.file_chooser.answer", direction: "request", needsLease: true },
   { name: "browser.sites.list", direction: "request", needsLease: false },
   { name: "browser.sites.set", direction: "request", needsLease: false },
   { name: "browser.data.clear", direction: "request", needsLease: false },
+  { name: "preview.list", direction: "request", needsLease: false },
+  { name: "preview.start", direction: "request", needsLease: false },
+  { name: "preview.stop", direction: "request", needsLease: false },
+  { name: "preview.logs", direction: "request", needsLease: false },
+  { name: "preview.auto_verify", direction: "request", needsLease: false },
   { name: "terminal.open", direction: "request", needsLease: false },
   { name: "terminal.attach", direction: "request", needsLease: false },
   { name: "terminal.input", direction: "request", needsLease: false },
@@ -306,6 +331,7 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "commands.changed", direction: "notification", needsLease: false },
   { name: "notification", direction: "notification", needsLease: false },
   { name: "terminal.exited", direction: "notification", needsLease: false },
+  { name: "preview.changed", direction: "notification", needsLease: false },
   { name: "memory.changed", direction: "notification", needsLease: false },
 ];
 
@@ -335,11 +361,18 @@ export class GenieClient {
     },
   };
   readonly browser = {
+    copy: (params: T.BrowserTabParams): Promise<T.CopyResult> => this.t.request("browser.copy", params) as Promise<T.CopyResult>,
     data: {
       clear: (params: T.DataClearParams): Promise<T.Empty> => this.t.request("browser.data.clear", params) as Promise<T.Empty>,
     },
+    file_chooser: {
+      answer: (params: T.FileChooserAnswerParams): Promise<T.Empty> => this.t.request("browser.file_chooser.answer", params) as Promise<T.Empty>,
+    },
     handback: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.handback", params) as Promise<T.Empty>,
     input: (params: T.BrowserInputParams): Promise<T.Empty> => this.t.request("browser.input", params) as Promise<T.Empty>,
+    inspect: (params: T.InspectParams): Promise<T.InspectResult> => this.t.request("browser.inspect", params) as Promise<T.InspectResult>,
+    navigate: (params: T.NavigateParams): Promise<T.TabIdResult> => this.t.request("browser.navigate", params) as Promise<T.TabIdResult>,
+    open_file: (params: T.OpenFileParams): Promise<T.TabIdResult> => this.t.request("browser.open_file", params) as Promise<T.TabIdResult>,
     popout: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.popout", params) as Promise<T.Empty>,
     screencast: {
       ack: (params: T.ScreencastAckParams): Promise<T.Empty> => this.t.request("browser.screencast.ack", params) as Promise<T.Empty>,
@@ -354,6 +387,8 @@ export class GenieClient {
     stop: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.stop", params) as Promise<T.Empty>,
     tab: {
       activate: (params: T.TabActivateParams): Promise<T.Empty> => this.t.request("browser.tab.activate", params) as Promise<T.Empty>,
+      close: (params: T.BrowserTabParams): Promise<T.Empty> => this.t.request("browser.tab.close", params) as Promise<T.Empty>,
+      new: (params: T.TabNewParams): Promise<T.TabIdResult> => this.t.request("browser.tab.new", params) as Promise<T.TabIdResult>,
     },
     tabs: (params: T.SessionIdParams): Promise<T.TabsResult> => this.t.request("browser.tabs", params) as Promise<T.TabsResult>,
     takeover: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.takeover", params) as Promise<T.Empty>,
@@ -454,6 +489,13 @@ export class GenieClient {
   readonly ping = (params: T.Empty = {}): Promise<T.Empty> => this.t.request("$/ping", params) as Promise<T.Empty>;
   readonly policy = {
     effective: (params: T.Empty = {}): Promise<T.PolicyEffectiveResult> => this.t.request("policy.effective", params) as Promise<T.PolicyEffectiveResult>,
+  };
+  readonly preview = {
+    auto_verify: (params: T.PreviewAutoVerifyParams): Promise<T.Empty> => this.t.request("preview.auto_verify", params) as Promise<T.Empty>,
+    list: (params: T.SessionIdParams): Promise<T.PreviewListResult> => this.t.request("preview.list", params) as Promise<T.PreviewListResult>,
+    logs: (params: T.PreviewLogsParams): Promise<T.PreviewLogsResult> => this.t.request("preview.logs", params) as Promise<T.PreviewLogsResult>,
+    start: (params: T.PreviewStartParams): Promise<T.PreviewServer> => this.t.request("preview.start", params) as Promise<T.PreviewServer>,
+    stop: (params: T.PreviewStopParams): Promise<T.Empty> => this.t.request("preview.stop", params) as Promise<T.Empty>,
   };
   readonly project = {
     create: (params: T.ProjectCreateParams): Promise<T.ProjectIdResult> => this.t.request("project.create", params) as Promise<T.ProjectIdResult>,

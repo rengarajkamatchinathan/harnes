@@ -188,10 +188,24 @@ methods! {
     BrowserInput = "browser.input", Request, true, browser::BrowserInputParams => Empty;
     BrowserTabs = "browser.tabs", Request, false, session::SessionIdParams => browser::TabsResult;
     BrowserTabActivate = "browser.tab.activate", Request, true, browser::TabActivateParams => Empty;
+    BrowserNavigate = "browser.navigate", Request, true, browser::NavigateParams => browser::TabIdResult;
+    BrowserTabNew = "browser.tab.new", Request, true, browser::TabNewParams => browser::TabIdResult;
+    BrowserTabClose = "browser.tab.close", Request, true, browser::BrowserTabParams => Empty;
+    BrowserOpenFile = "browser.open_file", Request, true, browser::OpenFileParams => browser::TabIdResult;
+    BrowserInspect = "browser.inspect", Request, false, browser::InspectParams => browser::InspectResult;
     BrowserPopout = "browser.popout", Request, false, session::SessionIdParams => Empty;
+    BrowserCopy = "browser.copy", Request, true, browser::BrowserTabParams => browser::CopyResult;
+    BrowserFileChooserAnswer = "browser.file_chooser.answer", Request, true, browser::FileChooserAnswerParams => Empty;
     BrowserSitesList = "browser.sites.list", Request, false, Empty => browser::SitesListResult;
     BrowserSitesSet = "browser.sites.set", Request, false, browser::SitePermission => Empty;
     BrowserDataClear = "browser.data.clear", Request, false, browser::DataClearParams => Empty;
+
+    // ---- dev servers (ticket 47 phase 2)
+    PreviewList = "preview.list", Request, false, session::SessionIdParams => browser::PreviewListResult;
+    PreviewStart = "preview.start", Request, false, browser::PreviewStartParams => browser::PreviewServer;
+    PreviewStop = "preview.stop", Request, false, browser::PreviewStopParams => Empty;
+    PreviewLogs = "preview.logs", Request, false, browser::PreviewLogsParams => browser::PreviewLogsResult;
+    PreviewAutoVerify = "preview.auto_verify", Request, false, browser::PreviewAutoVerifyParams => Empty;
 
     // ---- terminal (§6.7)
     TerminalOpen = "terminal.open", Request, false, browser::TerminalOpenParams => browser::TerminalIdParams;
@@ -276,6 +290,7 @@ methods! {
     CommandsChangedNote = "commands.changed", Notification, false, mcp::CommandsChanged => ();
     UserNotification = "notification", Notification, false, workspace::UserNotification => ();
     TerminalExited = "terminal.exited", Notification, false, workspace::TerminalExited => ();
+    PreviewChangedNote = "preview.changed", Notification, false, workspace::PreviewChanged => ();
     /// Memory changed outside a turn (`memory.update/delete/reset`, Settings → Memory).
     MemoryChangedNote = "memory.changed", Notification, false, crate::event::MemoryChanged => ();
 }

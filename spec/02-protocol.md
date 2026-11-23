@@ -222,17 +222,29 @@ Notification: `config.changed {keys, scope}`.
 | method | params → result |
 |---|---|
 | `browser.status` | → `{installed:[{kind:"chrome"|"edge"|"chromium", version, path}], running, profile_path}` |
-| `browser.screencast.start` | `{session_id, tab_id?, max_width, max_height, quality}` → `{stream_id}` |
+| `browser.screencast.start` | `{session_id, tab_id?, max_width, max_height, quality}` → `{stream_id}`. Without `tab_id` the stream follows the session's active tab and may start before any tab exists; it never launches the browser |
 | `browser.screencast.ack` | `{stream_id, frame_seq}` (flow control; CDP `screencastFrameAck`) |
 | `browser.screencast.stop` | `{stream_id}` |
 | `browser.takeover` / `browser.handback` / `browser.stop` | `{session_id}` (D21) |
-| `browser.input` | `{session_id, tab_id, event: MouseEvent|KeyEvent|WheelEvent|ImeEvent|InsertText}` (D56) |
+| `browser.input` | `{session_id, tab_id, event: MouseEvent|KeyEvent|WheelEvent|ImeEvent|InsertText}` (D56). During a turn, input other than pointer movement sets *user in control*; while no turn runs the user just uses the page, and the agent's next action gets the "user acted" note (t47) |
 | `browser.tabs` | `{session_id}` → `{tabs:[{tab_id, url, title, active}]}`; `browser.tab.activate` |
-| `browser.popout` | `{session_id}`: show the real Chrome/Edge window |
+| `browser.navigate` | `{session_id, tab_id?, url? \| action: "back"\|"forward"\|"reload"}` → `{tab_id}`: the user's own navigation (address bar). It never prompts, launches the browser, and opens a tab when the session has none. `url` is what the user typed: http(s), `host[:port]` (https; http for localhost) or `about:blank`; other schemes are rejected (t47) |
+| `browser.tab.new` / `browser.tab.close` | `{session_id, url?}` → `{tab_id}` (becomes the active tab) / `{session_id, tab_id}` (t47) |
+| `browser.popout` | `{session_id}`: show the real Chrome/Edge window (a headless browser restarts with windows; every session's tabs re-open at their URLs) |
+| `browser.copy` | `{session_id, tab_id}` → `{text}`: the page's selected text, only while the user is in control (SA-24) |
+| `browser.file_chooser.answer` | `{session_id, chooser_id, files:[path]}`: answer a `browser.file_chooser` event; empty `files` cancels |
 | `browser.sites.list` / `browser.sites.set` | per-site states `blocked|ask|read|act` |
 | `browser.data.clear` | `{what:"cookies"|"all"}` |
+| `browser.open_file` | `{session_id, path}` → `{tab_id}`: preview a file of the session's folder (`.html/.htm/.pdf/.mp4/.webm/.mov/.ogv/.svg`, inside the folder only) in a new tab, as `file://` (t47) |
+| `browser.inspect` | `{session_id, tab_id, x, y, capture?}` → `{selector, tag, text, html, x, y, w, h, url, image_b64?}`: Element select. The element at a viewport point (CSS px, like `browser.input`); `capture` adds a JPEG crop. Read-only, works whoever is in control (t47) |
+| `preview.list` | `{session_id}` → `{servers:[PreviewServer], configs:[name], auto_verify, config_error?}`: the session's dev servers and its `.genie/launch.json` entries (t47) |
+| `preview.start` / `preview.stop` | `{session_id, name}` → `PreviewServer`, answered once the port accepts connections (or after 60 s, still `starting`) / `{session_id, name?}` (no `name`: all). The user's own start never prompts (t47) |
+| `preview.logs` | `{session_id, name, lines?}` → `{text}`: the last lines of the server's stdout+stderr, ANSI stripped (t47) |
+| `preview.auto_verify` | `{session_id, enabled}`: the ⋮ menu's **Auto-verify changes**; writes the project's `autoVerify` to `.genie/launch.json` (t47) |
 
-`browser.frame` (ephemeral): `{stream_id, frame_seq, tab_id, jpeg_b64, w, h, device_scale, ts}`. Frames are base64 in NDJSON in v1; at ~60 KB per frame and 15 fps this is about 1.2 MB/s on a local socket, well within budget. The Tauri side decodes and hands an `ImageBitmap`-ready buffer to the webview.
+`PreviewServer`: `{name, state: "starting"|"running"|"exited"|"failed", url?, port?, command?, pid?, exit_code?, error?}`. `preview.changed {session_id, servers}` goes out on the workspace feed after every change; a server that turns `running` in the session on screen opens in its Browser tab. Servers outlive turns and actor eviction; `preview.stop`, `preview_stop`, session delete and daemon exit kill the whole process tree (t47).
+
+`browser.frame` (ephemeral): `{stream_id, frame_seq, tab_id, jpeg_b64, w, h, device_scale, ts}`; `w`/`h` are the viewport in CSS pixels (input coordinates use the same space) and `device_scale` is JPEG pixels per CSS pixel. `browser.control` (ephemeral): `{control: "agent"|"user"|"waiting_for_approval"|"handoff", reason?}`. `browser.file_chooser` (ephemeral): `{chooser_id, tab_id, multiple}`, sent when a page opens a file picker during take-over. Frames are base64 in NDJSON in v1; at ~60 KB per frame and 15 fps this is about 1.2 MB/s on a local socket, well within budget. The Tauri side decodes and hands an `ImageBitmap`-ready buffer to the webview.
 
 ### 6.7 Terminal (Code tab, D55)
 

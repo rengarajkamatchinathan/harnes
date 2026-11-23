@@ -10,6 +10,7 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type CSSProperties,
+  type Ref,
   type InputHTMLAttributes,
   type ReactElement,
   type ReactNode,
@@ -94,7 +95,8 @@ export function Tooltip({ content, shortcut, side = "bottom", children }: { cont
   return scoped ? tip : <RTooltip.Provider delayDuration={450}>{tip}</RTooltip.Provider>;
 }
 
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+/** A text input; `ref` reaches the `<input>` (React 19 passes it as a prop). */
+export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> }) {
   return <input className={cx("g-input", className)} {...rest} />;
 }
 

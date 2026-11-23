@@ -245,6 +245,9 @@ struct Inner {
     user: BTreeMap<String, SiteState>,
     admin_allow: Vec<String>,
     admin_block: Vec<String>,
+    /// Policy `browser.agentLocalOnly` / `browser.userLocalOnly` (ticket 47).
+    agent_local_only: bool,
+    user_local_only: bool,
 }
 
 /// Site permissions shared by every session of the daemon.
@@ -263,6 +266,48 @@ impl SitePolicy {
         if let Ok(mut g) = self.inner.write() {
             g.admin_allow = allow;
             g.admin_block = block;
+        }
+    }
+
+    /// Managed policy (ticket 47): `agent` keeps the agent's browser tools on local dev
+    /// servers; `user` does the same for the user's own address bar, tabs and chat links.
+    pub fn set_local_only(&self, agent: bool, user: bool) {
+        if let Ok(mut g) = self.inner.write() {
+            g.agent_local_only = agent;
+            g.user_local_only = user;
+        }
+    }
+
+    pub fn agent_local_only(&self) -> bool {
+        self.inner.read().map_or(true, |g| g.agent_local_only)
+    }
+
+    pub fn user_local_only(&self) -> bool {
+        self.inner.read().map_or(true, |g| g.user_local_only)
+    }
+
+    /// `Err(reason)` when policy keeps `url` (http/https) out of reach of the agent or user.
+    pub fn local_only_check(&self, url: &str, agent: bool) -> Result<(), String> {
+        let on = if agent {
+            self.agent_local_only()
+        } else {
+            self.user_local_only()
+        };
+        if !on || !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Ok(());
+        }
+        let host = host_of(url).unwrap_or_default();
+        if is_loopback(&host) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{host} is outside: your organization's policy limits the {} to local dev servers (localhost)",
+                if agent {
+                    "agent browser"
+                } else {
+                    "Browser tab"
+                }
+            ))
         }
     }
 
@@ -319,6 +364,11 @@ impl SitePolicy {
         if let Some(s) = g.user.get(&host) {
             return e(*s, Source::User);
         }
+        // Local dev servers need no approval (ticket 47): the agent previews and verifies
+        // the user's own app there. A user or admin block above still wins.
+        if is_loopback(&host) {
+            return e(SiteState::Act, Source::Default);
+        }
         if let Some(c) = category
             && c != Category::Messaging
         {
@@ -329,6 +379,16 @@ impl SitePolicy {
         }
         e(SiteState::Ask, Source::Default)
     }
+}
+
+/// `localhost`, `*.localhost`, `127.x.x.x` and `::1`.
+pub fn is_loopback(host: &str) -> bool {
+    let h = host.trim_start_matches('[').trim_end_matches(']');
+    h == "localhost"
+        || h.ends_with(".localhost")
+        || h == "::1"
+        || h.parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 // ---------------------------------------------------------------- exfiltration guard
@@ -437,6 +497,38 @@ mod tests {
             SiteState::Read
         );
         assert_eq!(p.effective("https://example.org").state, SiteState::Ask);
+        // Local-only policy (ticket 47).
+        p.set_local_only(true, false);
+        assert!(p.local_only_check("http://localhost:3000/", true).is_ok());
+        assert!(p.local_only_check("about:blank", true).is_ok());
+        assert!(
+            p.local_only_check("https://example.org/", true)
+                .unwrap_err()
+                .contains("agent browser")
+        );
+        assert!(p.local_only_check("https://example.org/", false).is_ok());
+        p.set_local_only(false, false);
+        // Local dev servers are allowed without asking (ticket 47), unless blocked.
+        for u in [
+            "http://localhost:5173/",
+            "http://127.0.0.1:3000",
+            "http://app.localhost/",
+            "http://[::1]:8080/",
+        ] {
+            assert_eq!(p.effective(u).state, SiteState::Act, "{u}");
+        }
+        p.set(&SitePermission {
+            origin: "localhost".into(),
+            state: SiteState::Blocked,
+        });
+        assert_eq!(
+            p.effective("http://localhost:5173/").state,
+            SiteState::Blocked
+        );
+        p.set(&SitePermission {
+            origin: "localhost".into(),
+            state: SiteState::Ask,
+        });
         assert_eq!(
             p.effective("https://mail.google.com").category,
             Some(Category::Messaging)

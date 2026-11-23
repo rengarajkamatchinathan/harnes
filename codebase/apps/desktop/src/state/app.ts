@@ -8,6 +8,7 @@ import {
   type ClientRef,
   type LeaseLost,
   type ModelInfo,
+  type PreviewChanged,
   type ProjectInfo,
   type ProviderInfo,
   type SessionEventEnvelope,
@@ -24,6 +25,7 @@ import { DEFAULT_APPEARANCE, type Appearance } from "@genie/ui";
 import { errorKind, errorMessage, type HostInfo, type HostMessage, type HostStatus, type Platform } from "../platform";
 import { Emitter } from "./emitter";
 import { SessionStore } from "./session";
+import { DevServers } from "./devServers";
 import { Terminals } from "./terminals";
 
 export type View = "main" | "settings" | "project";
@@ -66,6 +68,12 @@ export interface UiState {
   sidebarShow: "all" | "active";
   /** Slash commands used most recently first (the `/` menu's order, D58). */
   recentCommands: string[];
+  /** Web links clicked in chat open in the Browser tab (Cmd/Ctrl-click: system browser). */
+  browserOpenLinks: boolean;
+  /** The first outside link from chat asked "Browser tab or default browser?" (t47). */
+  browserLinkAsked: boolean;
+  /** The right panel is minimized to a pill (t47); opening any tab restores it. */
+  panelMinimized: boolean;
 }
 
 /** Folder paths compared loosely: the engine may report `\\?\C:\x` for a folder picked as `C:\x`. */
@@ -105,6 +113,9 @@ const DEFAULT_UI: UiState = {
   sidebarGroupByDate: false,
   sidebarShow: "all",
   recentCommands: [],
+  browserOpenLinks: true,
+  browserLinkAsked: false,
+  panelMinimized: false,
 };
 
 /** Where the user is, for the title-bar back/forward buttons. */
@@ -160,11 +171,63 @@ export class App extends Emitter {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly terminals: Terminals;
+  readonly devServers: DevServers;
 
   constructor(readonly platform: Platform) {
     super();
     this.client = new GenieClient({ request: (m, p) => platform.request(m, p) });
     this.terminals = new Terminals({ client: this.client, persistTerminals: (terminals) => this.setUi({ terminals }) });
+    this.devServers = new DevServers(this.client);
+  }
+
+  /** Element select (Cmd/Ctrl+Shift+S, ticket 47): the Browser tab picks an element. */
+  selectingElement = false;
+  /** Text and files for a session's composer (Element select); `n` changes per inject. */
+  composerInject: { sessionId: string; text: string; files: File[]; n: number } | null = null;
+
+  setSelectingElement(on: boolean) {
+    this.selectingElement = on;
+    if (on) this.setUi({ panelOpen: true, panelTab: "browser" });
+    this.changedNow();
+  }
+
+  injectComposer(sessionId: string, text: string, files: File[] = []) {
+    this.composerInject = { sessionId, text, files, n: (this.composerInject?.n ?? 0) + 1 };
+    this.changedNow();
+  }
+
+  /** The first outside link from chat, waiting for "Browser tab or default browser?". */
+  linkAsk: { sid: string; href: string } | null = null;
+
+  askLinks(sid: string, href: string) {
+    this.linkAsk = { sid, href };
+    this.changedNow();
+  }
+
+  /** `true`: Browser tab, `false`: default browser (both remembered), `null`: dismissed. */
+  answerLinks(pane: boolean | null) {
+    const ask = this.linkAsk;
+    this.linkAsk = null;
+    if (!ask || pane === null) return this.changedNow();
+    this.setUi({ browserOpenLinks: pane, browserLinkAsked: true });
+    const external = () => void this.platform.openExternal(ask.href).catch(() => {});
+    if (pane) {
+      this.setUi({ panelOpen: true, panelTab: "browser" });
+      void this.client.browser.tab.new({ session_id: ask.sid, url: ask.href }).catch(external);
+    } else external();
+  }
+
+  /** A local file clicked in chat (HTML, PDF, video, SVG) in the session's Browser tab. */
+  openFile(sessionId: string, path: string) {
+    this.setUi({ panelOpen: true, panelTab: "browser" });
+    void this.client.browser.open_file({ session_id: sessionId, path }).catch((e) => this.toast({ title: this.describeError(e), tone: "danger" }));
+  }
+
+  /** Show `url` in the session's Browser tab (a dev server, a server card's Open). */
+  openInBrowser(sessionId: string, url: string, quiet = false) {
+    this.setUi({ panelOpen: true, panelTab: "browser" });
+    // Quiet for automatic opens: with no browser installed the tab already says so.
+    void this.client.browser.navigate({ session_id: sessionId, url }).catch((e) => quiet || this.toast({ title: this.describeError(e), tone: "danger" }));
   }
 
   async start() {
@@ -208,6 +271,8 @@ export class App extends Emitter {
   }
 
   setUi(patch: Partial<UiState>) {
+    // Showing a panel tab brings a minimized panel back.
+    if (patch.panelOpen === true && patch.panelMinimized === undefined) patch = { ...patch, panelMinimized: false };
     const before = locOf(this.ui);
     this.ui = { ...this.ui, ...patch };
     const after = locOf(this.ui);
@@ -306,6 +371,7 @@ export class App extends Emitter {
       // The relay resubscribed sessions and the workspace feed itself (02 §3.1).
       void this.refreshLists();
       this.terminals.reattachAll();
+      this.devServers.refreshAll();
       return;
     }
     this.everReady = true;
@@ -360,6 +426,14 @@ export class App extends Emitter {
       case "terminal.exited":
         this.terminals.onExited(params as TerminalExited);
         return;
+      case "preview.changed": {
+        // A dev server that comes up in the session on screen opens in its Browser tab.
+        const p = params as PreviewChanged;
+        const up = this.devServers.onChanged(p);
+        const first = up.find((s) => s.url);
+        if (first?.url && p.session_id === this.ui.activeSession) this.openInBrowser(p.session_id, first.url, true);
+        return;
+      }
       case "session.synced":
         this.open.get((params as SessionSynced).session_id)?.markSynced();
         return;
