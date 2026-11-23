@@ -140,17 +140,14 @@ async fn sessions_survive_a_restart() {
 #[tokio::test]
 async fn missing_key_is_reported_and_start_fresh_sets_data_aside() {
     let dir = tempfile::tempdir().unwrap();
-    // A DB whose key lives in a key store this daemon will not see. (Written directly:
-    // an in-process daemon keeps its store open after `run` returns, which Windows
-    // won't let us rename.)
-    {
-        let opts = genie_store::StoreOptions::new(dir.path(), "genie-dev.db");
-        let lost = genie_store::MemoryKeyStore::new();
-        let store = genie_store::Store::open_with_keystore(&opts, &lost).unwrap();
-        store
-            .write(|tx| genie_store::sessions::ensure(tx, "ses_old"))
-            .unwrap();
-    }
+    // A daemon writes the DB with a key in its key store, then shuts down. Its store
+    // must be closed by then: on Windows an open handle would block the rename below.
+    let first = cfg(dir.path(), Arc::new(MemoryBackend::new()));
+    with_daemon(&first, |conn| async move {
+        create(&conn, false).await;
+        conn
+    })
+    .await;
 
     // Same data dir, but a key store without the DB key (e.g. another build's keychain).
     let other: Arc<dyn SecretBackend> = Arc::new(MemoryBackend::new());

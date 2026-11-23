@@ -91,6 +91,9 @@ fn now_ms() -> i64 {
 /// Artifacts of every session: staged versions, storage, path filtering.
 pub struct ArtifactHub {
     backend: Backend,
+    /// Artifacts of ephemeral (incognito) sessions: never written to the store.
+    memory: Backend,
+    ephemeral: OnceLock<crate::journal::Ephemeral>,
     conversation: OnceLock<Arc<dyn ConversationStore>>,
     staged: Mutex<HashMap<String, Vec<Staged>>>,
     enabled: AtomicBool,
@@ -104,6 +107,8 @@ impl ArtifactHub {
                 Some(s) => Backend::Store(s),
                 None => Backend::Memory(Mutex::new(MemArtifacts::default())),
             },
+            memory: Backend::Memory(Mutex::new(MemArtifacts::default())),
+            ephemeral: OnceLock::new(),
             conversation: OnceLock::new(),
             staged: Mutex::new(HashMap::new()),
             enabled: AtomicBool::new(true),
@@ -133,8 +138,27 @@ impl ArtifactHub {
         self.staged.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Which sessions keep their artifacts in memory only (incognito). Set once.
+    pub fn set_ephemeral(&self, f: crate::journal::Ephemeral) {
+        let _ = self.ephemeral.set(f);
+    }
+
+    fn for_session(&self, session: &str) -> &Backend {
+        match self.ephemeral.get() {
+            Some(f) if f(session) => &self.memory,
+            _ => &self.backend,
+        }
+    }
+
     fn stored_meta(&self, id: &str) -> Result<Option<ArtifactMeta>, Defect> {
-        match &self.backend {
+        if let Some(m) = Self::meta_in(&self.memory, id)? {
+            return Ok(Some(m));
+        }
+        Self::meta_in(&self.backend, id)
+    }
+
+    fn meta_in(backend: &Backend, id: &str) -> Result<Option<ArtifactMeta>, Defect> {
+        match backend {
             Backend::Store(s) => {
                 let a = s.read(|c| genie_store::artifacts::get(c, id)).map_err(sd)?;
                 Ok(a.map(|a| ArtifactMeta {
@@ -156,7 +180,14 @@ impl ArtifactHub {
 
     /// Every stored version of an artifact (all branches), by `n`.
     fn stored_versions(&self, id: &str) -> Result<Vec<Version>, Defect> {
-        match &self.backend {
+        if Self::meta_in(&self.memory, id)?.is_some() {
+            return Self::versions_in(&self.memory, id);
+        }
+        Self::versions_in(&self.backend, id)
+    }
+
+    fn versions_in(backend: &Backend, id: &str) -> Result<Vec<Version>, Defect> {
+        match backend {
             Backend::Store(s) => {
                 let v = s
                     .read(|c| genie_store::artifacts::versions(c, id))
@@ -181,7 +212,7 @@ impl ArtifactHub {
     }
 
     fn session_artifacts(&self, session: &str) -> Result<Vec<ArtifactMeta>, Defect> {
-        match &self.backend {
+        match self.for_session(session) {
             Backend::Store(s) => {
                 let v = s
                     .read(|c| genie_store::artifacts::for_session(c, session))
@@ -364,7 +395,7 @@ impl ArtifactHub {
     }
 
     fn persist(&self, s: &Staged, message_id: &str) -> Result<u32, Defect> {
-        match &self.backend {
+        match self.for_session(&s.meta.session_id) {
             Backend::Store(st) => {
                 let a = genie_store::artifacts::Artifact {
                     id: s.meta.id.clone(),

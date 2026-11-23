@@ -146,6 +146,66 @@ impl Journal for MemoryJournal {
     }
 }
 
+/// Whether a session must never reach disk (incognito, D24/D31; its subagents inherit
+/// it). The daemon answers from its session registry.
+pub type Ephemeral = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Routes each session's events: ephemeral sessions to process memory, the rest to the
+/// durable journal. Ephemeral sessions are therefore gone after a restart and leave no
+/// event rows behind.
+pub struct RoutedJournal {
+    durable: Arc<dyn Journal>,
+    memory: MemoryJournal,
+    ephemeral: Ephemeral,
+}
+
+impl RoutedJournal {
+    pub fn new(durable: Arc<dyn Journal>, ephemeral: Ephemeral) -> Self {
+        RoutedJournal {
+            durable,
+            memory: MemoryJournal::new(),
+            ephemeral,
+        }
+    }
+
+    fn pick(&self, session: &str) -> &dyn Journal {
+        if (self.ephemeral)(session) {
+            &self.memory
+        } else {
+            &*self.durable
+        }
+    }
+}
+
+impl Journal for RoutedJournal {
+    fn append(&self, env: &Envelope) -> Result<(), Defect> {
+        self.pick(&env.session_id).append(env)
+    }
+    fn events_after(&self, session: &str, after_seq: u64) -> Result<Vec<Envelope>, Defect> {
+        self.pick(session).events_after(session, after_seq)
+    }
+    fn last_seq(&self, session: &str) -> Result<u64, Defect> {
+        self.pick(session).last_seq(session)
+    }
+    fn claim_turn(&self, session: &str, turn: &str) -> Result<(), Defect> {
+        self.pick(session).claim_turn(session, turn)
+    }
+    fn settle_turn(&self, session: &str, turn: &str, finish: TurnFinish) -> Result<(), Defect> {
+        self.pick(session).settle_turn(session, turn, finish)
+    }
+    fn last_turn(&self, session: &str) -> Result<Option<TurnRecord>, Defect> {
+        self.pick(session).last_turn(session)
+    }
+    fn unsettled_claims(&self) -> Result<Vec<(SessionId, TurnId)>, Defect> {
+        let mut v = self.durable.unsettled_claims()?;
+        v.extend(self.memory.unsettled_claims()?);
+        Ok(v)
+    }
+    fn log_floor(&self, session: &str) -> Result<u64, Defect> {
+        self.pick(session).log_floor(session)
+    }
+}
+
 /// [`Journal`] on the SQLCipher store (spec 04).
 ///
 /// Events are stored as `(type, payload = the serialized CoreEvent)`; `ts_ms` is the
@@ -299,6 +359,78 @@ mod tests {
             item_id: i.to_string(),
             items: vec![],
         }
+    }
+
+    fn rows(st: &genie_store::Store, sql: &str, session: &str) -> i64 {
+        st.read(|c| Ok(c.query_row(sql, [session], |r| r.get(0))?))
+            .unwrap()
+    }
+
+    /// Incognito (D24): events, messages and usage rows of an ephemeral session never
+    /// reach the store; a normal session's do. Spend totals still count both.
+    #[test]
+    fn ephemeral_sessions_never_reach_the_store() {
+        use crate::runtime::conversation::{MsgKind, StoredMessage, UsageLine};
+        use crate::runtime::{ConversationStore, RoutedConversation, StoreConversation};
+
+        let dir = tempfile::tempdir().unwrap();
+        let st = store(&dir);
+        let eph: Ephemeral = Arc::new(|s: &str| s == "ses_incognito");
+
+        let bus = Bus::new(Arc::new(RoutedJournal::new(
+            Arc::new(StoreJournal::new(st.clone())),
+            eph.clone(),
+        )));
+        let conv = RoutedConversation::new(
+            Arc::new(StoreConversation::new(st.clone())),
+            eph,
+            Some(st.clone()),
+        );
+        for s in ["ses_incognito", "ses_normal"] {
+            bus.publish(s, ev("a")).unwrap();
+            let m = genie_providers::model::Message::user_text(format!("msg_{s}"), "secret");
+            conv.append(s, &StoredMessage::new(m, MsgKind::Normal))
+                .unwrap();
+            conv.record_usage(
+                s,
+                &UsageLine {
+                    kind: "chat",
+                    provider: "p".into(),
+                    model: "m".into(),
+                    project_id: None,
+                    usage: genie_providers::model::Usage {
+                        input_total: 10,
+                        ..Default::default()
+                    },
+                    cost_usd: 1.0,
+                    message_id: None,
+                },
+            )
+            .unwrap();
+            // Readable within this run either way.
+            assert_eq!(conv.path(s).unwrap().len(), 1);
+            assert_eq!(bus.head_seq(s).unwrap(), 1);
+        }
+        for (s, want) in [("ses_incognito", 0), ("ses_normal", 1)] {
+            assert_eq!(
+                rows(&st, "SELECT count(*) FROM session WHERE id = ?1", s),
+                want,
+                "{s}"
+            );
+            assert_eq!(
+                rows(&st, "SELECT count(*) FROM event WHERE session_id = ?1", s),
+                want
+            );
+            assert_eq!(
+                rows(&st, "SELECT count(*) FROM message WHERE session_id = ?1", s),
+                want
+            );
+        }
+        // Both calls are in the spend totals (no content there).
+        let spent: f64 = st
+            .read(|c| Ok(c.query_row("SELECT sum(cost_usd) FROM usage_daily", [], |r| r.get(0))?))
+            .unwrap();
+        assert!((spent - 2.0).abs() < 1e-9, "spent {spent}");
     }
 
     #[test]

@@ -198,6 +198,12 @@ struct H {
 }
 
 fn harness(window: u64, image: bool, pdf: bool) -> H {
+    harness_with(window, image, pdf, false)
+}
+
+/// `incognito`: every session is ephemeral and wired the way the daemon wires incognito
+/// sessions (routed journal, conversation, spill and artifacts).
+fn harness_with(window: u64, image: bool, pdf: bool, incognito: bool) -> H {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(
         genie_store::Store::open_with_keystore(
@@ -209,10 +215,13 @@ fn harness(window: u64, image: bool, pdf: bool) -> H {
     let models = Resolver::new(window, image, pdf);
     let settings = Arc::new(DynSettings(Mutex::new(SessionSettings {
         model: "anthropic/claude-test".into(),
+        incognito,
         ..SessionSettings::default()
     })));
+    let eph: genie_core::journal::Ephemeral = Arc::new(move |_: &str| incognito);
     let root = TaskScope::root();
     let artifacts = ArtifactHub::new(Some(store.clone()));
+    artifacts.set_ephemeral(eph.clone());
     let projects = ProjectsHub::new(
         store.clone(),
         models.clone(),
@@ -227,6 +236,15 @@ fn harness(window: u64, image: bool, pdf: bool) -> H {
             ..RuntimeConfig::default()
         })
         .store(store.clone())
+        .conversation(Arc::new(genie_core::runtime::RoutedConversation::new(
+            Arc::new(genie_core::runtime::StoreConversation::new(store.clone())),
+            eph.clone(),
+            Some(store.clone()),
+        )))
+        .spill(Some(Arc::new(genie_core::runtime::RoutedSpill::new(
+            Arc::new(genie_core::runtime::bridge::BlobSpill::new(store.clone())),
+            eph.clone(),
+        ))))
         .artifacts(artifacts.clone())
         .projects(projects.clone())
         .memory_control(memory.clone())
@@ -234,7 +252,10 @@ fn harness(window: u64, image: bool, pdf: bool) -> H {
         .chat_search(store.clone())
         .build();
     let engine = EngineBuilder::new()
-        .journal(Arc::new(StoreJournal::new(store.clone())))
+        .journal(Arc::new(genie_core::journal::RoutedJournal::new(
+            Arc::new(StoreJournal::new(store.clone())),
+            eph,
+        )))
         .turn_runner(Arc::new(runner))
         .build(&root);
     let s = engine.create_session();
@@ -345,6 +366,42 @@ fn last_tool_result(body: &Value) -> String {
 }
 
 // ------------------------------------------------------------------ artifacts
+
+/// Incognito (D24): a whole turn with an artifact leaves nothing in the store, yet the
+/// session works normally while it runs.
+#[tokio::test]
+async fn incognito_turn_with_an_artifact_writes_nothing_to_the_store() {
+    let mut h = harness_with(200_000, false, false, true);
+    let ev = h
+        .say(
+            vec![
+                tool(
+                    "toolu_a",
+                    "artifact_create",
+                    json!({"type":"document","title":"Secret plan","content":"# Plan"}),
+                ),
+                text("Here it is."),
+            ],
+            "private request",
+        )
+        .await;
+    settled_ok(&ev);
+    assert_eq!(versioned(&ev).len(), 1, "artifact works in memory: {ev:?}");
+    for table in [
+        "session",
+        "message",
+        "part",
+        "event",
+        "artifact",
+        "artifact_version",
+    ] {
+        let n: i64 = h
+            .store
+            .read(|c| Ok(c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(n, 0, "{table} has incognito rows");
+    }
+}
 
 #[tokio::test]
 async fn artifact_create_update_versions_follow_the_branch() {

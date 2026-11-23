@@ -825,3 +825,32 @@ fn session_listing_and_status() {
     assert_eq!(deleted, 1);
     assert!(store.read(|c| sessions::get(c, &b)).unwrap().is_some());
 }
+
+/// `close` releases the DB files while other `Arc`s still hold the store (01 §4.3);
+/// later calls fail cleanly instead of panicking.
+#[test]
+fn close_releases_the_files_and_later_calls_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let opts = genie_store::StoreOptions::new(dir.path(), "genie.db");
+    let keys = genie_store::MemoryKeyStore::new();
+    let store = std::sync::Arc::new(genie_store::Store::open_with_keystore(&opts, &keys).unwrap());
+    let other_holder = store.clone();
+    store
+        .write(|tx| genie_store::sessions::ensure(tx, "ses_a"))
+        .unwrap();
+    store.close();
+    store.close(); // idempotent
+    assert!(other_holder.is_closed());
+    let moved = dir.path().join("moved.db");
+    std::fs::rename(dir.path().join("genie.db"), &moved).expect("no handle left open");
+    assert!(
+        other_holder
+            .read(|c| genie_store::sessions::get(c, "ses_a"))
+            .is_err()
+    );
+    assert!(
+        other_holder
+            .write(|tx| genie_store::sessions::ensure(tx, "ses_b"))
+            .is_err()
+    );
+}

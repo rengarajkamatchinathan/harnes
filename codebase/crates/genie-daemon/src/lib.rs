@@ -399,12 +399,35 @@ fn build_engine(
     let turns = Arc::new(genie_core::runtime::active::ActiveTurns::new());
     let mut rb = RuntimeBuilder::new(registry.clone(), models.clone()).turns(turns.clone());
     let mut eb = EngineBuilder::new();
-    if let Some(store) = &store {
-        rb = rb.store(store.clone());
+    // Incognito sessions (and their subagents) never reach disk (D24, D31): their events,
+    // messages, spilled output and artifacts stay in process memory. Only their spend is
+    // added to the usage totals.
+    let ephemeral: genie_core::journal::Ephemeral = {
+        let reg = registry.clone();
+        Arc::new(move |id: &str| reg.is_incognito(id))
+    };
+    let conversation: Option<Arc<dyn ConversationStore>> = store.as_ref().map(|s| {
+        Arc::new(genie_core::runtime::RoutedConversation::new(
+            Arc::new(genie_core::runtime::StoreConversation::new(s.clone())),
+            ephemeral.clone(),
+            Some(s.clone()),
+        )) as Arc<dyn ConversationStore>
+    });
+    if let (Some(store), Some(conv)) = (&store, &conversation) {
+        rb = rb
+            .store(store.clone())
+            .conversation(conv.clone())
+            .spill(Some(Arc::new(genie_core::runtime::RoutedSpill::new(
+                Arc::new(genie_core::runtime::bridge::BlobSpill::new(store.clone())),
+                ephemeral.clone(),
+            ))));
     }
     // Durable events → audit (tool calls, usage, browser actions) + usage analytics.
     let journal: Arc<dyn genie_core::journal::Journal> = match &store {
-        Some(store) => Arc::new(StoreJournal::new(store.clone())),
+        Some(store) => Arc::new(genie_core::journal::RoutedJournal::new(
+            Arc::new(StoreJournal::new(store.clone())),
+            ephemeral.clone(),
+        )),
         None => Arc::new(genie_core::journal::MemoryJournal::new()),
     };
     eb = eb.journal(observe::EventTap::wrap(
@@ -422,6 +445,9 @@ fn build_engine(
         root,
         hub.as_deref(),
     );
+    if let Some(a) = &services.artifacts {
+        a.set_ephemeral(ephemeral.clone());
+    }
     // Shell (Code, 06 §13) with background jobs bound to the engine below; web tools
     // (Chat + Code, 06 §8) tainting the turn.
     let jobs = genie_core::runtime::host::EngineJobs::new(store.clone());
@@ -473,10 +499,7 @@ fn build_engine(
         );
         host.models = Some(models.clone());
         host.store = store.clone();
-        host.conversation = store.as_ref().map(|s| {
-            Arc::new(genie_core::runtime::StoreConversation::new(s.clone()))
-                as Arc<dyn genie_core::runtime::ConversationStore>
-        });
+        host.conversation = conversation.clone();
         let host = Arc::new(host);
         let sites = Arc::new(genie_browser::SitePolicy::new());
         if let Some(h) = &hub {
@@ -529,10 +552,8 @@ fn build_engine(
             blocked_domains: p.strings("webSearch.blockedDomains"),
         }));
         let mut authz = PermissionAuthorizer::new(hub.clone(), registry.clone());
-        if let Some(store) = &store {
-            authz = authz.with_conversation(Arc::new(genie_core::runtime::StoreConversation::new(
-                store.clone(),
-            )));
+        if let Some(c) = &conversation {
+            authz = authz.with_conversation(c.clone());
         }
         if let Some(a) = &services.audit {
             authz = authz.with_audit(a.clone());
@@ -786,6 +807,11 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
             remaining = root.task_count(),
             "tasks still running after grace period"
         );
+    }
+    // Close the store explicitly: subsystems bound to the engine keep `Arc`s to it in
+    // reference cycles, so dropping ours would not release the DB files.
+    if let Some(s) = &services.store {
+        s.close();
     }
     listener::cleanup(&ep.address);
     let _ = std::fs::remove_file(ep.token_path());

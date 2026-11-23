@@ -228,9 +228,9 @@ impl Registry {
     /// Write `id`'s record through to the store (no-op without one). A failed write is
     /// logged, never surfaced: the in-memory record stays correct for this run.
     ///
-    /// Incognito sessions get a record too, only so that [`Self::attach_store`] finds and
-    /// deletes their rows on the next start: the journal and conversation store still
-    /// write their events and messages while they run.
+    /// Incognito sessions are never written: their events, messages and artifacts are
+    /// routed to memory (`RoutedJournal` / `RoutedConversation`), so nothing of them is
+    /// on disk to point at.
     fn persist(&self, id: &str) {
         let now = i64::try_from(now_ms()).unwrap_or(i64::MAX);
         self.persist_with_times(id, now, now);
@@ -241,6 +241,9 @@ impl Registry {
             return;
         };
         let Some(info) = self.get(id) else { return };
+        if info.incognito {
+            return;
+        }
         let x = self.extra(id);
         let row = genie_store::sessions::MetaRow {
             id: id.to_string(),
@@ -329,6 +332,11 @@ impl Registry {
 
     pub fn get(&self, id: &str) -> Option<SessionInfo> {
         self.lock().get(id).cloned()
+    }
+
+    /// Incognito sessions (and their subagents, which inherit it) never reach disk.
+    pub fn is_incognito(&self, id: &str) -> bool {
+        self.lock().get(id).is_some_and(|s| s.incognito)
     }
 
     pub fn exists(&self, id: &str) -> bool {
