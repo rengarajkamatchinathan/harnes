@@ -11,15 +11,9 @@ use genie_protocol::{AskKind, Channel, ClientCapabilities, ClientKind};
 use serde_json::Value;
 
 /// Build-time channel (`GENIE_CHANNEL`), overridable at run time with
-/// `GENIE_CHANNEL_OVERRIDE` (same rules as the CLI). Without one, a debug build is
-/// `dev`, so it never shares the installed app's data dir and DB.
+/// `GENIE_CHANNEL_OVERRIDE` (same rules as the CLI).
 pub fn channel() -> Channel {
-    let default = if cfg!(debug_assertions) {
-        "dev"
-    } else {
-        "stable"
-    };
-    let build = option_env!("GENIE_CHANNEL").unwrap_or(default);
+    let build = option_env!("GENIE_CHANNEL").unwrap_or("stable");
     let name = std::env::var("GENIE_CHANNEL_OVERRIDE").unwrap_or_else(|_| build.to_string());
     Channel::from_str(&name).unwrap_or_default()
 }
