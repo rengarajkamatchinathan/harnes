@@ -125,9 +125,13 @@ Output lands in `target/release/bundle/`. Build on the OS you are packaging for.
 [Bun](https://bun.sh) (`powershell -c "irm bun.sh/install.ps1 | iex"`). WebView2 ships with
 Windows 10/11. Then, from the repo root or `codebase/`:
 
+Step-by-step setup, including the OpenSSL/Perl requirement on Windows, is in
+[start.md](start.md).
+
 ```powershell
 bun i
-bun tauri build --bundles nsis   # → target\release\bundle\nsis\Genie_0.1.0_x64-setup.exe
+bun run build:app                # → target\release\bundle\nsis\Genie_0.1.0_x64-setup.exe (per-user)
+bun tauri build --bundles nsis   # the same, without the OpenSSL pre-check
 bun tauri build --bundles msi    # → target\release\bundle\msi\Genie_0.1.0_x64_en-US.msi
 ```
 

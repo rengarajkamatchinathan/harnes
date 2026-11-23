@@ -10,6 +10,7 @@
     "start": "bun scripts/tauri.ts dev",
     "dev": "bun scripts/tauri.ts dev",
     "tauri": "bun scripts/tauri.ts",
+    "build:app": "bun scripts/build-app.ts",
     "web": "bun scripts/prep.ts --frontend-only && bun run --cwd apps/desktop dev",
     "prep": "bun scripts/prep.ts",
     "build:runtime": "bun run --cwd packages/artifact-runtime build",
