@@ -362,7 +362,7 @@ fn build_engine(
         store.as_ref(),
         &models,
         root,
-        hub.as_deref(),
+        hub.as_ref(),
     );
     // Shell (Code, 06 §13) with background jobs bound to the engine below; web tools
     // (Chat + Code, 06 §8) tainting the turn.

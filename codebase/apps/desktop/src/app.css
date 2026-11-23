@@ -173,8 +173,8 @@ code { font-size: 0.92em; }
    With grouped commands the box is taller, so it sits near the top third and the list scrolls
    inside it. A stronger dim + blur pushes the page back so the palette is the only focus. */
 .palette-backdrop {
-  place-items: start center;
-  padding: max(16px, 12vh) 16px 16px calc(var(--sb, 0px) + 16px);
+  place-items: center;
+  padding: 16px; /* centred in the whole window, both ways */
   background: oklch(0 0 0 / 0.55);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -183,7 +183,7 @@ code { font-size: 0.92em; }
 .palette { width: min(640px, 100%); background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop), 0 24px 64px oklch(0 0 0 / 0.45); overflow: hidden; animation: g-pop-in var(--dur-base) var(--ease-out); }
 .palette__input { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); height: 56px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); }
 .palette__input input { flex: 1; border: none; outline: none; background: none; color: var(--text); font: inherit; font-size: var(--text-md); }
-.palette__list { max-height: min(440px, calc(100vh - 12vh - 140px)); overflow: auto; padding: var(--space-1) var(--space-2) var(--space-2); overscroll-behavior: contain; scroll-padding: var(--space-2); }
+.palette__list { max-height: min(440px, calc(100vh - 160px)); overflow: auto; padding: var(--space-1) var(--space-2) var(--space-2); overscroll-behavior: contain; scroll-padding: var(--space-2); }
 .palette__section + .palette__section { margin-top: var(--space-1); padding-top: var(--space-1); border-top: 1px solid var(--border-subtle); }
 .palette__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette__kbd, .nav-row__kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-subtle, var(--surface-hover)); color: var(--text-muted); font: inherit; font-size: var(--text-xs); line-height: 1; white-space: nowrap; }
@@ -1080,3 +1080,17 @@ code { font-size: 0.92em; }
 .file-diff summary { padding: 8px 12px; background: var(--surface); }
 .file-diff pre.code.diff { margin: 0; padding: 12px 14px; border-radius: 0; line-height: 1.55; }
 .split-diff td { padding: 1px 8px; }
+
+/* Compare chip: the models that will answer, by name. */
+.racechip { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: 100%; padding: 4px 4px 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-hover); font-size: var(--text-xs); color: var(--text-muted); }
+.racechip > .g-icon { color: var(--accent); }
+.racechip__label { color: var(--text); font-weight: 500; }
+.racechip__models { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.racechip__vs { color: var(--text-muted); }
+.racechip__model { max-width: 220px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.racechip__model.is-current { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
+
+/* Softer reading text: bold and headings in replies/documents use semibold (Poppins bold is heavy),
+   and body text sits a touch lighter than headings. */
+.markdown strong, .markdown b, .markdown h1, .markdown h2, .markdown h3, .markdown h4 { font-weight: 600; }
+.markdown .md { color: color-mix(in oklch, var(--text) 90%, var(--text-muted)); }

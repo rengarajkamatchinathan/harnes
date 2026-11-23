@@ -290,6 +290,15 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     s.running = { cancel: () => (cancelled = true) };
     publish(s, { type: "turn.started", turn_id, message_id: userMsgId }, true, turn_id);
     setStatus(s, "running");
+    if (scripted?.reject) {
+      // Like a provider rejecting the request outright: the turn fails before any reply exists.
+      setTimeout(() => {
+        s.running = undefined;
+        publish(s, { type: "turn.settled", turn_id, status: "failed", error: { code: "provider_error", message: scripted.error ?? "rejected" } }, true, turn_id);
+        setStatus(s, "idle");
+      }, tick);
+      return;
+    }
     const msgId = uid("msg");
     const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model, usage, cost: { usd } };
     s.messages.push(assistant);

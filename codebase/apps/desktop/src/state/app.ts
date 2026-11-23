@@ -27,6 +27,7 @@ import { BudgetSpend, NO_BUDGETS, normalizeBudgets, type Budgets } from "./budge
 import { SessionStore } from "./session";
 import { Terminals } from "./terminals";
 import type { Handoff } from "./handoff";
+import { chatModels } from "./modelFilter";
 
 export type View = "main" | "settings" | "project" | "folder" | "handoff";
 export type PanelTab = "artifact" | "browser" | "changes" | "files" | "terminal";
@@ -355,7 +356,8 @@ export class App extends Emitter {
    */
   get usableModels(): ModelInfo[] {
     const ready = new Set(this.providers.filter((p) => p.status === "ready").map((p) => p.id));
-    return this.models.filter((m) => ready.has(m.provider));
+    // Only models that can chat: special-purpose families (computer use, deep research…) are left out.
+    return chatModels(this.models, ready);
   }
 
   /** Model for new sessions: last picked, else the configured default, else the first usable; never one whose provider isn't connected. */

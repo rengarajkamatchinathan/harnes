@@ -116,6 +116,17 @@ describe("a race over the mock engine", () => {
     expect(race.answers[1].error).toBeTruthy();
   });
 
+  it("still asks the other models when the first one fails without replying", async () => {
+    const { s, deps, book } = await setup();
+    // Genie Test rejects "reject" outright (no reply to branch from), like a provider refusing the request.
+    const race = await startRace(s, [{ type: "text", text: "reject" }], ["mock/genie-test", "mock/genie-large"], deps, book);
+    await until(() => !race.running);
+    expect(race.answers[0].status).toBe("failed");
+    expect(race.answers[0].error).toBeTruthy();
+    expect(race.answers[1].status).toBe("done");
+    expect(race.answers[1].messages.flatMap((m) => m.parts).map((p) => p.text).join("")).toContain("more depth");
+  });
+
   it("stops: the running answer is cancelled and the rest never start", async () => {
     const { platform, id, s, deps, book } = await setup(5);
     const race = await startRace(s, [{ type: "text", text: "hello" }], ["mock/genie-small", "mock/genie-large", "mock/genie-test"], deps, book);

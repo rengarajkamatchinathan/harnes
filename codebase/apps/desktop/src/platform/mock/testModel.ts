@@ -7,6 +7,8 @@ export interface TestReply {
   text: string;
   /** Ends the turn as failed with this message after streaming `text`. */
   error?: string;
+  /** Fail at once with no reply at all (a provider rejecting the request). */
+  reject?: boolean;
   /** Runs a shell tool first with this (large) output: fills the context to demo the context meter. */
   log?: { command: string; output: string };
 }
@@ -33,6 +35,7 @@ const HELP = `I'm **Genie Test**, a scripted model for trying out the chat. Incl
 | \`logs\` | a large tool output that fills the context (small 32k window) |
 | \`run\` / \`shell\` / \`permission\` | a tool call that asks for permission |
 | \`error\` | a turn that fails partway |
+| \`reject\` | the provider refuses at once (no reply at all) |
 
 Anything else is echoed back with some stats.`;
 
@@ -149,6 +152,7 @@ export function testReply(prompt: string): TestReply {
   const p = prompt.toLowerCase();
   const has = (...words: string[]) => words.some((w) => new RegExp(`\\b${w}\\b`).test(p));
 
+  if (has("reject")) return { text: "", reject: true, error: "provider error: invalid_request (Genie Test rejected the request, as asked)" };
   if (has("error", "fail")) return { text: "Starting the answer, and then something goes wrong…", error: "Genie Test simulated a provider error (you asked for one)." };
   const thinking = has("think", "reason") ? "The user wants to see a reasoning block. I'll think for a moment, then give a short answer that explains what happened." : undefined;
   if (has("help")) return { thinking, text: HELP };

@@ -213,7 +213,7 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
             </button>
             {choices.map((w) => (
               <button key={w} className="folder-card__row" title={w} onClick={() => setPath(w)}>
-                <Icon name="folder" />
+                <Icon name="repo" />
                 <span className="sidebar__title">{folderName(w)}</span>
                 {!!path && sameWorkspace(w, path) && <Icon name="check" />}
               </button>
@@ -457,7 +457,7 @@ function SessionView({ id }: { id: string }) {
               </span>
               {folderName(info?.workspace_id ?? "") && (
                 <span className="composer-foot__item" title={info?.workspace_id ?? ""}>
-                  <Icon name="folder" size={14} /> {folderName(info?.workspace_id ?? "")}
+                  <Icon name="repo" size={14} /> {folderName(info?.workspace_id ?? "")}
                 </span>
               )}
             </>

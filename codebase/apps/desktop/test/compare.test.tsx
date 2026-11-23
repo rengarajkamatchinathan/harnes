@@ -51,13 +51,18 @@ describe("compare view", () => {
     expect(html).toContain("boom");
     expect(html).toContain("2.4s");
     expect(html).toContain("$0.0021");
-    expect(html.match(/Keep this/g)).toHaveLength(3);
-    // The failed card can't be kept.
-    expect(html.match(/disabled=""[^>]*>Keep this/g)).toHaveLength(1);
+    // The failed card has no "Keep this" at all; the two answers do.
+    expect(html.match(/Keep this/g)).toHaveLength(2);
+    expect(html.match(/disabled=""[^>]*>Keep this/g)).toBeNull();
   });
 
   it("shows the composer chip only for a real race", () => {
     expect(renderToStaticMarkup(<CompareChip models={["a"]} />)).toBe("");
     expect(renderToStaticMarkup(<CompareChip models={["a", "b", "c"]} />)).toContain("Comparing 3 models");
+    // The chip names the models that will answer.
+    const named = renderToStaticMarkup(<CompareChip models={["az/gpt", "g/flash"]} nameOf={(id) => ({ "az/gpt": "GPT-5.2", "g/flash": "Gemini Flash" })[id] ?? id} />);
+    expect(named).toContain("GPT-5.2");
+    expect(named).toContain("Gemini Flash");
+    expect(named).toContain("vs");
   });
 });

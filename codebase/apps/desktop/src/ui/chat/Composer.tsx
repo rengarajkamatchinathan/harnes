@@ -8,6 +8,7 @@ import { formatCost, formatTokens, t } from "../../i18n";
 import { formatBytes, guessMime, rejectReason, uploadBlob, type Attachment } from "../../state/attachments";
 import type { SessionStore } from "../../state/session";
 import { useApp } from "../context";
+import { isOffEffort } from "../../state/modelFilter";
 import { providerMeta } from "../settings/ProvidersSection";
 import { RewindDialog } from "../code/CodeExtras";
 import { raceBook, startRace } from "../../state/race";
@@ -84,8 +85,10 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
   const info = store?.model.info;
   const currentModel = info?.model ?? app.preferredModel() ?? "";
   const modelInfo = app.models.find((m) => m.id === currentModel);
-  const effortLevels = modelInfo?.effort_levels ?? [];
-  const effort = info?.effort ?? app.ui.effort ?? effortLevels[0] ?? null;
+  // "Off" isn't offered: thinking effort is picked from the real levels (low/medium/high…).
+  const effortLevels = (modelInfo?.effort_levels ?? []).filter((e) => !isOffEffort(e));
+  const picked = info?.effort ?? app.ui.effort ?? null;
+  const effort = picked && effortLevels.includes(picked) ? picked : (effortLevels[0] ?? null);
   const fail = (e: unknown) => app.toast({ title: app.describeError(e), tone: "danger" });
   const setModel = (id: string) => {
     app.setUi({ model: id });
@@ -478,7 +481,7 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
       )}
       {racing && (
         <div className="row wrap composer__atts">
-          <CompareChip models={raceWith} />
+          <CompareChip models={raceWith} nameOf={(id) => app.models.find((m) => m.id === id)?.name || id} />
         </div>
       )}
       {atts.length > 0 && (

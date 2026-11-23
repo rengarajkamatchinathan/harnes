@@ -550,8 +550,26 @@ export function Field({
     return (
       <div className="g-field g-field--inline">
         <div className="g-field__text">
-          {head}
-          {description && <div className="g-field__desc">{description}</div>}
+          {/* Settings rows stay short: the explanation sits behind an info icon next to the label. */}
+          <div className="g-field__head">
+            <label className="g-field__label" htmlFor={htmlFor}>
+              {label}
+            </label>
+            {description && (
+              <Tooltip content={<span className="g-tooltip__wrap">{description}</span>} side="top">
+                <span className="g-field__info" tabIndex={0} role="img" aria-label={typeof description === "string" ? description : "More info"}>
+                  <Icon name="info" size={13} />
+                </span>
+              </Tooltip>
+            )}
+            {locked && (
+              <span className="g-field__lock">
+                <Icon name="lock" /> {locked}
+              </span>
+            )}
+            {saved && !error && <span className="g-field__saved" role="status">Saved</span>}
+            {extra}
+          </div>
         </div>
         <div className="g-field__control">{children}</div>
         {err}

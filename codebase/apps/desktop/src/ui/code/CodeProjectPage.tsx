@@ -89,7 +89,7 @@ export function CodeProjectPage({ path }: { path: string }) {
         <div className="page__inner project">
           <div className="project__head">
             <span className="project__icon" aria-hidden>
-              <Icon name="folder" size={18} />
+              <Icon name="repo" size={18} />
             </span>
             <h1 className="project__name codeproj-page__name" title={display}>
               {name}

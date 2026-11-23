@@ -1,6 +1,6 @@
 // Model race UI: the "Compare" picker by the model picker, the composer chip, the side-by-side
 // comparison of one prompt's answers ("Keep this" switches the branch), and the reopen button.
-import { Button, Chip, Icon, IconButton, Menu } from "@genie/ui";
+import { Button, Icon, IconButton, Menu } from "@genie/ui";
 import { t } from "../../i18n";
 import { useEmitter } from "../../state/emitter";
 import { answerLeaf, cancelRace, keepAnswer, MAX_RACE_MODELS, promptOf, raceBook, raceModels, raceProgress, toggleExtra, turnMessages, type Race, type RaceAnswer } from "../../state/race";
@@ -59,12 +59,23 @@ export function CompareToggle({ store }: { store: SessionStore | null }) {
 }
 
 /** Composer chip: the next send is a race. */
-export function CompareChip({ models }: { models: string[] }) {
+export function CompareChip({ models, nameOf = (id) => id }: { models: string[]; nameOf?: (id: string) => string }) {
   if (models.length < 2) return null;
+  // Show which models will answer, not just how many.
   return (
-    <Chip icon="compare" title={models.join(" · ")} removeLabel={t("race.chipRemove")} onRemove={() => raceBook.setExtras([])}>
-      {t("race.chip", { n: models.length })}
-    </Chip>
+    <div className="racechip" role="group" aria-label={t("race.chip", { n: models.length })}>
+      <Icon name="compare" size={14} />
+      <span className="racechip__label">{t("race.chipLead")}</span>
+      {models.map((id, i) => (
+        <span key={id} className="racechip__models">
+          {i > 0 && <span className="racechip__vs">{t("race.vs")}</span>}
+          <span className={`racechip__model ${i === 0 ? "is-current" : ""}`} title={id}>
+            {nameOf(id)}
+          </span>
+        </span>
+      ))}
+      <IconButton icon="x" size="sm" label={t("race.chipRemove")} onClick={() => raceBook.setExtras([])} />
+    </div>
   );
 }
 
@@ -168,7 +179,8 @@ function AnswerCard({ answer: a, name, store, kept, canKeep, onKeep }: { answer:
           <span className="compare__kept">
             <Icon name="check" size={14} /> {t("race.kept")}
           </span>
-        ) : (
+        ) : a.status === "failed" || a.status === "skipped" || a.status === "cancelled" ? null : (
+          // Nothing to keep from a card without an answer; while answers are still coming in it shows disabled.
           <Button size="sm" variant="primary" disabled={!canKeep} onClick={onKeep}>
             {t("race.keep")}
           </Button>

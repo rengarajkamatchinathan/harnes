@@ -473,6 +473,8 @@ const en = {
   "race.noModels": "Connect another provider to compare models",
   "race.chip": "Comparing {n} models",
   "race.chipRemove": "Stop comparing",
+  "race.chipLead": "Comparing",
+  "race.vs": "vs",
   "race.title": "Comparing {n} answers",
   "race.progress": "{i} of {n} answering…",
   "race.done": "All answers are in: keep the one you like",

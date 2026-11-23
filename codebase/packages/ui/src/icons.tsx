@@ -20,6 +20,7 @@ import {
   File,
   Folder,
   FolderKanban,
+  FolderGit2,
   Ghost,
   GitBranch,
   Globe,
@@ -93,6 +94,8 @@ const ICONS = {
   globe: Globe,
   terminal: SquareTerminal,
   folder: Folder,
+  /** A Code project (a git folder); Chat projects use `folder`. */
+  repo: FolderGit2,
   file: File,
   branch: GitBranch,
   more: Ellipsis,

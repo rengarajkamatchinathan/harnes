@@ -352,7 +352,7 @@ export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; vari
     );
   const items: MenuItem[] = [
     { id: "none", label: t("code.noProject"), icon: "chat", checked: !current, onSelect: () => choose("") },
-    ...known.map((w, i) => ({ id: `ws:${w}`, label: folderName(w), title: w, icon: "folder" as const, checked: !!current && sameWorkspace(current, w), separatorBefore: i === 0, onSelect: () => choose(w) })),
+    ...known.map((w, i) => ({ id: `ws:${w}`, label: folderName(w), title: w, icon: "repo" as const, checked: !!current && sameWorkspace(current, w), separatorBefore: i === 0, onSelect: () => choose(w) })),
     { id: "open", label: t("code.openFolder"), icon: "plus", separatorBefore: true, onSelect: open },
   ];
   return (
@@ -362,7 +362,7 @@ export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; vari
       items={items}
       trigger={(p) => (
         <button className={`codeproj codeproj--${variant}`} title={current || t("code.noProject")} {...p}>
-          <Icon name={current ? "folder" : "chat"} size={variant === "sidebar" ? 16 : 14} />
+          <Icon name={current ? "repo" : "chat"} size={variant === "sidebar" ? 16 : 14} />
           <span className="codeproj__name">{current ? folderName(current) : t("code.noProject")}</span>
           <Icon name="chevronDown" size={12} />
         </button>
@@ -400,7 +400,7 @@ function CodeList({ items, app }: { items: SessionSummary[]; app: App }) {
           return (
             <div key={w} className={`sidebar__row ${active ? "is-active" : ""}`}>
               <button className="sidebar__link" title={w} aria-current={active ? "page" : undefined} onClick={() => openPage(w)}>
-                <Icon name="folder" />
+                <Icon name="repo" />
                 <span className="sidebar__title">{name}</span>
                 <span className="codeproj-row__count muted">{count}</span>
               </button>

@@ -27,6 +27,8 @@ export interface Race {
   sessionId: string;
   /** The prompt every model answers. */
   userMessageId: string;
+  /** What was sent, to ask again when there is no earlier answer to branch from. */
+  parts?: InputPart[];
   answers: RaceAnswer[];
   running: boolean;
   cancelled: boolean;
@@ -231,6 +233,7 @@ export async function startRace(s: RaceSession, parts: InputPart[], models: stri
     id: `race_${++raceSeq}`,
     sessionId: s.id,
     userMessageId: res.message_id,
+    parts,
     answers: models.map((model) => ({ model, status: "waiting", turnId: null, messages: [] })),
     running: true,
     cancelled: false,
@@ -253,8 +256,10 @@ export async function runAnswers(s: RaceSession, race: Race, seen: Set<string>, 
         continue;
       }
       if (i > 0) {
+        // Regenerate needs an earlier answer to branch from. When every model so far failed without
+        // replying (e.g. a provider rejected the request), ask the same question again with this model.
         const base = branchBase(race);
-        if (!base) {
+        if (!base && !race.parts) {
           a.status = "skipped";
           book.touch();
           continue;
@@ -262,7 +267,8 @@ export async function runAnswers(s: RaceSession, race: Race, seen: Set<string>, 
         try {
           await deps.setModel(a.model);
           model = a.model;
-          await s.regenerate(base);
+          if (base) await s.regenerate(base);
+          else race.userMessageId = (await s.send(race.parts!, "steer")).message_id;
         } catch (e) {
           a.status = "failed";
           a.error = deps.describeError(e);

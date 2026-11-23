@@ -8,6 +8,7 @@ import { formatCost, formatTokens, t } from "../../i18n";
 import type { App } from "../../state/app";
 import type { SessionStore } from "../../state/session";
 import type { MessageView } from "../../state/sessionModel";
+import { isOffEffort } from "../../state/modelFilter";
 
 /** `command.list` for the session (or, before one exists, for the mode); reloads on `commands.changed`. */
 export function useCommands(app: App, store: SessionStore | null, kind: SessionKind): CommandInfo[] | null {
@@ -142,7 +143,7 @@ export async function runClientCommand(app: App, store: SessionStore | null, kin
 
     case "effort": {
       const current = info?.model ?? app.preferredModel() ?? "";
-      const levels = app.models.find((m) => m.id === current)?.effort_levels ?? [];
+      const levels = (app.models.find((m) => m.id === current)?.effort_levels ?? []).filter((e) => !isOffEffort(e));
       if (!levels.length) {
         app.toast({ title: t("slash.noEffort"), tone: "info" });
         return null;
