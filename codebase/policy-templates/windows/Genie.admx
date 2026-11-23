@@ -229,6 +229,12 @@
       <enabledValue><decimal value="1" /></enabledValue>
       <disabledValue><decimal value="0" /></disabledValue>
     </policy>
+    <policy name="ImageGenerationEnabled" class="Machine" displayName="$(string.ImageGenerationEnabled)" explainText="$(string.ImageGenerationEnabled_Explain)" key="Software\Policies\Genie" valueName="imageGeneration.enabled">
+      <parentCategory ref="Genie_Capabilities" />
+      <supportedOn ref="SUPPORTED_Genie1" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
     <policy name="BrowserSiteAllowlist" class="Machine" displayName="$(string.BrowserSiteAllowlist)" explainText="$(string.BrowserSiteAllowlist_Explain)" key="Software\Policies\Genie" presentation="$(presentation.BrowserSiteAllowlist)">
       <parentCategory ref="Genie_Capabilities" />
       <supportedOn ref="SUPPORTED_Genie1" />

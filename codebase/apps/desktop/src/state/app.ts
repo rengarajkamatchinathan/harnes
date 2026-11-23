@@ -23,10 +23,12 @@ import {
 import { DEFAULT_APPEARANCE, type Appearance } from "@genie/ui";
 import { errorKind, errorMessage, type HostInfo, type HostMessage, type HostStatus, type Platform } from "../platform";
 import { Emitter } from "./emitter";
+import { BudgetSpend, NO_BUDGETS, normalizeBudgets, type Budgets } from "./budget";
 import { SessionStore } from "./session";
 import { Terminals } from "./terminals";
+import type { Handoff } from "./handoff";
 
-export type View = "main" | "settings" | "project";
+export type View = "main" | "settings" | "project" | "folder" | "handoff";
 export type PanelTab = "artifact" | "browser" | "changes" | "files" | "terminal";
 
 export interface UiState {
@@ -66,6 +68,8 @@ export interface UiState {
   sidebarShow: "all" | "active";
   /** Slash commands used most recently first (the `/` menu's order, D58). */
   recentCommands: string[];
+  /** Budget guard: monthly limits per Chat project and overall (desktop-side; see state/budget.ts). */
+  budgets: Budgets;
 }
 
 /** Folder paths compared loosely: the engine may report `\\?\C:\x` for a folder picked as `C:\x`. */
@@ -87,7 +91,7 @@ const DEFAULT_UI: UiState = {
   settingsItem: null,
   panelOpen: false,
   panelTab: "artifact",
-  panelWidth: 420,
+  panelWidth: 600,
   sidebarWidth: 280,
   incognito: false,
   appearance: DEFAULT_APPEARANCE,
@@ -105,6 +109,7 @@ const DEFAULT_UI: UiState = {
   sidebarGroupByDate: false,
   sidebarShow: "all",
   recentCommands: [],
+  budgets: NO_BUDGETS,
 };
 
 /** Where the user is, for the title-bar back/forward buttons. */
@@ -113,9 +118,11 @@ interface Loc {
   view: View;
   activeSession: string | null;
   activeProject: string | null;
+  /** Code project page / new-session folder. */
+  codeWorkspace: string;
 }
-const locOf = (u: UiState): Loc => ({ mode: u.mode, view: u.view, activeSession: u.activeSession, activeProject: u.activeProject });
-const sameLoc = (a: Loc, b: Loc) => a.mode === b.mode && a.view === b.view && a.activeSession === b.activeSession && a.activeProject === b.activeProject;
+const locOf = (u: UiState): Loc => ({ mode: u.mode, view: u.view, activeSession: u.activeSession, activeProject: u.activeProject, codeWorkspace: u.codeWorkspace });
+const sameLoc = (a: Loc, b: Loc) => a.mode === b.mode && a.view === b.view && a.activeSession === b.activeSession && a.activeProject === b.activeProject && (a.view !== "folder" || a.codeWorkspace === b.codeWorkspace);
 
 export interface Toast {
   id: number;
@@ -139,12 +146,18 @@ export class App extends Emitter {
   pendingAsks = 0;
   clients: ClientRef[] = [];
   projects: ProjectInfo[] = [];
+  /** An imported handoff file shown read-only (view "handoff"); not persisted. */
+  handoff: Handoff | null = null;
+  /** Opens the file picker for "Open handoff file…" (set by Root, which keeps the hidden input mounted). */
+  pickHandoffFile: (() => void) | null = null;
   /** Every catalog model, including providers that aren't connected (Settings shows these). */
   models: ModelInfo[] = [];
   providers: ProviderInfo[] = [];
   /** The `model` setting (default model for new sessions), if any. */
   configModel: string | null = null;
   toasts: Toast[] = [];
+  /** Month-to-date spend for the budget guard. */
+  readonly budgetSpend = new BudgetSpend((p) => this.client.usage.query(p));
 
   private open = new Map<string, SessionStore>();
   /** server request id → ask id, for asks the daemon asked us directly. */
@@ -169,7 +182,9 @@ export class App extends Emitter {
 
   async start() {
     const [state] = await Promise.all([this.platform.loadState().catch(() => ({}))]);
-    this.ui = { ...DEFAULT_UI, ...(state as Partial<UiState>), view: "main", appearance: { ...DEFAULT_APPEARANCE, ...((state as Partial<UiState>).appearance ?? {}) } };
+    this.ui = { ...DEFAULT_UI, ...(state as Partial<UiState>), view: "main", appearance: { ...DEFAULT_APPEARANCE, ...((state as Partial<UiState>).appearance ?? {}) }, budgets: normalizeBudgets((state as Partial<UiState>).budgets) };
+    // The right panel's old default (420px) was too tight for diffs; a width the user never changed moves to the new default.
+    if (this.ui.panelWidth === 420) this.ui.panelWidth = DEFAULT_UI.panelWidth;
     if ((state as { firstRunDone?: boolean }).firstRunDone) this.ui.firstRunDone = true;
     this.stateLoaded = true;
     this.terminals.restore(this.ui.terminals);
@@ -232,6 +247,12 @@ export class App extends Emitter {
     if (m[1] === "session") this.selectSession(m[2]);
     else this.setUi({ view: "settings", settingsSection: m[2], settingsItem: m[3] ?? null });
     return true;
+  }
+
+  /** Show an imported handoff file (read-only replay). */
+  openHandoff(h: Handoff) {
+    this.handoff = h;
+    this.setUi({ view: "handoff", activeSession: null, activeProject: null });
   }
 
   /** Open the session switcher with search (`/resume`). */

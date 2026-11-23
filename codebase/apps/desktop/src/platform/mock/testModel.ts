@@ -7,6 +7,15 @@ export interface TestReply {
   text: string;
   /** Ends the turn as failed with this message after streaming `text`. */
   error?: string;
+  /** Runs a shell tool first with this (large) output: fills the context to demo the context meter. */
+  log?: { command: string; output: string };
+}
+
+/** ~43k characters (~11k tokens) of verbose test output: two runs pass 70% of a 32k window. */
+export function verboseLog(): string {
+  const lines: string[] = [];
+  for (let i = 1; i <= 450; i++) lines.push(`  ✓ src/feature${i % 37}.test.ts > case ${i}: renders, updates and cleans up without leaking (${(i % 9) + 1} ms)`);
+  return `$ vitest run --reporter=verbose\n${lines.join("\n")}\n\n Test Files  37 passed (37)\n      Tests  450 passed (450)`;
 }
 
 const HELP = `I'm **Genie Test**, a scripted model for trying out the chat. Include one of these words in your message:
@@ -21,6 +30,7 @@ const HELP = `I'm **Genie Test**, a scripted model for trying out the chat. Incl
 | \`mermaid\` | a diagram |
 | \`long\` | a long reply, to test scrolling and streaming |
 | \`think\` | a reasoning block before the answer |
+| \`logs\` | a large tool output that fills the context (small 32k window) |
 | \`run\` / \`shell\` / \`permission\` | a tool call that asks for permission |
 | \`error\` | a turn that fails partway |
 
@@ -148,6 +158,7 @@ export function testReply(prompt: string): TestReply {
   if (has("math", "latex", "katex")) return { thinking, text: MATH };
   if (has("mermaid", "diagram")) return { thinking, text: MERMAID };
   if (has("long")) return { thinking, text: long() };
+  if (has("logs", "verbose")) return { thinking, text: "All 450 tests passed. That output was large: send `logs` once or twice more to watch the context meter fill up.", log: { command: "npm test -- --reporter=verbose", output: verboseLog() } };
   if (has("run", "shell", "permission")) return { thinking, text: "The command finished. Its output is shown above." };
   if (thinking) return { thinking, text: "Done thinking. The reasoning above is collapsible." };
   return { text: echo(prompt) };

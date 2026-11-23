@@ -24,6 +24,7 @@ import type {
   ToolOutcome,
   ToolProgress,
   TurnInterrupted,
+  TurnStatus,
   UsageUpdated,
 } from "@genie/protocol";
 
@@ -93,6 +94,10 @@ export interface SessionModel {
   artifacts: ArtifactVersioned[];
   /** Tokens and cost per turn from `step.ended` events seen by this client (hover card). */
   turnUsage: Map<string, TurnUsage>;
+  /** How each turn seen by this client ended (`turn.settled`), e.g. for a model race. */
+  turnEnd: Map<string, { status: TurnStatus; error: ErrorInfo | null }>;
+  /** The turn in progress, for events the engine sends without a `turn_id`. */
+  currentTurn?: string | null;
   subagents: Map<string, SubagentView>;
   browser: { control: BrowserControl | null; frame: BrowserFrame | null; actions: BrowserAction[] };
   /** Set by `branch.switched`: the caller reloads with `session.get`. */
@@ -108,6 +113,9 @@ export interface TurnUsage {
   cacheRead: number;
   usd: number;
   steps: number;
+  /** When the turn started (event time, RFC 3339), and how long it took once settled. */
+  startedAt?: string;
+  ms?: number;
 }
 
 export function emptyModel(sessionId: string): SessionModel {
@@ -129,6 +137,7 @@ export function emptyModel(sessionId: string): SessionModel {
     leaseLost: false,
     artifacts: [],
     turnUsage: new Map(),
+    turnEnd: new Map(),
     subagents: new Map(),
     browser: { control: null, frame: null, actions: [] },
     needsReload: false,
@@ -227,6 +236,11 @@ function touch(m: MessageView) {
 export function applyEvent(model: SessionModel, env: SessionEventEnvelope): boolean {
   if (env.session_id !== model.sessionId) return false;
   const e = env.event;
+  // The engine stamps `turn_id` only on turn.started / turn.settled; events in between
+  // (parts, step.ended with the tokens) belong to the turn that is running.
+  if (e.type === "turn.started") model.currentTurn = e.turn_id;
+  if (!env.turn_id && model.currentTurn && e.type !== "session.created" && e.type !== "session.updated") env = { ...env, turn_id: model.currentTurn };
+  if (e.type === "turn.settled" || e.type === "turn.interrupted") model.currentTurn = null;
   if (env.seq != null && model.info) model.info.head_seq = Math.max(model.info.head_seq, env.seq);
   switch (e.type) {
     case "session.created":
@@ -256,6 +270,10 @@ export function applyEvent(model: SessionModel, env: SessionEventEnvelope): bool
       model.interrupted = null;
       model.error = null;
       model.retry = null;
+      if (env.turn_id) {
+        const u = model.turnUsage.get(env.turn_id) ?? { input: 0, output: 0, reasoning: 0, cacheRead: 0, usd: 0, steps: 0 };
+        model.turnUsage = new Map(model.turnUsage).set(env.turn_id, { ...u, startedAt: env.ts });
+      }
       break;
     case "step.started":
       return false;
@@ -263,6 +281,7 @@ export function applyEvent(model: SessionModel, env: SessionEventEnvelope): bool
       if (!env.turn_id) return false;
       const u = model.turnUsage.get(env.turn_id) ?? { input: 0, output: 0, reasoning: 0, cacheRead: 0, usd: 0, steps: 0 };
       const next: TurnUsage = {
+        ...u,
         input: u.input + (e.usage.input_tokens ?? 0),
         output: u.output + (e.usage.output_tokens ?? 0),
         reasoning: u.reasoning + (e.usage.reasoning_tokens ?? 0),
@@ -358,6 +377,12 @@ export function applyEvent(model: SessionModel, env: SessionEventEnvelope): bool
       break;
     case "turn.settled":
       model.retry = null;
+      if (env.turn_id) {
+        const u = model.turnUsage.get(env.turn_id);
+        const ms = u?.startedAt ? Date.parse(env.ts) - Date.parse(u.startedAt) : NaN;
+        if (u && Number.isFinite(ms) && ms >= 0) model.turnUsage = new Map(model.turnUsage).set(env.turn_id, { ...u, ms });
+      }
+      model.turnEnd = new Map(model.turnEnd).set(e.turn_id, { status: e.status, error: e.error ?? null });
       if (e.status === "failed" && e.error) model.error = e.error;
       for (const m of model.messages)
         for (const p of m.parts)

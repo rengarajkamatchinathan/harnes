@@ -95,7 +95,13 @@ describe("settings extras", () => {
   });
 
   it("per-message usage chip", () => {
-    const html = renderToStaticMarkup(<UsageChip u={{ input: 1200, output: 300, reasoning: 0, cacheRead: 0, usd: 0.0021, steps: 1 }} />);
-    expect(html).toContain("1.5k tokens · $0.0021");
+    const html = renderToStaticMarkup(<UsageChip u={{ input: 1200, output: 300, reasoning: 0, cacheRead: 0, usd: 0.0021, steps: 1, ms: 3400 }} />);
+    expect(html).toContain("1.5k tokens");
+    expect(html).toContain("1.2k in · 300 out");
+    expect(html).toContain("3.4s");
+    expect(html).toContain("$0.0021");
+    // Free models: no "$0.0000".
+    expect(renderToStaticMarkup(<UsageChip u={{ input: 10, output: 5, reasoning: 0, cacheRead: 0, usd: 0, steps: 1, ms: 72_000 }} />)).not.toContain("$");
+    expect(renderToStaticMarkup(<UsageChip u={{ input: 10, output: 5, reasoning: 0, cacheRead: 0, usd: 0, steps: 1, ms: 72_000 }} />)).toContain("1m 12s");
   });
 });

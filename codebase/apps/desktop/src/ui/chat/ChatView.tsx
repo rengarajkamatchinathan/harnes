@@ -8,8 +8,13 @@ import { drivenElsewhere } from "../../state/sessionModel";
 import type { MessageView } from "../../state/sessionModel";
 import { useApp, useSession } from "../context";
 import { AskCard } from "./AskCard";
-import { Composer, ContextRing, ModelPicker } from "./Composer";
-import { CodeProjectPicker, folderName, TitlebarControls } from "../Sidebar";
+import { Composer, ModelPicker } from "./Composer";
+import { SessionUsage } from "./Usage";
+import { ContextBanner } from "./ContextMeter";
+import { CompareToggle, CompareView } from "./Compare";
+import { raceBook } from "../../state/race";
+import { useEmitter } from "../../state/emitter";
+import { CodeProjectPicker, folderName, NewProject, TitlebarControls } from "../Sidebar";
 import { GenieMark } from "../GenieMark";
 import { useShell } from "../shell";
 import { effectiveTab, PANEL_ICON, panelTabs } from "../panel/RightPanel";
@@ -89,6 +94,7 @@ function EmptyHero({ noProvider }: { noProvider: boolean }) {
   const app = useApp();
   const [seed, setSeed] = useState<{ text: string; n: number } | undefined>();
   const project = app.projects.find((p) => p.project_id === app.ui.activeProject);
+  const [creating, setCreating] = useState(false);
   const ideas = ["chat.idea.brief", "chat.idea.plan", "chat.idea.code"] as const;
   const ideaIcon: IconName[] = ["file", "clock", "code"];
   return (
@@ -119,7 +125,26 @@ function EmptyHero({ noProvider }: { noProvider: boolean }) {
             layout="hero"
             store={null}
             seed={seed}
-            placeholder={t("composer.placeholderEmpty")}
+            placeholder={project ? t("composer.placeholderProject", { name: project.name }) : t("composer.placeholderEmpty")}
+            leading={
+              <Menu
+                label={t("chat.projectOrFolder")}
+                placement="up"
+                className="projpill__list"
+                items={[
+                  { id: "", label: t("row.noProject"), icon: "chat", checked: !project, onSelect: () => app.setUi({ activeProject: null }) },
+                  ...app.projects.map((p, i) => ({ id: p.project_id, label: p.name, icon: "folder" as const, separatorBefore: i === 0, checked: p.project_id === project?.project_id, onSelect: () => app.setUi({ activeProject: p.project_id }) })),
+                  { id: "new", label: t("sidebar.newProject"), icon: "plus", separatorBefore: true, keepFocus: true, onSelect: () => setCreating(true) },
+                ]}
+                trigger={(p) => (
+                  <button className={`projpill ${project ? "is-set" : ""}`} title={project ? t("chat.inProject", { name: project.name }) : t("chat.pickProject")} {...p}>
+                    <Icon name="folder" size={14} />
+                    <span className="projpill__name">{project?.name ?? t("chat.projectOrFolder")}</span>
+                    <Icon name="chevronDown" size={12} />
+                  </button>
+                )}
+              />
+            }
             onCreate={async () => {
               const id = await app.createSession({ kind: "chat", projectId: app.ui.activeProject });
               const s = app.session(id);
@@ -127,20 +152,6 @@ function EmptyHero({ noProvider }: { noProvider: boolean }) {
               return s;
             }}
           />
-          <div className="hero__chips">
-            <Menu
-              label={t("chat.projectOrFolder")}
-              items={[
-                { id: "", label: t("row.noProject"), checked: !project, onSelect: () => app.setUi({ activeProject: null }) },
-                ...app.projects.map((p) => ({ id: p.project_id, label: p.name, checked: p.project_id === project?.project_id, onSelect: () => app.setUi({ activeProject: p.project_id }) })),
-              ]}
-              trigger={(p) => (
-                <button className="textbtn" {...p}>
-                  {project?.name ?? t("chat.projectOrFolder")}
-                </button>
-              )}
-            />
-          </div>
           {noProvider ? (
             <div className="hero__ideas">
               <Button variant="primary" onClick={() => app.openDeepLink("genie://settings/providers")}>
@@ -162,6 +173,7 @@ function EmptyHero({ noProvider }: { noProvider: boolean }) {
           )}
         </div>
       </div>
+      {creating && <NewProject stay onClose={() => setCreating(false)} />}
     </div>
   );
 }
@@ -273,6 +285,8 @@ function SessionView({ id }: { id: string }) {
   const [rewind, setRewind] = useState<MessageView | null>(null);
   const [now, setNow] = useState(Date.now());
   const elsewhere = drivenElsewhere(m, app.selfId);
+  useEmitter(raceBook);
+  const race = code ? undefined : raceBook.shown(id);
 
   // Retry countdown.
   useEffect(() => {
@@ -399,7 +413,9 @@ function SessionView({ id }: { id: string }) {
         )}
       </div>
 
-      {store.loading && !m.messages.length ? (
+      {race ? (
+        <CompareView store={store} race={race} />
+      ) : store.loading && !m.messages.length ? (
         <div className="chat__empty muted">{t("common.loading")}</div>
       ) : (
         <Transcript store={store} compact={code} onRewind={code ? setRewind : undefined} />
@@ -431,6 +447,7 @@ function SessionView({ id }: { id: string }) {
             }}
           />
         ))}
+        <ContextBanner store={store} readOnly={!!elsewhere || m.leaseLost} />
         <Composer store={store} readOnly={!!elsewhere || m.leaseLost} placeholder={code ? t("code.placeholder") : t("composer.placeholderReply")} />
         <div className="composer-foot">
           {code ? (
@@ -448,6 +465,7 @@ function SessionView({ id }: { id: string }) {
             <span className="composer-foot__item composer-foot__note">{t("chat.disclaimer")}</span>
           )}
           <span className="grow" />
+          {!code && !elsewhere && !m.leaseLost && <CompareToggle store={store} />}
           <ModelPicker store={store} />
           {code && (
             <Menu
@@ -462,7 +480,7 @@ function SessionView({ id }: { id: string }) {
               )}
             />
           )}
-          <ContextRing store={store} />
+          <SessionUsage store={store} code={code} />
         </div>
         {code && info?.workspace_id && <WorktreeFooter sessionId={id} />}
       </div>

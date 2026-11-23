@@ -63,12 +63,83 @@ export function double(xs: number[]): number[] {
 
 The area of a circle is $\\pi r^2$.`;
 
+/** "Genie Large": a longer, differently shaped answer, so a model race has something to compare. */
+const LARGE = `Let me walk through it in a bit more depth.
+
+### The idea
+
+Doubling every element is a **pure map**: no element depends on another, so the work is
+trivially parallel and the input is left untouched.
+
+\`\`\`ts
+/** Doubles every number; returns a new array. */
+export const double = (xs: readonly number[]): number[] => xs.map((x) => x * 2);
+\`\`\`
+
+### Trade-offs
+
+- \`map\` allocates a new array: fine for most inputs, but for very large ones a typed array
+  (\`Float64Array\`) is faster and lighter.
+- Mutating in place saves memory but surprises callers that still hold the input.
+
+> Rule of thumb: keep it pure until a profiler says otherwise.
+
+Complexity is $O(n)$ time and $O(n)$ extra space.`;
+
+/** Reply text and usage per mock model (Genie Small is the default sample). */
+function mockModelReply(model: string): { text: string; usage: { input_tokens: number; output_tokens: number }; usd: number } {
+  if (model === "mock/genie-large") return { text: LARGE, usage: { input_tokens: 1400, output_tokens: 620 }, usd: 0.0074 };
+  return { text: SAMPLE, usage: { input_tokens: 1200, output_tokens: 300 }, usd: 0.0021 };
+}
+
+/** Genie Test has a small window so the context meter / trim banner is easy to demonstrate. */
+const mockWindow = (model: string) => (model === "mock/genie-test" ? 32000 : 200000);
+
+/** Context in use: a fixed system prompt plus ≈ chars / 4 of the path since the latest compaction. */
+function mockContextTokens(s: MockSession): number {
+  const path = pathOf(s, s.leaf);
+  let from = 0;
+  path.forEach((m, i) => m.parts.some((p) => p.type === "compaction") && (from = i));
+  let chars = 0;
+  for (const m of path.slice(from))
+    for (const p of m.parts) {
+      if (p.type === "text") chars += p.text.length;
+      else if (p.type === "reasoning") chars += p.text?.length ?? 0;
+      else if (p.type === "tool_call") chars += JSON.stringify(p.input ?? "").length;
+      else if (p.type === "tool_result") chars += typeof p.content === "string" ? p.content.length : JSON.stringify(p.content ?? "").length;
+      else if (p.type === "compaction") chars += p.summary?.length ?? 0;
+    }
+  return 2500 + Math.ceil(chars / 4);
+}
+
 interface MockSession {
   info: SessionInfo;
   events: SessionEventEnvelope[];
+  /** Every message of the tree; the conversation is the path from the root to `leaf`. */
   messages: Message[];
+  /** Active leaf (D24): new prompts append under it; regenerate / branch switch move it. */
+  leaf?: string | null;
   subscribed: boolean;
   running?: { cancel: () => void };
+}
+
+/** Root → `leaf` (the whole list for a session that never set a leaf). */
+function pathOf(s: MockSession, leaf: string | null | undefined): Message[] {
+  if (leaf === undefined) return s.messages;
+  const byId = new Map(s.messages.map((m) => [m.id, m]));
+  const out: Message[] = [];
+  for (let m = leaf ? byId.get(leaf) : undefined; m && out.length < 10_000; m = m.parent_id ? byId.get(m.parent_id) : undefined) out.unshift(m);
+  return out;
+}
+
+/** For each message on the path with siblings: the sibling ids, in creation order. */
+function siblingsOf(s: MockSession, path: Message[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const m of path) {
+    const ids = s.messages.filter((x) => x.role === m.role && (x.parent_id ?? null) === (m.parent_id ?? null)).map((x) => x.id);
+    if (ids.length > 1) out[m.id] = ids;
+  }
+  return out;
 }
 
 function err(kind: string, message: string, code = -32000): WireError {
@@ -113,6 +184,9 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
   const projectFiles: { project_id: string; file_id: string; name: string; blob_id: string; size: number; tokens: number; added_at: string }[] = [];
   const ringCap = opts.terminalRing ?? 64 * 1024;
   const uploads = new Map<string, string[]>();
+  /** Fake uncommitted changes per Code session (path → unified diff), for git.status / git.diff. */
+  const dirty = new Map<string, Map<string, { change: "added" | "modified"; diff: string }>>();
+  const dirtyOf = (id: string) => dirty.get(id) ?? dirty.set(id, new Map()).get(id)!;
 
   const emit = (m: HostMessage) => listener?.(m);
   const notify = (method: string, params: unknown) => emit({ kind: "batch", messages: [{ method, params }] });
@@ -158,15 +232,14 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     setStatus(s, "running");
 
     // Conversation so far, up to and including the prompting user message.
-    const upto = s.messages.findIndex((m) => m.id === userMsgId);
-    const history: ChatMessage[] = s.messages
-      .slice(0, upto < 0 ? undefined : upto + 1)
+    const history: ChatMessage[] = pathOf(s, userMsgId)
       .map((m) => ({ role: m.role === "assistant" ? ("assistant" as const) : ("user" as const), content: m.parts.map((p) => (p.type === "text" ? p.text : "")).join("") }))
       .filter((m) => m.content.trim());
 
     const msgId = uid("msg");
     const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model };
     s.messages.push(assistant);
+    s.leaf = msgId;
     const partId = uid("prt");
     publish(s, { type: "part.started", kind: "text", message_id: msgId, part_id: partId }, true, turn_id);
 
@@ -210,24 +283,70 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     if (!opts.reply && azureConfig && s.info.model === azureModelId(azureConfig)) return runAzureTurn(s, azureConfig, userMsgId);
     const turn_id = uid("trn");
     const scripted = !opts.reply && s.info.model === "mock/genie-test" ? testReply(prompt) : null;
-    const text = opts.reply ? opts.reply(prompt) : (scripted?.text ?? SAMPLE);
+    const byModel = mockModelReply(s.info.model);
+    const { usage, usd } = byModel;
+    const text = opts.reply ? opts.reply(prompt) : (scripted?.text ?? byModel.text);
     let cancelled = false;
     s.running = { cancel: () => (cancelled = true) };
     publish(s, { type: "turn.started", turn_id, message_id: userMsgId }, true, turn_id);
     setStatus(s, "running");
     const msgId = uid("msg");
-    const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model, usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } };
+    const assistant: Message = { id: msgId, role: "assistant", parts: [], created_at: now(), parent_id: userMsgId, turn_id, model: s.info.model, usage, cost: { usd } };
     s.messages.push(assistant);
+    s.leaf = msgId;
     const finish = (status: "completed" | "cancelled" | "failed") => {
       s.running = undefined;
-      publish(s, { type: "step.ended", finish: status === "completed" ? "stop" : status === "failed" ? "error" : "cancelled", usage: { input_tokens: 1200, output_tokens: 300 }, cost: { usd: 0.0021 } }, true, turn_id);
-      publish(s, { type: "usage.updated", context_tokens: 1200 + text.length, context_window: 200000, cost: { usd: 0.0021 }, session: { input_tokens: 1200, output_tokens: 300 } }, false, turn_id);
+      publish(s, { type: "step.ended", finish: status === "completed" ? "stop" : status === "failed" ? "error" : "cancelled", usage, cost: { usd } }, true, turn_id);
+      publish(s, { type: "usage.updated", context_tokens: mockContextTokens(s), context_window: mockWindow(s.info.model), cost: { usd }, session: usage }, false, turn_id);
       const error = status === "failed" && scripted?.error ? { code: "provider_error", message: scripted.error } : undefined;
       publish(s, { type: "turn.settled", turn_id, status, ...(error ? { error } : {}) }, true, turn_id);
       setStatus(s, "idle");
     };
+    // Code sessions: "edit … (and run tests / lint)" edits files and runs the checks, no asks.
+    const editFlow = s.info.kind === "code" && /\b(edit|change|fix|implement|refactor)\b/i.test(prompt);
+    const toolCall = async (name: string, input: Record<string, unknown>, content: string, ok = true) => {
+      const callPart = uid("prt");
+      const call_id = uid("call");
+      publish(s, { type: "part.started", kind: "tool_call", message_id: msgId, part_id: callPart }, true, turn_id);
+      const part: Part = { type: "tool_call", id: callPart, call_id, name, input };
+      assistant.parts.push(part);
+      publish(s, { type: "part.ended", part_id: callPart, part }, true, turn_id);
+      publish(s, { type: "tool.started", call_id, name, resource: name === "shell" ? `Bash(${String(input.command)})` : String(input.path ?? "") }, true, turn_id);
+      await new Promise((r) => setTimeout(r, tick * 4));
+      const resPart = uid("prt");
+      const result: Part = { type: "tool_result", id: resPart, call_id, content, is_error: !ok };
+      assistant.parts.push(result);
+      publish(s, { type: "tool.ended", call_id, outcome: ok ? "ok" : "error", result_part_id: resPart }, true, turn_id);
+      publish(s, { type: "part.ended", part_id: resPart, part: result }, true, turn_id);
+    };
+    const runEditFlow = async () => {
+      const files = dirtyOf(s.info.session_id);
+      const n = files.size;
+      const path = n ? `src/feature${n}.ts` : "src/App.tsx";
+      const old_string = 'const title = "Hello";';
+      const new_string = 'const title = "Hello, Genie";\nconst subtitle = "Ready to commit";';
+      await toolCall("edit", { path, old_string, new_string }, `Edited ${path}`);
+      files.set(path, {
+        change: n ? "added" : "modified",
+        diff: n
+          ? `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,2 @@\n+${new_string.split("\n").join("\n+")}\n`
+          : `diff --git a/${path} b/${path}\nindex 1a2b3c4..5d6e7f8 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,3 +1,4 @@\n import React from "react";\n-${old_string}\n+${new_string.split("\n").join("\n+")}\n export default title;\n`,
+      });
+      if (!files.has("src/App.test.tsx") && /\btests?\b/i.test(prompt)) {
+        const test = "src/App.test.tsx";
+        files.set(test, { change: "added", diff: `diff --git a/${test} b/${test}\nnew file mode 100644\n--- /dev/null\n+++ b/${test}\n@@ -0,0 +1,3 @@\n+import { expect, it } from "vitest";\n+import title from "./App";\n+it("greets", () => expect(title).toContain("Genie"));\n` });
+        await toolCall("write", { path: test, content: "…" }, `Wrote ${test}`);
+      }
+      if (/\btests?\b/i.test(prompt)) {
+        const fail = /\bfail/i.test(prompt);
+        await toolCall("shell", { command: "bun run test" }, fail ? " FAIL  src/App.test.tsx > greets\n Test Files  1 failed (1)\n      Tests  1 failed | 11 passed (12)" : " ✓ src/App.test.tsx (1 test)\n Test Files  3 passed (3)\n      Tests  12 passed (12)", true);
+      }
+      if (/\b(lint|typecheck|tsc)\b/i.test(prompt)) await toolCall("shell", { command: "bun run typecheck" }, "$ tsc --noEmit -p .", true);
+    };
     const stream = async () => {
-      if (/permission|run|shell/i.test(prompt)) {
+      if (scripted?.log) await toolCall("shell", { command: scripted.log.command }, scripted.log.output);
+      if (editFlow) await runEditFlow();
+      else if (/permission|run|shell/i.test(prompt)) {
         const callPart = uid("prt");
         const call_id = uid("call");
         publish(s, { type: "part.started", kind: "tool_call", message_id: msgId, part_id: callPart }, true, turn_id);
@@ -362,7 +481,8 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     },
     "session.get": (p) => {
       const s = session(p.session_id);
-      return { session: s.info, path: s.messages, siblings: {} };
+      const path = pathOf(s, p.leaf_id ?? s.leaf);
+      return { session: { ...s.info, active_leaf_id: s.leaf ?? null }, path, siblings: siblingsOf(s, path) };
     },
     "session.subscribe": (p) => {
       const s = session(p.session_id);
@@ -388,7 +508,8 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       const builtin = typed ? MOCK_BUILTINS.find((b) => b.name === typed || b.aliases?.includes(typed)) : undefined;
       if (builtin && builtin.route === "client") throw err("command_not_prompt", `/${builtin.name} is a client command; run it in the client`, -32014);
       const text = parts.map((x) => (x.type === "text" ? x.text : x.type === "command" ? `/${x.name} ${x.args}`.trim() : "")).join("");
-      s.messages.push({ id, role: "user", parts: [{ type: "text", id: uid("prt"), text }], created_at: now(), parent_id: null });
+      s.messages.push({ id, role: "user", parts: [{ type: "text", id: uid("prt"), text }], created_at: now(), parent_id: p.parent_id ?? s.leaf ?? null });
+      s.leaf = id;
       publish(s, { type: "message.admitted", message_id: id, delivery: p.delivery, parts, role: "user", source: "user", parent_id: p.parent_id ?? null });
       if (!s.running) runTurn(s, text, id);
       return { message_id: id, inbox_id: uid("inb") };
@@ -408,6 +529,10 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         if (changes.project_id && !projects.some((x) => x.project_id === changes.project_id)) throw err("not_found", "no such project", -32004);
         changes.project_id = changes.project_id || null;
       }
+      if (changes.active_leaf_id) {
+        if (!s.messages.some((m) => m.id === changes.active_leaf_id)) throw err("not_found", "no such message", -32004);
+        s.leaf = changes.active_leaf_id;
+      }
       Object.assign(s.info, changes);
       publish(s, { type: "session.updated", ...changes });
       if (workspaceOn) notify("session.listed", { change: "updated", session: summary(s) });
@@ -423,8 +548,16 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     "session.take_over": () => ({}),
     "session.resume": () => ({}),
     "session.regenerate": (p) => {
+      // Like the engine: a sibling reply under the user message above `message_id` (D24).
       const s = session(p.session_id);
-      runTurn(s, "regenerate", p.message_id);
+      const byId = new Map(s.messages.map((m) => [m.id, m]));
+      let user = byId.get(p.message_id);
+      if (!user || user.role !== "assistant") throw err("invalid_params", "message_id must be an assistant message", -32602);
+      while (user && user.role !== "user") user = user.parent_id ? byId.get(user.parent_id) : undefined;
+      if (!user) throw err("invalid_params", "regenerate: no user message above", -32602);
+      if (s.running) throw err("busy", "a turn is running", -32000);
+      s.leaf = user.id;
+      runTurn(s, user.parts.map((x) => (x.type === "text" ? x.text : "")).join(""), user.id);
       return {};
     },
     "session.search": (p) => ({
@@ -433,6 +566,17 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         .map((s) => ({ session_id: s.info.session_id, message_id: "", snippet: s.info.title ?? "" })),
     }),
     "session.export": (p) => ({ text: `# ${session(p.session_id).info.title ?? "Chat"}\n` }),
+    "git.status": (p) => {
+      if (session(p.session_id).info.kind !== "code") throw err("not_a_repo", "not a git repository");
+      return { branch: "main", files: [...dirtyOf(p.session_id).entries()].map(([path, f]) => ({ path, change: f.change })) };
+    },
+    "git.diff": (p) => ({ text: [...dirtyOf(p.session_id).entries()].filter(([path]) => !p.path || path === p.path).map(([, f]) => f.diff).join("") }),
+    "git.commit": (p) => {
+      const files = dirtyOf(p.session_id);
+      if (!files.size) throw err("nothing_to_commit", "nothing to commit");
+      files.clear();
+      return { commit: Array.from({ length: 40 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join(""), note: null, pr_url: null };
+    },
     "permission.respond": () => ({}),
     "permission.pending": () => ({ asks: [] }),
     "project.list": () => ({ projects }),
@@ -448,7 +592,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         { id: "openai/gpt-5.2", name: "GPT-5.2", provider: "openai", context_window: 400000, effort_levels: ["low", "medium", "high"] },
         { id: "mock/genie-small", name: "Genie Small", provider: "mock", context_window: 128000, effort_levels: [] },
         { id: "mock/genie-large", name: "Genie Large", provider: "mock", context_window: 200000, effort_levels: ["low", "medium", "high"] },
-        { id: "mock/genie-test", name: "Genie Test", provider: "mock", context_window: 200000, effort_levels: [] },
+        { id: "mock/genie-test", name: "Genie Test", provider: "mock", context_window: mockWindow("mock/genie-test"), effort_levels: [] },
         ...(azureConfig ? [{ id: azureModelId(azureConfig), name: "GPT-5.2 (Azure)", provider: "azure-foundry", context_window: 400000, effort_levels: [] }] : []),
       ],
     }),
@@ -538,9 +682,57 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         diagnostics: [],
       };
     },
-    "session.compact": () => ({}),
+    "session.compact": (p) => {
+      // Like the engine: summarise the path so far into a compaction message; later context counts from it.
+      const s = session(p.session_id);
+      if (s.running) throw err("invalid_state", "a turn is running", -32010);
+      const before = mockContextTokens(s);
+      setStatus(s, "compacting");
+      setTimeout(() => {
+        const asked = pathOf(s, s.leaf)
+          .filter((m) => m.role === "user")
+          .map((m) => m.parts.map((x) => (x.type === "text" ? x.text : "")).join(" ").trim().slice(0, 80))
+          .filter(Boolean);
+        const focus = typeof p.focus === "string" && p.focus.trim() ? `\n\nKept in detail: ${p.focus.trim()}.` : "";
+        const summary = `Summary of the conversation so far. The user asked about: ${asked.map((a) => `“${a}”`).join(", ") || "nothing yet"}. Large tool output was condensed to its result.${focus}`;
+        const id = uid("msg");
+        const partId = uid("prt");
+        const part: Part = { type: "compaction", id: partId, summary, native: false };
+        s.messages.push({ id, role: "assistant", parts: [part], created_at: now(), parent_id: s.leaf ?? pathOf(s, s.leaf).at(-1)?.id ?? null, turn_id: null, model: s.info.model });
+        s.leaf = id;
+        publish(s, { type: "part.started", kind: "compaction", message_id: id, part_id: partId }, true);
+        publish(s, { type: "part.ended", part_id: partId, part }, true);
+        const after = mockContextTokens(s);
+        publish(s, { type: "session.compacted", compaction_message_id: id, native: false, tokens_before: before, tokens_after: after, trigger: "manual" }, true);
+        publish(s, { type: "usage.updated", context_tokens: after, context_window: mockWindow(s.info.model), cost: { usd: 0 }, session: { input_tokens: 0, output_tokens: 0 } }, false);
+        setStatus(s, "idle");
+      }, tick * 10 + 300);
+      return {};
+    },
     "skill.list": () => ({ skills: [{ id: "pdf", name: "PDF", description: "Read and fill PDFs", enabled: true, source: "builtin" }] }),
-    "usage.query": () => ({ rows: [{ keys: ["mock"], usage: { input_tokens: 12000, output_tokens: 3400 }, cost: { usd: 0.12 } }] }),
+    "usage.query": (p) => {
+      // A fixed month-to-date baseline per project (Demo project near its sample budget) plus
+      // every reply sent in this preview, so budget warnings can be demonstrated.
+      const acc = new Map<string, { input_tokens: number; output_tokens: number; usd: number }>([
+        ["prj_demo", { input_tokens: 610_000, output_tokens: 205_000, usd: 1.64 }],
+        ["", { input_tokens: 96_000, output_tokens: 24_000, usd: 0.4 }],
+      ]);
+      for (const s of sessions.values())
+        for (const m of s.messages) {
+          if (m.role !== "assistant" || !m.usage) continue;
+          const k = s.info.project_id ?? "";
+          const a = acc.get(k) ?? { input_tokens: 0, output_tokens: 0, usd: 0 };
+          a.input_tokens += m.usage.input_tokens ?? 0;
+          a.output_tokens += m.usage.output_tokens ?? 0;
+          a.usd += m.cost?.usd ?? 0;
+          acc.set(k, a);
+        }
+      const byProject = (p.group_by ?? []).includes("project");
+      const rows = [...acc].map(([k, a]) => ({ keys: [k], usage: { input_tokens: a.input_tokens, output_tokens: a.output_tokens }, cost: { usd: a.usd } }));
+      if (byProject && p.group_by.length === 1) return { rows };
+      if (!p.group_by?.length) return { rows: [{ keys: [], usage: { input_tokens: rows.reduce((n, r) => n + r.usage.input_tokens, 0), output_tokens: rows.reduce((n, r) => n + r.usage.output_tokens, 0) }, cost: { usd: rows.reduce((n, r) => n + r.cost.usd, 0) } }] };
+      return { rows: [{ keys: ["mock"], usage: { input_tokens: 12000, output_tokens: 3400 }, cost: { usd: 0.12 } }] };
+    },
     "daemon.status": () => ({ version: "0.1.0-mock", pid: 1, uptime_s: 42, socket: "mock", channel: "dev", clients: [], sessions_running: 0 }),
     "doctor.run": () => ({ checks: [{ id: "daemon", status: "ok", detail: "mock engine" }] }),
     "diagnostics.collect": () => ({ text: "mock diagnostics" }),
@@ -671,6 +863,29 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     },
     async saveFile(name) {
       return `~/Downloads/${name}`;
+    },
+    async gitGraph() {
+      // A small history with a feature branch merged back, for the browser preview.
+      const h = (n: number) => n.toString(16).padStart(40, "a");
+      const at = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+      const c = (n: number, parents: number[], who: string, days: number, refs: string, subject: string, body = "") => [h(n), parents.map(h).join(" "), who, at(days), refs, subject, body].join("\x1f") + "\x1e";
+      // Genie's commits carry a `Genie-Session` trailer; these point at sessions the mock doesn't
+      // have, so the preview shows the "deleted session" label (plus time-window links for new sessions).
+      return {
+        log: [
+          c(9, [8, 7], "Sam Rivera", 0.02, "HEAD -> main, origin/main", "Merge branch 'feature/login'"),
+          c(8, [6], "Sam Rivera", 0.3, "", "Fix header spacing on mobile", "Genie-Session: ses_mock_header\n"),
+          c(7, [5], "Alex Kim", 0.5, "feature/login", "Add login form validation", "Checks email and password before submit.\n\nGenie-Session: ses_mock_login\n"),
+          c(6, [4], "Sam Rivera", 1, "tag: v1.1", "Release 1.1"),
+          c(5, [4], "Alex Kim", 1.5, "", "Start login page"),
+          c(4, [3], "Sam Rivera", 3, "", "Update dependencies"),
+          c(3, [2], "Sam Rivera", 6, "tag: v1.0", "First release"),
+          c(2, [1], "Alex Kim", 9, "", "Add README"),
+          c(1, [], "Sam Rivera", 12, "", "Initial commit"),
+        ].join(""),
+        status: " M src/App.tsx\n?? src/new.ts\n",
+        branch: "main",
+      };
     },
     async pickFolder() {
       return opts.pickFolder === undefined ? "/tmp/mock-repo" : opts.pickFolder;

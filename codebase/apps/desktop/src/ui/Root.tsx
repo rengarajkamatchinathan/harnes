@@ -11,6 +11,8 @@ import { RightPanel } from "./panel/RightPanel";
 import { SettingsPage } from "./settings/SettingsPage";
 import { FirstRun } from "./FirstRun";
 import { ProjectPage, ProjectsPage } from "./ProjectPage";
+import { CodeProjectPage } from "./code/CodeProjectPage";
+import { HandoffView, useHandoffImport } from "./Handoff";
 
 export function Root() {
   const app = useApp();
@@ -89,7 +91,14 @@ function Shell() {
   const app = useApp();
   const { ui, status } = app;
   const width = useWindowWidth();
-  const panelShown = ui.view !== "project" && ui.panelOpen;
+  const handoffImport = useHandoffImport(app);
+  useEffect(() => {
+    app.pickHandoffFile = handoffImport.open;
+    return () => {
+      app.pickHandoffFile = null;
+    };
+  }, [app, handoffImport.open]);
+  const panelShown = ui.view !== "project" && ui.view !== "handoff" && ui.panelOpen;
   const { narrow, overlay, panelWidth } = layoutFor(width, { sidebarWidth: ui.sidebarWidth, panelOpen: panelShown, panelWidth: ui.panelWidth });
   const [drawerOpen, setDrawer] = useState(false);
   // The drawer is transient: it closes when the layout widens or the user goes somewhere.
@@ -126,11 +135,20 @@ function Shell() {
             <Banner tone="neutral">{t("conn.degraded")}</Banner>
           </div>
         )}
-        {ui.view === "project" ? (ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ProjectsPage />) : <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />}
+        {ui.view === "handoff" ? (
+          <HandoffView />
+        ) : ui.view === "project" ? (
+          ui.activeProject ? <ProjectPage id={ui.activeProject} /> : <ProjectsPage />
+        ) : ui.view === "folder" && ui.mode === "code" ? (
+          <CodeProjectPage key={ui.codeWorkspace} path={ui.codeWorkspace} />
+        ) : (
+          <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />
+        )}
       </main>
       {panelShown && <RightPanel />}
       {ui.view === "settings" && <SettingsPage />}
       <Toasts />
+      {handoffImport.input}
     </div>
     </ShellContext.Provider>
   );

@@ -81,6 +81,8 @@
       <string id="ArtifactsEnabled_Explain">Disabled turns artifacts off.</string>
       <string id="BrowserEnabled">Agent browser</string>
       <string id="BrowserEnabled_Explain">Disabled turns the agent browser off.</string>
+      <string id="ImageGenerationEnabled">Image generation</string>
+      <string id="ImageGenerationEnabled_Explain">Disabled hides the image_generate tool in Chat and Code.</string>
       <string id="BrowserSiteAllowlist">Agent browser allowed sites</string>
       <string id="BrowserSiteAllowlist_Explain">Only these sites can be opened by the agent browser.</string>
       <string id="BrowserSiteBlocklist">Agent browser blocked sites</string>

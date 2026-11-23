@@ -1,7 +1,7 @@
 // Composer (05 §2.3): Enter sends, Shift+Enter newline; while a turn runs Enter steers and
 // Alt+Enter queues (SA-06); attachments via blob.put; model + effort pickers; "+" menu;
 // context meter ring (D32); queued items as chips; the `/` menu (D58).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { CommandInfo, Delivery, InputPart, McpServerInfo, ModelInfo } from "@genie/protocol";
 import { Button, Chip, Dialog, Icon, IconButton, Menu, Ring, Switch } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
@@ -10,6 +10,10 @@ import type { SessionStore } from "../../state/session";
 import { useApp } from "../context";
 import { providerMeta } from "../settings/ProvidersSection";
 import { RewindDialog } from "../code/CodeExtras";
+import { raceBook, startRace } from "../../state/race";
+import { CompareChip, CompareToggle, useRaceModels } from "./Compare";
+import { checksFor, sendGate, type BudgetCheck } from "../../state/budget";
+import { BudgetNotice, checkMessage, useBudgetChecks } from "../BudgetGuard";
 import { useDictation } from "./dictation";
 import { McpPromptPicker, McpResourcePicker, type McpResource } from "./McpPickers";
 import { findCommand, hintAfter, needsArgs, parseSlash, pushRecent, rankCommands, slashQuery } from "./slash";
@@ -25,6 +29,8 @@ export interface ComposerProps {
   placeholder?: string;
   /** Prefill the box (e.g. an "Ideas for you" row); a new `n` re-applies the text. */
   seed?: { text: string; n: number };
+  /** Extra controls after the "+" menu in the hero toolbar (e.g. the project picker). */
+  leading?: ReactNode;
 }
 
 /** Which key does what (pure, for tests). */
@@ -160,7 +166,7 @@ export function ContextRing({ store }: { store: SessionStore | null }) {
   );
 }
 
-export function Composer({ store, onCreate, readOnly, layout = "reply", placeholder, seed }: ComposerProps) {
+export function Composer({ store, onCreate, readOnly, layout = "reply", placeholder, seed, leading }: ComposerProps) {
   const app = useApp();
   const [text, setText] = useState("");
   useEffect(() => {
@@ -210,6 +216,20 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
   const modelInfo = app.models.find((m) => m.id === currentModel);
   const kind = info?.kind === "code" || (!info && app.ui.mode === "code") ? "code" : "chat";
   const commands = useCommands(app, store, kind);
+  // Model race (Chat only): the next send goes to these models when there are two or more.
+  const raceWith = useRaceModels(currentModel);
+  const racing = kind === "chat" && raceWith.length > 1;
+  // Budget guard: a chat's project budget (Code folders have none) plus the overall one.
+  const budgetProject = kind === "chat" ? (info ? info.project_id || null : app.ui.activeProject) : null;
+  const budgetChecks = useBudgetChecks(budgetProject);
+  const [budgetAsk, setBudgetAsk] = useState<{ delivery: Delivery; override?: string; checks: BudgetCheck[] } | null>(null);
+  const hasBudget = !!app.ui.budgets.overall || (!!budgetProject && !!app.ui.budgets.projects[budgetProject]);
+  // Refresh month-to-date spend shortly after each turn settles (debounced; only with a budget).
+  const wasBusy = useRef(busy);
+  useEffect(() => {
+    if (wasBusy.current && !busy && hasBudget) app.budgetSpend.refresh(1500);
+    wasBusy.current = busy;
+  }, [busy, hasBudget, app]);
 
   // The `/` menu (D58): open while the name is typed at the very start of the prompt.
   const query = slashQuery(text);
@@ -293,7 +313,7 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
     else void submit("steer", `/${c.name}`);
   };
 
-  const submit = async (delivery: Delivery, override?: string) => {
+  const submit = async (delivery: Delivery, override?: string, budgetOk = false) => {
     const body = (override ?? text).trim();
     const ready = atts.filter((a) => a.state === "ready" && a.blobId);
     if ((!body && !ready.length) || sending || atts.some((a) => a.state === "uploading")) return;
@@ -303,6 +323,8 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
     const cmd = slash ? findCommand(commands ?? [], slash.name) : undefined;
     // Attachments stay in the composer for the next message.
     if (slash && cmd?.route === "client") return void runClient(cmd, slash.args);
+    if (store && raceBook.running(store.id)) return void app.toast({ title: t("race.busy"), tone: "info" });
+    if (racing && busy) return void app.toast({ title: t("race.busyTurn"), tone: "info" });
     if (slash && cmd?.route === "prompt") {
       parts.push({ type: "command", name: cmd.name, args: slash.args });
       remember(cmd.name);
@@ -311,11 +333,30 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
       parts.push({ type: "text", text: body });
     }
     for (const a of ready) parts.push({ type: "attachment", blob_id: a.blobId!, mime: a.mime, name: a.name });
+    if (!budgetOk && hasBudget) {
+      // First send after launch: make sure this month's spend is known before deciding.
+      if (!app.budgetSpend.loadedAt) await app.budgetSpend.load();
+      const name = app.projects.find((p) => p.project_id === budgetProject)?.name ?? "";
+      const gate = sendGate(checksFor(app.ui.budgets, app.budgetSpend, budgetProject, name), currentModel, (m) => app.usableModels.some((x) => x.id === m));
+      if (gate.kind === "ask") return void setBudgetAsk({ delivery, override, checks: gate.checks });
+      if (gate.kind === "switch" && !racing) {
+        try {
+          app.setUi({ model: gate.model });
+          if (store) await app.client.session.update({ session_id: store.id, model: gate.model });
+          app.toast({ title: t("budget.switched", { model: app.models.find((m) => m.id === gate.model)?.name ?? gate.model }), body: checkMessage(gate.check), tone: "info" });
+        } catch (e) {
+          return void app.toast({ title: app.describeError(e), tone: "danger" });
+        }
+      }
+    }
     setSending(true);
     try {
       const s = store ?? (await onCreate?.());
       if (!s) return;
-      await s.send(parts, delivery);
+      if (racing) {
+        await startRace(s, parts, raceWith, { setModel: (model) => app.client.session.update({ session_id: s.id, model }), describeError: (e) => app.describeError(e) });
+        raceBook.setExtras([]); // one race per pick: the chip said "the next send"
+      } else await s.send(parts, delivery);
       setText("");
       setAtts([]);
     } catch (e) {
@@ -410,6 +451,8 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
   if (readOnly) return <div className="composer composer--readonly muted">{t("composer.readOnly")}</div>;
 
   return (
+    <>
+    <BudgetNotice checks={budgetChecks} projectId={budgetProject} />
     <div
       className={`composer composer--${layout} ${drag ? "composer--drag" : ""}`}
       onDragOver={(e) => {
@@ -431,6 +474,11 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
               {q.preview}
             </Chip>
           ))}
+        </div>
+      )}
+      {racing && (
+        <div className="row wrap composer__atts">
+          <CompareChip models={raceWith} />
         </div>
       )}
       {atts.length > 0 && (
@@ -467,7 +515,9 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
           ]}
         />
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
+        {layout === "hero" && leading}
         {layout === "hero" ? <span className="grow" /> : textarea}
+        {layout === "hero" && kind === "chat" && <CompareToggle store={store} />}
         {layout === "hero" && <ModelPicker store={store} />}
         <IconButton
           icon="mic"
@@ -542,7 +592,35 @@ export function Composer({ store, onCreate, readOnly, layout = "reply", placehol
       {cmdDialog?.kind === "choice" && <ChoiceDialog title={cmdDialog.title} options={cmdDialog.options} onPick={cmdDialog.onPick} onClose={() => setCmdDialog(null)} />}
       {cmdDialog?.kind === "connectors" && store && <ConnectorToggles sessionId={store.id} onClose={() => setCmdDialog(null)} />}
       {cmdDialog?.kind === "rewind" && store && <RewindDialog sessionId={store.id} message={cmdDialog.message} onClose={() => setCmdDialog(null)} onDone={() => setCmdDialog(null)} />}
+      {budgetAsk && (
+        <Dialog
+          open
+          title={t("budget.confirmTitle")}
+          onClose={() => setBudgetAsk(null)}
+          footer={
+            <>
+              <Button onClick={() => setBudgetAsk(null)}>{t("common.cancel")}</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const a = budgetAsk;
+                  setBudgetAsk(null);
+                  void submit(a.delivery, a.override, true);
+                }}
+              >
+                {t("budget.sendAnyway")}
+              </Button>
+            </>
+          }
+        >
+          {budgetAsk.checks.map((c) => (
+            <p key={c.scope}>{checkMessage(c)}</p>
+          ))}
+          <p>{t("budget.confirmBody")}</p>
+        </Dialog>
+      )}
     </div>
+    </>
   );
 }
 

@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Clock,
   Code,
+  Columns3,
   Copy,
   Download,
   Ellipsis,
@@ -23,6 +24,7 @@ import {
   GitBranch,
   Globe,
   Hand,
+  Image,
   Info,
   KeyRound,
   Layers,
@@ -31,7 +33,7 @@ import {
   Maximize,
   Maximize2,
   MessageSquare,
-  MessagesSquare,
+  MessageCircle,
   Mic,
   SquareCode,
   Monitor,
@@ -130,9 +132,12 @@ const ICONS = {
   expand: Maximize2,
   computer: Laptop,
   // Title-bar Chat/Code mode switch (distinct from the per-session chat/code glyphs).
-  modeChat: MessagesSquare,
+  modeChat: MessageCircle,
   modeCode: SquareCode,
   mic: Mic,
+  image: Image,
+  // Model race: answers side by side.
+  compare: Columns3,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

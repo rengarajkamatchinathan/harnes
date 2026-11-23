@@ -71,6 +71,7 @@ export function CommandPalette({ onClose, onNewProject, onNewCode }: { onClose: 
         keywords: "theme appearance dark light mode",
         run: () => app.setUi({ appearance: { ...app.ui.appearance, theme: dark ? "light" : "dark" } }),
       },
+      { id: "open-handoff", group: "actions", label: t("handoff.open"), icon: "file", keywords: "import share json", run: () => app.pickHandoffFile?.() },
       { id: "toggle-sidebar", group: "actions", label: t("sidebar.toggle"), icon: "sidebar", shortcut: `${modKey()}.`, run: () => app.setUi({ sidebarCollapsed: !app.ui.sidebarCollapsed }) },
       { id: "home", group: "nav", label: t("palette.home"), icon: "chat", keywords: "start new", run: go({ view: "main", activeSession: null, activeProject: null }) },
       { id: "projects", group: "nav", label: t("sidebar.projects"), icon: "projects", run: go({ mode: "chat", view: "project", activeProject: null, activeSession: null }) },

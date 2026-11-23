@@ -9,8 +9,8 @@
       "name": "@genie/desktop",
       "version": "0.1.0",
       "dependencies": {
-        "@fontsource-variable/inter": "^5.2.0",
         "@fontsource-variable/jetbrains-mono": "^5.2.0",
+        "@fontsource/poppins": "5.2.7",
         "@genie/protocol": "workspace:*",
         "@genie/ui": "workspace:*",
         "@tanstack/react-virtual": "^3.14.26",
@@ -176,9 +176,9 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
 
-    "@fontsource-variable/inter": ["@fontsource-variable/inter@5.3.0", "", {}, "sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA=="],
-
     "@fontsource-variable/jetbrains-mono": ["@fontsource-variable/jetbrains-mono@5.3.0", "", {}, "sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw=="],
+
+    "@fontsource/poppins": ["@fontsource/poppins@5.2.7", "", {}, "sha512-6uQyPmseo4FgI97WIhA4yWRlNaoLk4vSDK/PyRwdqqZb5zAEuc+Kunt8JTMcsHYUEGYBtN15SNkMajMdqUSUmg=="],
 
     "@genie/artifact-runtime": ["@genie/artifact-runtime@workspace:packages/artifact-runtime"],
 

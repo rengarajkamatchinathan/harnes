@@ -13,7 +13,26 @@ import type { SessionStore } from "../../state/session";
 import { useAppStatic } from "../context";
 import { GenieMark } from "../GenieMark";
 import { TextPart } from "./Markdown";
-import { headTail, resultText, summarizeTool, toolActivity, toolGroupSummary } from "./toolInfo";
+import { CompareAnswersButton } from "./Compare";
+import { QuestionStepper } from "./QuestionStepper";
+import { ReadyToCommit } from "../code/ReadyToCommit";
+import { parseQuestions } from "./questions";
+import { UsageChip } from "./Usage";
+import { turnStats } from "./usageStats";
+import { registerTranscriptScroll } from "./scrollBus";
+
+export { UsageChip };
+import { type GeneratedImage, headTail, resultText, summarizeTool, toolActivity, toolGroupSummary } from "./toolInfo";
+
+/** The question stepper under the latest reply when that reply asks the user several questions. */
+function LastReplyQuestions({ msg, store }: { msg: MessageView; store: SessionStore }) {
+  const text = msg.parts
+    .filter((p) => p.kind === "text")
+    .map((p) => p.text)
+    .join("\n\n");
+  const questions = useMemo(() => parseQuestions(text), [text]);
+  return questions ? <QuestionStepper key={msg.id} messageId={msg.id} questions={questions} store={store} /> : null;
+}
 
 export function Transcript({ store, compact, onRewind }: { store: SessionStore; compact?: boolean; onRewind?: (m: MessageView) => void }) {
   const model = store.model;
@@ -21,6 +40,7 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
   const stick = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
   const busy = store.busy;
+  const code = model.info?.kind === "code";
   const items = useMemo(() => buildRows(model.messages), [model.messages, model.rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const virt = useVirtualizer({
     count: items.length,
@@ -30,11 +50,23 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
     getItemKey: (i) => items[i].key,
   });
 
-  // After every commit: keep the bottom in view while streaming (unless the user scrolled up).
+  // Keep the bottom in view while content grows (streaming, new rows) unless the user scrolled
+  // up. Only on growth: renders caused by the user's own scrolling must never pull them back.
+  const lastHeight = useRef(0);
+  const lastTop = useRef(0);
   useLayoutEffect(() => {
     const el = parentRef.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const h = el.scrollHeight;
+    if (stick.current && h !== lastHeight.current) el.scrollTop = h;
+    lastHeight.current = h;
   });
+  // Any upward intent (wheel, touchpad, keys) stops following at once, however small the step.
+  const unstick = () => {
+    if (!stick.current) return;
+    stick.current = false;
+    setAtBottom(false);
+  };
   useEffect(() => {
     if (items.length) virt.scrollToIndex(items.length - 1, { align: "end" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -59,6 +91,27 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
     }
   }
 
+  // Scroll to a message on request (context meter): stop following the bottom, then flash the row.
+  const [flash, setFlash] = useState<string | null>(null);
+  const latest = useRef({ items, messages: model.messages });
+  latest.current = { items, messages: model.messages };
+  useEffect(
+    () =>
+      registerTranscriptScroll(store.id, (messageId) => {
+        const { items: rows, messages } = latest.current;
+        const i = rowIndexOf(messages, rows, messageId);
+        if (i < 0) return;
+        const key = rows[i].key;
+        stick.current = false;
+        setAtBottom(false);
+        virt.scrollToIndex(i, { align: "start" });
+        setFlash(key);
+        window.setTimeout(() => setFlash((f) => (f === key ? null : f)), 1600);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.id],
+  );
+
   const jumpToBottom = () => {
     const el = parentRef.current;
     if (!el) return;
@@ -76,10 +129,20 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
       aria-live="polite"
       aria-busy={store.busy}
       tabIndex={0}
+      onWheel={(e) => e.deltaY < 0 && unstick()}
+      onKeyDown={(e) => ["ArrowUp", "PageUp", "Home"].includes(e.key) && unstick()}
       onScroll={(e) => {
         const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-        if (stick.current !== atBottom) setAtBottom(stick.current);
+        const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+        const down = el.scrollTop > lastTop.current;
+        lastTop.current = el.scrollTop;
+        // Moving away from the bottom (scrollbar drag, touch) unsticks; scrolling down to the
+        // very bottom re-sticks. Never re-stick on an upward move, however close to the end.
+        if (stick.current && gap > 48) unstick();
+        else if (!stick.current && down && gap < 4) {
+          stick.current = true;
+          setAtBottom(true);
+        }
       }}
     >
       <div style={{ height: virt.getTotalSize(), position: "relative" }}>
@@ -90,16 +153,20 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
               key={vi.key}
               data-index={vi.index}
               ref={virt.measureElement}
-              className={`transcript__item${isNew(row.key) ? " is-new" : ""}${vi.index === lastAssistant && !busy ? " is-last" : ""}`}
+              className={`transcript__item${isNew(row.key) ? " is-new" : ""}${vi.index === lastAssistant && !busy ? " is-last" : ""}${flash === row.key ? " is-flash" : ""}`}
               style={{ transform: `translateY(${vi.start}px)` }}
             >
               {row.kind === "msg" ? (
-                <MessageRow msg={row.msg} rev={row.msg.rev} store={store} model={model} tools={model.tools} busy={busy} compact={!!compact} onRewind={onRewind} />
+                <>
+                  <MessageRow msg={row.msg} rev={row.msg.rev} store={store} model={model} tools={model.tools} busy={busy} compact={!!compact} onRewind={onRewind} turnUsage={row.msg.turnId ? model.turnUsage.get(row.msg.turnId) : undefined} />
+                  {vi.index === lastAssistant && vi.index === items.length - 1 && !busy && <LastReplyQuestions msg={row.msg} store={store} />}
+                </>
               ) : (
                 <div className="msg msg--assistant msg--tools">
                   <ToolGroup parts={row.parts} model={model} busy={busy} compact={!!compact} />
                 </div>
               )}
+              {code && !busy && !store.loading && vi.index === items.length - 1 && <ReadyToCommit store={store} />}
             </div>
           );
         })}
@@ -114,7 +181,7 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
 }
 
 const MessageRow = memo(
-  function MessageRow({ msg, store, model, busy, compact, onRewind }: { msg: MessageView; rev: number; store: SessionStore; model: SessionModel; tools: SessionModel["tools"]; busy: boolean; compact: boolean; onRewind?: (m: MessageView) => void }) {
+  function MessageRow({ msg, store, model, busy, compact, onRewind }: { msg: MessageView; rev: number; store: SessionStore; model: SessionModel; tools: SessionModel["tools"]; busy: boolean; compact: boolean; onRewind?: (m: MessageView) => void; turnUsage?: TurnUsage }) {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState("");
     const app = useAppStatic();
@@ -210,7 +277,8 @@ const MessageRow = memo(
             ) : (
               <IconButton icon="refresh" size="sm" label={t("chat.regenerate")} onClick={() => void store.regenerate(msg.id).catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }))} />
             )}
-            {!isUser && (msg.usage ?? (msg.turnId ? model.turnUsage.get(msg.turnId) : undefined)) && <UsageChip u={(msg.usage ?? model.turnUsage.get(msg.turnId!))!} />}
+            {!isUser && turnStats(msg, model) && <CompareAnswersButton store={store} msg={msg} />}
+            {!isUser && turnStats(msg, model) && <UsageChip u={turnStats(msg, model)!} />}
             {onRewind && isUser && <IconButton icon="refresh" size="sm" label={t("code.rewind")} onClick={() => onRewind(msg)} />}
           </div>
         )}
@@ -219,7 +287,7 @@ const MessageRow = memo(
   },
   // `tools` and `busy` are passed by value: comparing `a.model.tools` with `b.model.tools` read the
   // same mutable model twice, so rows never re-rendered when a tool finished (stuck spinners).
-  (a, b) => a.msg === b.msg && a.rev === b.rev && a.compact === b.compact && a.tools === b.tools && a.busy === b.busy,
+  (a, b) => a.msg === b.msg && a.rev === b.rev && a.compact === b.compact && a.tools === b.tools && a.busy === b.busy && a.turnUsage === b.turnUsage,
 );
 
 function PartRow({ part, model, busy, compact }: { part: PartView; model: SessionModel; busy: boolean; compact: boolean }) {
@@ -428,6 +496,7 @@ function ToolRow({ part, model, busy, compact, nested }: { part: PartView; model
         </button>
       )}
       {tool?.error && <div className="tool__error">{tool.error.message}</div>}
+      {sum.images && sum.images.length > 0 && <GeneratedImages images={sum.images} prompt={typeof (input as { prompt?: unknown })?.prompt === "string" ? (input as { prompt: string }).prompt : ""} />}
       {open && (
         <div className="tool__body">
           <div className="tool__label">{t("tool.arguments")}</div>
@@ -450,39 +519,72 @@ function ToolRow({ part, model, busy, compact, nested }: { part: PartView; model
 }
 
 function Media({ part }: { part: Extract<Part, { type: "media" }> }) {
+  return <BlobImage blobId={part.blob_id} mime={part.mime} name={part.name ?? undefined} />;
+}
+
+/** A stored blob shown as an image (a badge while loading, or when it isn't an image). */
+function BlobImage({ blobId, mime, name, title }: { blobId: string; mime: string; name?: string; title?: string }) {
   const app = useAppStatic();
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!part.mime.startsWith("image/")) return;
+    if (!mime.startsWith("image/")) return;
     let u: string | null = null;
-    readBlob(app.client, part.blob_id, 16 * 1024 * 1024)
+    let live = true;
+    readBlob(app.client, blobId, 32 * 1024 * 1024)
       .then((bytes) => {
-        u = URL.createObjectURL(new Blob([bytes as BlobPart], { type: part.mime }));
+        if (!live) return;
+        u = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
         setUrl(u);
       })
       .catch(() => {});
     return () => {
+      live = false;
       if (u) URL.revokeObjectURL(u);
     };
-  }, [app, part.blob_id, part.mime]);
-  if (url) return <img className="media" src={url} alt={part.name ?? ""} />;
+  }, [app, blobId, mime]);
+  if (url) return <img className="media" src={url} alt={name ?? ""} title={title} />;
   return (
     <Badge>
-      <Icon name="file" /> {part.name ?? part.mime}
+      <Icon name="file" /> {name ?? mime}
     </Badge>
   );
 }
 
-const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
-
-/** Per-message tokens + cost (05 §2.2, D24), from the turn's `step.ended` events. */
-export function UsageChip({ u }: { u: TurnUsage }) {
-  const total = u.input + u.output;
-  const detail = t("chat.usageDetail", { input: u.input, output: u.output, reasoning: u.reasoning, cache: u.cacheRead, steps: u.steps, cost: u.usd.toFixed(4) });
+/** `image_generate` results: the images, each with a save link. */
+function GeneratedImages({ images, prompt }: { images: GeneratedImage[]; prompt: string }) {
   return (
-    <span className="msg__usage muted" title={detail} aria-label={detail}>
-      {t("chat.usage", { tokens: fmtTokens(total), cost: u.usd >= 0.01 ? u.usd.toFixed(2) : u.usd.toFixed(4) })}
-    </span>
+    <div className="tool__images">
+      {images.map((img) => (
+        <figure key={img.blob_id} className="tool__image">
+          <BlobImage blobId={img.blob_id} mime={img.mime} name={prompt} title={img.revised_prompt ?? prompt} />
+          <SaveBlob blobId={img.blob_id} mime={img.mime} />
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function SaveBlob({ blobId, mime }: { blobId: string; mime: string }) {
+  const app = useAppStatic();
+  const ext = mime.split("/")[1]?.replace("jpeg", "jpg") ?? "png";
+  return (
+    <button
+      className="linklike tool__save"
+      onClick={() => {
+        readBlob(app.client, blobId, 32 * 1024 * 1024)
+          .then((bytes) => {
+            const u = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+            const a = document.createElement("a");
+            a.href = u;
+            a.download = `genie-image-${blobId.slice(-8)}.${ext}`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(u), 1000);
+          })
+          .catch((e) => app.toast({ title: app.describeError(e), tone: "danger" }));
+      }}
+    >
+      <Icon name="download" size={12} /> {t("tool.saveImage")}
+    </button>
   );
 }
 
@@ -553,6 +655,21 @@ export function buildRows(messages: MessageView[]): Row[] {
     rows.push({ key: m.id, kind: "msg", msg: m });
   }
   return rows;
+}
+
+/**
+ * The row showing a message: its own row, the tool group it folded into, or (for a message
+ * the transcript doesn't draw) the closest drawn message before it. -1 when there is none.
+ */
+export function rowIndexOf(messages: MessageView[], rows: Row[], messageId: string): number {
+  const at = messages.findIndex((m) => m.id === messageId);
+  for (let i = at; i >= 0; i--) {
+    const m = messages[i];
+    const ids = new Set(m.parts.map((p) => p.id));
+    const r = rows.findIndex((row) => (row.kind === "msg" ? row.msg.id === m.id : row.key === `tools:${m.id}` || row.parts.some((p) => ids.has(p.id))));
+    if (r >= 0) return r;
+  }
+  return -1;
 }
 
 /** Within one message: consecutive tool calls fold into a group, everything else as is. */

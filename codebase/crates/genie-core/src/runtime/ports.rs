@@ -116,6 +116,38 @@ pub trait ModelResolver: Send + Sync {
     fn small_model(&self, model: &str) -> Result<ResolvedModel, ResolveError> {
         self.resolve(model)
     }
+    /// The OpenAI-compatible REST API of a configured provider, for calls that are not
+    /// chat (image generation). Defaults to "not available".
+    fn provider_api(&self, provider: &str) -> Result<ProviderApi, ResolveError> {
+        Err(ResolveError {
+            class: "no_provider_configured",
+            message: format!("{provider} has no OpenAI-compatible API here"),
+            fix_link: Some("genie://settings/providers".into()),
+        })
+    }
+}
+
+/// A provider's OpenAI-compatible API root (`…/v1`) with the route's credentials.
+#[derive(Clone)]
+pub struct ProviderApi {
+    pub provider: String,
+    /// The API root without a trailing slash, e.g. `https://api.openai.com/v1` or
+    /// `https://res.openai.azure.com/openai/v1`; append `/images/generations` etc.
+    pub base: String,
+    pub auth: Arc<dyn genie_providers::Auth>,
+    pub headers: Vec<(String, String)>,
+}
+
+impl ProviderApi {
+    /// The API root of an OpenAI Responses / Chat Completions endpoint URL.
+    pub fn base_of(endpoint_url: &str) -> Option<String> {
+        let url = endpoint_url.split('?').next().unwrap_or(endpoint_url);
+        let url = url.trim_end_matches('/');
+        ["/responses", "/chat/completions"]
+            .iter()
+            .find_map(|s| url.strip_suffix(s))
+            .map(str::to_string)
+    }
 }
 
 /// No provider is set up: every turn fails with `no_provider_configured`.

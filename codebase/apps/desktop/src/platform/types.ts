@@ -70,6 +70,8 @@ export interface Platform {
   saveState(state: Record<string, unknown>): Promise<void>;
   /** Save an export to Downloads; resolves with the saved path. */
   saveFile(name: string, content: { text: string } | { base64: string }): Promise<string>;
+  /** Raw git history + status of a project folder (Code project page git graph). */
+  gitGraph(path: string, limit?: number): Promise<{ log: string; status: string; branch: string }>;
   /** Native folder picker (Code: new session); null when cancelled. */
   pickFolder(title?: string): Promise<string | null>;
   /** Native save dialog; resolves with the chosen path or null. */

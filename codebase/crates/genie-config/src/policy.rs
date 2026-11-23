@@ -379,6 +379,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "browser.siteAllowlist",
     "browser.siteBlocklist",
     "browser.profile",
+    "imageGeneration.enabled",
     "projectRetrieval.embeddingsProvider",
     "memory.enabled",
     "chatSearch.enabled",

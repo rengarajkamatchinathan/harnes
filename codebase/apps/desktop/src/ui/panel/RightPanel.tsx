@@ -60,7 +60,7 @@ export function RightPanel() {
           label={t("artifact.fullscreen")}
           onClick={() => {
             const max = Math.max(280, Math.min(1400, window.innerWidth - (app.ui.sidebarCollapsed ? 0 : app.ui.sidebarWidth) - 360));
-            app.setUi({ panelWidth: app.ui.panelWidth >= max - 10 ? 420 : max });
+            app.setUi({ panelWidth: app.ui.panelWidth >= max - 10 ? 600 : max });
           }}
         />
         <IconButton icon="x" size="sm" label={t("panel.hide")} onClick={() => app.setUi({ panelOpen: false })} />
