@@ -83,3 +83,30 @@ describe("session view model", () => {
     expect(m.needsReload).toBe(true);
   });
 });
+
+describe("turn time", () => {
+  it("records how long a turn took, with its tokens", async () => {
+    const { applyEvent, emptyModel } = await import("../src/state/sessionModel");
+    const m = emptyModel("ses_t");
+    const env = (seq: number, ts: string, event: unknown) => ({ session_id: "ses_t", seq, ts, turn_id: "trn_1", event }) as never;
+    applyEvent(m, env(1, "2026-01-01T10:00:00.000Z", { type: "turn.started", turn_id: "trn_1", message_id: "msg_u" }));
+    applyEvent(m, env(2, "2026-01-01T10:00:02.000Z", { type: "step.ended", finish: "stop", usage: { input_tokens: 100, output_tokens: 40 }, cost: { usd: 0 } }));
+    applyEvent(m, env(3, "2026-01-01T10:00:03.400Z", { type: "turn.settled", turn_id: "trn_1", status: "completed" }));
+    expect(m.turnUsage.get("trn_1")).toMatchObject({ input: 100, output: 40, steps: 1, ms: 3400 });
+  });
+});
+
+describe("events without a turn id", () => {
+  it("count toward the running turn (the engine stamps only start/settle)", async () => {
+    const { applyEvent, emptyModel } = await import("../src/state/sessionModel");
+    const m = emptyModel("ses_r");
+    const env = (seq: number, ts: string, event: unknown, turn_id?: string) => ({ session_id: "ses_r", seq, ts, ...(turn_id ? { turn_id } : {}), event }) as never;
+    applyEvent(m, env(1, "2026-01-01T10:00:00.000Z", { type: "turn.started", turn_id: "trn_9", message_id: "u" }, "trn_9"));
+    applyEvent(m, env(2, "2026-01-01T10:00:01.000Z", { type: "part.started", kind: "text", message_id: "a", part_id: "p" }));
+    applyEvent(m, env(3, "2026-01-01T10:00:02.500Z", { type: "step.ended", finish: "stop", usage: { input_tokens: 7655, output_tokens: 6 }, cost: { usd: 0 } }));
+    applyEvent(m, env(4, "2026-01-01T10:00:04.000Z", { type: "turn.settled", turn_id: "trn_9", status: "completed" }, "trn_9"));
+    expect(m.messages.find((x) => x.id === "a")?.turnId).toBe("trn_9");
+    expect(m.turnUsage.get("trn_9")).toMatchObject({ input: 7655, output: 6, ms: 4000 });
+    expect(m.currentTurn).toBeNull();
+  });
+});

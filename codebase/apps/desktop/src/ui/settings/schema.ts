@@ -93,7 +93,7 @@ export function sectionOf(key: string): SectionId {
   if (["model", "smallModel", "effort", "updates"].includes(top)) return "general";
   if (top === "theme") return "appearance";
   if (["memory", "chatSearch", "instructions"].includes(top)) return "genie";
-  if (["webSearch", "codeExecution", "artifacts", "browser"].includes(top)) return "capabilities";
+  if (["webSearch", "codeExecution", "artifacts", "browser", "imageGeneration"].includes(top)) return "capabilities";
   if (top === "mcpServers") return "connectors";
   if (top === "permissions") return "permissions";
   if (top === "telemetry") return "privacy";

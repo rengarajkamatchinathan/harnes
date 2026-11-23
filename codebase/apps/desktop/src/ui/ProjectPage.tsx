@@ -7,6 +7,8 @@ import { formatBytes, uploadBlob } from "../state/attachments";
 import { useApp } from "./context";
 import { NewProject, TitlebarControls } from "./Sidebar";
 import { useShell } from "./shell";
+import { GenieMark } from "./GenieMark";
+import { ProjectBudgetCard } from "./BudgetGuard";
 
 /** Projects overview: every project as a card, with search and "New project". */
 export function ProjectsPage() {
@@ -166,6 +168,9 @@ export function ProjectPage({ id }: { id: string }) {
                   {chats.map((s) => (
                     <div key={s.session_id} className="list-box__row project__chat">
                       <button className="project__chat-link" onClick={() => app.selectSession(s.session_id)}>
+                        <span className="sidebar__mark" aria-hidden>
+                          <GenieMark size={14} />
+                        </span>
                         <span className="sidebar__title">{s.title || t("sidebar.untitled")}</span>
                         <span className="muted project__when">{new Date(s.updated_at).toLocaleDateString()}</span>
                       </button>
@@ -195,6 +200,8 @@ export function ProjectPage({ id }: { id: string }) {
                   aria-label={t("project.instructions")}
                 />
               </div>
+
+              <ProjectBudgetCard projectId={id} />
 
               <div className="project__card">
                 <div className="project__card-head">

@@ -6,6 +6,8 @@
 //! port defined in [`tool`] ([`PermissionGate`], [`SpillStore`], [`MemoryPort`],
 //! [`EventSink`]) and implemented by `genie-core`, which runs the calls.
 //!
+//! [`image`] (`image_generate`) brings [`image::ImageBackend`] and [`image::ImageStore`].
+//!
 //! [`shell`] (06 §13: the `shell` tool, shell selection, the command scanner) and [`web`]
 //! (06 §8: `web_fetch` with the SSRF guard, web search) bring their own ports
 //! ([`shell::SessionDirs`], [`shell::BackgroundJobs`], [`web::TaintPort`],
@@ -13,6 +15,7 @@
 
 pub mod chat;
 pub mod code;
+pub mod image;
 pub mod output;
 pub mod preview;
 pub mod registry;

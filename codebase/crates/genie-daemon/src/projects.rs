@@ -31,6 +31,37 @@ use crate::services::{Services, not_implemented};
 /// Exports larger than this are returned as a blob.
 pub const EXPORT_INLINE_MAX: usize = 1024 * 1024;
 
+const ARTIFACTS_KEY: &str = "artifacts.enabled";
+
+/// Artifacts are allowed by policy and not switched off in the user's settings.
+fn artifacts_on(hub: &ConfigHub) -> bool {
+    let policy_off = hub.policy().bool(ARTIFACTS_KEY) == Some(false);
+    let user_off = hub.value(None, ARTIFACTS_KEY).and_then(|v| v.as_bool()) == Some(false);
+    !policy_off && !user_off
+}
+
+/// Follow `artifacts.enabled` in settings and policy for the life of the engine.
+fn watch_artifacts_setting(hub: Arc<ConfigHub>, artifacts: Arc<ArtifactHub>, root: &TaskScope) {
+    use genie_core::config::HubEvent;
+    use tokio::sync::broadcast::error::RecvError;
+    let mut rx = hub.subscribe();
+    root.child("artifacts-setting").spawn_cancellable(async move {
+        loop {
+            match rx.recv().await {
+                Ok(HubEvent::Config { keys, .. } | HubEvent::Policy { keys }) => {
+                    if keys.is_empty() || keys.iter().any(|k| k == ARTIFACTS_KEY || k == "artifacts") {
+                        artifacts.set_enabled(artifacts_on(&hub));
+                    }
+                }
+                Ok(_) => {}
+                // Missed events: just re-read the current value.
+                Err(RecvError::Lagged(_)) => artifacts.set_enabled(artifacts_on(&hub)),
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 /// Wire artifacts, memory state, projects/retrieval, attachments and chat search into the
 /// runtime and the method table. Policy: `artifacts.enabled`, `memory.enabled`,
 /// `chatSearch.enabled` set to `false` turn the feature off (D28, D31, D38).
@@ -40,13 +71,18 @@ pub(crate) fn wire(
     store: Option<&Arc<genie_store::Store>>,
     models: &Arc<dyn ModelResolver>,
     root: &TaskScope,
-    hub: Option<&ConfigHub>,
+    hub: Option<&Arc<ConfigHub>>,
 ) -> RuntimeBuilder {
     let off = |key: &str| hub.is_some_and(|h| h.policy().bool(key) == Some(false));
     let memory = MemoryControl::new(store.cloned());
     memory.set_allowed(!off("memory.enabled"));
     let artifacts = ArtifactHub::new(store.cloned());
-    artifacts.set_enabled(!off("artifacts.enabled"));
+    // Artifacts: on unless managed policy OR the user's own setting (Settings → Artifacts) turns
+    // them off; re-checked whenever either changes, so the switch applies from the next turn.
+    if let Some(h) = hub {
+        artifacts.set_enabled(artifacts_on(h));
+        watch_artifacts_setting(h.clone(), artifacts.clone(), root);
+    }
     rb = rb
         .memory_control(memory.clone())
         .artifacts(artifacts.clone());
@@ -526,4 +562,37 @@ fn session_export(
         blob_id: None,
         text: Some(text),
     })
+}
+
+#[cfg(test)]
+mod artifacts_setting_tests {
+    use super::*;
+    use genie_protocol::common::ConfigScope;
+
+    #[tokio::test]
+    async fn user_setting_turns_artifacts_off_and_back_on_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = Arc::new(
+            ConfigHub::new(dir.path().to_path_buf(), dir.path().join("trust.json"), None).unwrap(),
+        );
+        assert!(artifacts_on(&hub), "on by default");
+
+        let artifacts = ArtifactHub::new(None);
+        let root = TaskScope::root();
+        watch_artifacts_setting(hub.clone(), artifacts.clone(), &root);
+        let settle = || async {
+            for _ in 0..50 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+
+        hub.set(ARTIFACTS_KEY, Value::Bool(false), ConfigScope::User, None).unwrap();
+        settle().await;
+        assert!(!artifacts_on(&hub));
+        assert!(!artifacts.enabled(), "the running engine follows the setting");
+
+        hub.set(ARTIFACTS_KEY, Value::Bool(true), ConfigScope::User, None).unwrap();
+        settle().await;
+        assert!(artifacts.enabled());
+    }
 }

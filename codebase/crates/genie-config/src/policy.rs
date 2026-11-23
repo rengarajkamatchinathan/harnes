@@ -381,6 +381,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "browser.profile",
     "browser.agentLocalOnly",
     "browser.userLocalOnly",
+    "imageGeneration.enabled",
     "projectRetrieval.embeddingsProvider",
     "memory.enabled",
     "chatSearch.enabled",

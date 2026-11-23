@@ -10,7 +10,9 @@ import { sameWorkspace, type App } from "../state/app";
 import { useApp } from "./context";
 import { NewCodeSession } from "./code/NewCodeSession";
 import { CommandPalette, modKey } from "./CommandPalette";
+import { GenieMark } from "./GenieMark";
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useShell } from "./shell";
+import { ShareHandoff } from "./Handoff";
 
 export type DateGroup = "pinned" | "today" | "yesterday" | "week" | "older";
 
@@ -350,7 +352,7 @@ export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; vari
     );
   const items: MenuItem[] = [
     { id: "none", label: t("code.noProject"), icon: "chat", checked: !current, onSelect: () => choose("") },
-    ...known.map((w, i) => ({ id: `ws:${w}`, label: folderName(w), title: w, icon: "folder" as const, checked: !!current && sameWorkspace(current, w), separatorBefore: i === 0, onSelect: () => choose(w) })),
+    ...known.map((w, i) => ({ id: `ws:${w}`, label: folderName(w), title: w, icon: "repo" as const, checked: !!current && sameWorkspace(current, w), separatorBefore: i === 0, onSelect: () => choose(w) })),
     { id: "open", label: t("code.openFolder"), icon: "plus", separatorBefore: true, onSelect: open },
   ];
   return (
@@ -360,7 +362,7 @@ export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; vari
       items={items}
       trigger={(p) => (
         <button className={`codeproj codeproj--${variant}`} title={current || t("code.noProject")} {...p}>
-          <Icon name={current ? "folder" : "chat"} size={variant === "sidebar" ? 16 : 14} />
+          <Icon name={current ? "repo" : "chat"} size={variant === "sidebar" ? 16 : 14} />
           <span className="codeproj__name">{current ? folderName(current) : t("code.noProject")}</span>
           <Icon name="chevronDown" size={12} />
         </button>
@@ -370,23 +372,20 @@ export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; vari
 }
 
 function CodeList({ items, app }: { items: SessionSummary[]; app: App }) {
-  // Projects: one row per folder; clicking a project shows its sessions beneath it.
+  // Projects: one row per folder; clicking a project opens its page (its sessions, New session).
   // All sessions: every Code session, whatever its project.
   const sorted = [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const projects = app.codeWorkspaces;
-  const activeWs = app.ui.activeSession ? app.sessions.get(app.ui.activeSession)?.workspace_id : null;
-  const [open, setOpen] = useState<string[]>(() => (activeWs ? [activeWs] : []));
-  const isOpen = (w: string) => open.some((x) => sameWorkspace(x, w));
-  const toggle = (w: string) => setOpen((o) => (o.some((x) => sameWorkspace(x, w)) ? o.filter((x) => !sameWorkspace(x, w)) : [...o, w]));
   const fresh = useFreshIds(sorted.map((s) => s.session_id));
   const newIn = (w: string) => app.setUi({ codeWorkspace: w, activeSession: null, view: "main", activeProject: null });
+  const openPage = (w: string) => app.setUi({ view: "folder", codeWorkspace: w, activeSession: null, activeProject: null });
+  const onPage = (w: string) => app.ui.view === "folder" && sameWorkspace(app.ui.codeWorkspace, w);
   const openFolder = () =>
     void app.platform.pickFolder(t("code.folder")).then(
       (p) => {
         if (!p) return;
         app.setUi({ recentWorkspaces: [p, ...app.ui.recentWorkspaces.filter((w) => !sameWorkspace(w, p))].slice(0, 8) });
-        setOpen((o) => [...o.filter((x) => !sameWorkspace(x, p)), p]);
-        newIn(p);
+        openPage(p);
       },
       () => {},
     );
@@ -396,26 +395,16 @@ function CodeList({ items, app }: { items: SessionSummary[]; app: App }) {
         {projects.length === 0 && <div className="sidebar__empty muted">{t("code.noProjects")}</div>}
         {projects.map((w) => {
           const name = folderName(w);
-          const list = sorted.filter((s) => sameWorkspace(s.workspace_id, w));
-          const expanded = isOpen(w);
+          const count = sorted.filter((s) => sameWorkspace(s.workspace_id, w)).length;
+          const active = onPage(w);
           return (
-            <div key={w} className={`codeproj-row ${expanded ? "is-open" : ""}`}>
-              <div className="sidebar__row">
-                <button className="sidebar__link" title={w} aria-expanded={expanded} onClick={() => toggle(w)}>
-                  <Icon name="folder" />
-                  <span className="sidebar__title">{name}</span>
-                  <span className="codeproj-row__count muted">{list.length}</span>
-                  <span className="codeproj-row__chev" aria-hidden>
-                    <Icon name="chevronRight" size={12} />
-                  </span>
-                </button>
-                <IconButton icon="plus" size="sm" label={t("sidebar.newInFolder", { folder: name })} className="sidebar__more" onClick={() => newIn(w)} />
-              </div>
-              <div className="codeproj-row__body" inert={!expanded} aria-hidden={!expanded || undefined}>
-                <div className="codeproj-row__inner">
-                  {list.length === 0 ? <div className="sidebar__empty muted">{t("code.noSessions")}</div> : list.map((s) => <SessionRow key={s.session_id} s={s} app={app} code fresh={fresh(s.session_id)} />)}
-                </div>
-              </div>
+            <div key={w} className={`sidebar__row ${active ? "is-active" : ""}`}>
+              <button className="sidebar__link" title={w} aria-current={active ? "page" : undefined} onClick={() => openPage(w)}>
+                <Icon name="repo" />
+                <span className="sidebar__title">{name}</span>
+                <span className="codeproj-row__count muted">{count}</span>
+              </button>
+              <IconButton icon="plus" size="sm" label={t("sidebar.newInFolder", { folder: name })} className="sidebar__more" onClick={() => newIn(w)} />
             </div>
           );
         })}
@@ -435,6 +424,7 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
   const [renaming, setRenaming] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [title, setTitle] = useState(s.title ?? "");
   // Enter commits and unmounts the input, which then blurs: commit only once.
@@ -473,12 +463,13 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
     ...(!code ? [{ id: "move", label: t("row.moveToProject"), icon: "folder" as const, keepFocus: true, onSelect: () => setMoving(true) }] : []),
     { id: "md", label: t("row.exportMd"), icon: "download", separatorBefore: true, onSelect: () => void exportAs("markdown") },
     { id: "json", label: t("row.exportJson"), icon: "download", onSelect: () => void exportAs("json") },
+    { id: "handoff", label: t("handoff.share"), icon: "share", keepFocus: true, onSelect: () => setSharing(true) },
     { id: "delete", label: t("row.delete"), icon: "trash", danger: true, separatorBefore: true, keepFocus: true, onSelect: () => setConfirm(true) },
   ];
 
   return (
     <div
-      className={`sidebar__row ${active ? "is-active" : ""} ${fresh ? "is-new" : ""} ${renaming ? "is-renaming" : ""}`}
+      className={`sidebar__row ${code ? "sidebar__row--code" : ""} ${active ? "is-active" : ""} ${fresh ? "is-new" : ""} ${renaming ? "is-renaming" : ""}`}
       onContextMenu={(e) => {
         // Right-click opens the same actions menu as the ··· button.
         if (renaming) return;
@@ -513,7 +504,11 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
           onKeyDown={(e) => e.key === "F2" && (e.preventDefault(), startRename())}
           aria-current={active ? "page" : undefined}
         >
-          {STATUS_TONE[s.status] ? <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} /> : !code && <span className="bullet" aria-hidden />}
+          {STATUS_TONE[s.status] ? <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} /> : (
+            <span className="sidebar__mark" aria-hidden>
+              <GenieMark size={14} />
+            </span>
+          )}
           <span className="sidebar__title">{s.title || untitled}</span>
           {hint && <span className="sidebar__hint muted">{hint}</span>}
         </button>
@@ -535,6 +530,7 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
         {t("row.deleteConfirm", { title: s.title || untitled })}
       </Dialog>
       {moving && <MoveToProject s={s} onClose={() => setMoving(false)} />}
+      {sharing && <ShareHandoff s={s} onClose={() => setSharing(false)} />}
     </div>
   );
 }
@@ -610,7 +606,8 @@ function MoveToProject({ s, onClose }: { s: SessionSummary; onClose: () => void 
   );
 }
 
-export function NewProject({ onClose }: { onClose: () => void }) {
+/** `stay`: select the new project for the chat being started instead of opening its page. */
+export function NewProject({ onClose, stay }: { onClose: () => void; stay?: boolean }) {
   const app = useApp();
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -620,7 +617,7 @@ export function NewProject({ onClose }: { onClose: () => void }) {
       const r = await app.client.project.create({ name, instructions });
       if (starred) await app.client.project.update({ project_id: r.project_id, starred: true });
       await app.refreshLists();
-      app.setUi({ view: "project", activeProject: r.project_id });
+      app.setUi(stay ? { activeProject: r.project_id } : { view: "project", activeProject: r.project_id });
       onClose();
     } catch (e) {
       app.toast({ title: app.describeError(e), tone: "danger" });

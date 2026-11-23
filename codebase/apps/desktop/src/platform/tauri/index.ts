@@ -25,6 +25,7 @@ export function createTauriPlatform(): Platform {
     retry: () => invoke("host_retry"),
     openExternal: (url) => invoke("host_open_external", { url }),
     openPath: (path) => invoke("host_open_path", { path }),
+    gitGraph: (path, limit) => invoke<{ log: string; status: string; branch: string }>("host_git_graph", { path, limit: limit ?? null }),
     loadState: () => invoke<Record<string, unknown>>("host_state_load"),
     saveState: (state) => invoke("host_state_save", { state }),
     saveFile: (name, content) => invoke<string>("host_save_file", { name, text: "text" in content ? content.text : null, base64: "base64" in content ? content.base64 : null }),

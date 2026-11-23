@@ -72,6 +72,9 @@ pub struct Settings {
     pub artifacts: Option<Toggle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<BrowserSettings>,
+    /// The `image_generate` tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<ImageGenerationSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetrySettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -179,6 +182,18 @@ pub struct BrowserSettings {
     /// cleared when the daemon exits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_cookies: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImageGenerationSettings {
+    /// On by default; the tool still needs its provider set up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// `<provider>/<model>`, e.g. `openai/gpt-image-1` or `azure/<deployment>`
+    /// (default `openai/gpt-image-1`). The provider must speak the OpenAI images API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -377,6 +392,20 @@ pub const UI_META: &[KeyMeta] = &[
         scopes: USER,
         restart_required: false,
         advanced: false,
+    },
+    KeyMeta {
+        key: "imageGeneration.enabled",
+        title: "Image generation",
+        scopes: ALL,
+        restart_required: false,
+        advanced: false,
+    },
+    KeyMeta {
+        key: "imageGeneration.model",
+        title: "Image model",
+        scopes: ALL,
+        restart_required: false,
+        advanced: true,
     },
     KeyMeta {
         key: "browser.profile",

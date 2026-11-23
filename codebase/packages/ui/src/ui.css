@@ -709,3 +709,8 @@ body {
 .g-progress--warn > div {
   background: var(--warning);
 }
+
+/* Settings rows: the description lives in a tooltip behind a small info icon. */
+.g-field__info { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: var(--text-muted); opacity: 0.7; cursor: help; transition: opacity var(--dur-instant) var(--ease), color var(--dur-instant) var(--ease); }
+.g-field__info:hover, .g-field__info:focus-visible { opacity: 1; color: var(--text); outline: none; }
+.g-tooltip__wrap { display: block; max-width: 300px; white-space: normal; line-height: 1.45; text-align: left; }

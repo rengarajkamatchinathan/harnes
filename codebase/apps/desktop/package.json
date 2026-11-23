@@ -14,8 +14,8 @@
     "ui:shots": "node scripts/ui-shots.mjs"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.2.0",
     "@fontsource-variable/jetbrains-mono": "^5.2.0",
+    "@fontsource/poppins": "5.2.7",
     "@genie/protocol": "workspace:*",
     "@genie/ui": "workspace:*",
     "@tanstack/react-virtual": "^3.14.26",

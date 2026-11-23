@@ -11,6 +11,34 @@ export interface ToolSummary {
   artifact?: boolean;
   memory?: boolean;
   browser?: boolean;
+  /** Generated images to show inline (`image_generate`). */
+  images?: GeneratedImage[];
+}
+
+export interface GeneratedImage {
+  blob_id: string;
+  mime: string;
+  revised_prompt?: string;
+}
+
+/** The images in an `image_generate` result (JSON, possibly as a string). */
+export function generatedImages(result: unknown): GeneratedImage[] {
+  let v: unknown = result;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
+  const list = v && typeof v === "object" ? (v as { images?: unknown }).images : undefined;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((i) => {
+    if (!i || typeof i !== "object") return [];
+    const { blob_id, mime, revised_prompt } = i as Record<string, unknown>;
+    if (typeof blob_id !== "string" || !blob_id || typeof mime !== "string" || !mime.startsWith("image/")) return [];
+    return [{ blob_id, mime, ...(typeof revised_prompt === "string" ? { revised_prompt } : {}) }];
+  });
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -33,6 +61,12 @@ export function summarizeTool(name: string, input: unknown, outcome: ToolOutcome
     return { icon: "globe", title: n ? `Searched ${n} sites` : `Searched “${short(str(inp.query))}”` };
   }
   if (name === "web_fetch") return { icon: "globe", title: `Fetched ${short(str(inp.url))}` };
+  if (name === "image_generate") {
+    const images = generatedImages(result);
+    const prompt = short(str(inp.prompt));
+    if (outcome === "ok" && images.length) return { icon: "image", title: images.length > 1 ? `Generated ${images.length} images` : "Generated an image", images };
+    return { icon: "image", title: prompt ? `Image · ${prompt}` : "Image generation" };
+  }
   if (name.startsWith("memory_")) return { icon: "memory", title: "Memory updated", memory: true };
   if (name.startsWith("artifact_")) return { icon: "file", title: str(inp.title) || "Artifact", artifact: true };
   if (name.startsWith("browser_")) return { icon: "globe", title: `Browser · ${name.slice(8).replace(/_/g, " ")}`, browser: true };
@@ -104,6 +138,7 @@ export function toolActivity(name: string): string {
   if (name === "grep" || name === "glob" || name === "list") return "Searching the code";
   if (name === "web_search") return "Searching the web";
   if (name === "web_fetch") return "Reading a web page";
+  if (name === "image_generate") return "Generating an image";
   if (name.startsWith("browser_")) return "Using the browser";
   if (name === "preview_start") return "Starting a dev server";
   if (name === "preview_stop") return "Stopping a dev server";

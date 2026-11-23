@@ -23,7 +23,7 @@ use genie_providers::route::{Preset, PresetProvider, ProviderConfig};
 use genie_providers::{Auth, Provider};
 use genie_secrets::credentials::{self, CredentialStore};
 
-use crate::runtime::ports::{ModelResolver, ResolveError, ResolvedModel};
+use crate::runtime::ports::{ModelResolver, ProviderApi, ResolveError, ResolvedModel};
 
 fn protocol(p: Protocol) -> Option<ProtocolKind> {
     Some(match p {
@@ -332,6 +332,45 @@ impl ModelResolver for CatalogResolver {
             None => self.resolve(model),
         }
     }
+
+    /// Bind any OpenAI-protocol model of `provider` and keep its API root and auth.
+    fn provider_api(&self, provider: &str) -> Result<ProviderApi, ResolveError> {
+        let entries: Vec<Entry> = self
+            .catalog
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .entries()
+            .filter(|e| {
+                e.provider == provider
+                    && matches!(e.protocol, Protocol::OpenaiResponses | Protocol::OpenaiChat)
+            })
+            .cloned()
+            .collect();
+        let mut last = ResolveError {
+            class: "no_provider_configured",
+            message: format!("{provider} has no OpenAI-compatible model in the catalog"),
+            fix_link: Some("genie://settings/providers".into()),
+        };
+        for e in &entries {
+            match self.bind(e) {
+                Ok(m) => {
+                    let url = m.route.endpoint.url(&m.route.model.wire_id);
+                    if let Some(base) = ProviderApi::base_of(&url) {
+                        return Ok(ProviderApi {
+                            provider: provider.to_string(),
+                            base,
+                            auth: m.route.auth.clone(),
+                            headers: m.route.headers.clone(),
+                        });
+                    }
+                }
+                // A missing credential is the same for every model of the provider.
+                Err(err) if err.class == "no_provider_configured" => return Err(err),
+                Err(err) => last = err,
+            }
+        }
+        Err(last)
+    }
 }
 
 #[cfg(test)]
@@ -366,5 +405,23 @@ mod tests {
         let e = r.resolve("openai/gpt-5.1").err().unwrap();
         assert_eq!(e.class, "no_provider_configured");
         assert_eq!(r.resolve("nope/x").err().unwrap().class, "model_not_found");
+    }
+
+    #[test]
+    fn provider_api_for_image_and_other_rest_calls() {
+        let r = resolver(&[("OPENAI_API_KEY", "sk-test")]);
+        let api = r.provider_api("openai").ok().unwrap();
+        assert_eq!(api.base, "https://api.openai.com/v1");
+        let r = resolver(&[]);
+        assert_eq!(
+            r.provider_api("openai").err().unwrap().class,
+            "no_provider_configured"
+        );
+        assert!(r.provider_api("anthropic").is_err());
+        assert_eq!(
+            ProviderApi::base_of("https://res.services.ai.azure.com/openai/v1/chat/completions"),
+            Some("https://res.services.ai.azure.com/openai/v1".into())
+        );
+        assert_eq!(ProviderApi::base_of("https://x/v1/messages"), None);
     }
 }

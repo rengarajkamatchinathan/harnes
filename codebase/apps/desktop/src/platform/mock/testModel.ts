@@ -7,6 +7,17 @@ export interface TestReply {
   text: string;
   /** Ends the turn as failed with this message after streaming `text`. */
   error?: string;
+  /** Fail at once with no reply at all (a provider rejecting the request). */
+  reject?: boolean;
+  /** Runs a shell tool first with this (large) output: fills the context to demo the context meter. */
+  log?: { command: string; output: string };
+}
+
+/** ~43k characters (~11k tokens) of verbose test output: two runs pass 70% of a 32k window. */
+export function verboseLog(): string {
+  const lines: string[] = [];
+  for (let i = 1; i <= 450; i++) lines.push(`  ✓ src/feature${i % 37}.test.ts > case ${i}: renders, updates and cleans up without leaking (${(i % 9) + 1} ms)`);
+  return `$ vitest run --reporter=verbose\n${lines.join("\n")}\n\n Test Files  37 passed (37)\n      Tests  450 passed (450)`;
 }
 
 const HELP = `I'm **Genie Test**, a scripted model for trying out the chat. Include one of these words in your message:
@@ -21,8 +32,10 @@ const HELP = `I'm **Genie Test**, a scripted model for trying out the chat. Incl
 | \`mermaid\` | a diagram |
 | \`long\` | a long reply, to test scrolling and streaming |
 | \`think\` | a reasoning block before the answer |
+| \`logs\` | a large tool output that fills the context (small 32k window) |
 | \`run\` / \`shell\` / \`permission\` | a tool call that asks for permission |
 | \`error\` | a turn that fails partway |
+| \`reject\` | the provider refuses at once (no reply at all) |
 
 Anything else is echoed back with some stats.`;
 
@@ -139,6 +152,7 @@ export function testReply(prompt: string): TestReply {
   const p = prompt.toLowerCase();
   const has = (...words: string[]) => words.some((w) => new RegExp(`\\b${w}\\b`).test(p));
 
+  if (has("reject")) return { text: "", reject: true, error: "provider error: invalid_request (Genie Test rejected the request, as asked)" };
   if (has("error", "fail")) return { text: "Starting the answer, and then something goes wrong…", error: "Genie Test simulated a provider error (you asked for one)." };
   const thinking = has("think", "reason") ? "The user wants to see a reasoning block. I'll think for a moment, then give a short answer that explains what happened." : undefined;
   if (has("help")) return { thinking, text: HELP };
@@ -148,6 +162,7 @@ export function testReply(prompt: string): TestReply {
   if (has("math", "latex", "katex")) return { thinking, text: MATH };
   if (has("mermaid", "diagram")) return { thinking, text: MERMAID };
   if (has("long")) return { thinking, text: long() };
+  if (has("logs", "verbose")) return { thinking, text: "All 450 tests passed. That output was large: send `logs` once or twice more to watch the context meter fill up.", log: { command: "npm test -- --reporter=verbose", output: verboseLog() } };
   if (has("run", "shell", "permission")) return { thinking, text: "The command finished. Its output is shown above." };
   if (thinking) return { thinking, text: "Done thinking. The reasoning above is collapsible." };
   return { text: echo(prompt) };

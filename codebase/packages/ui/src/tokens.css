@@ -11,7 +11,7 @@
 
 :root {
   /* Type */
-  --font-ui: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-ui: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --text-xs: 12px;
   --text-sm: 13px;
@@ -93,7 +93,7 @@
   --gray-9: oklch(0.650 0 0);
   --gray-10: oklch(0.580 0 0);
   --gray-11: oklch(0.460 0 0);
-  --gray-12: oklch(0.230 0 0);
+  --gray-12: oklch(0.320 0 0); /* main text in light theme: dark grey, not near-black */
 
   --accent-1: oklch(0.990 0.008 195);
   --accent-2: oklch(0.975 0.018 195);

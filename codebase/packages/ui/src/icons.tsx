@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Clock,
   Code,
+  Columns3,
   Copy,
   Download,
   Ellipsis,
@@ -19,10 +20,12 @@ import {
   File,
   Folder,
   FolderKanban,
+  FolderGit2,
   Ghost,
   GitBranch,
   Globe,
   Hand,
+  Image,
   Info,
   KeyRound,
   Layers,
@@ -31,7 +34,7 @@ import {
   Maximize,
   Maximize2,
   MessageSquare,
-  MessagesSquare,
+  MessageCircle,
   Mic,
   SquareCode,
   Monitor,
@@ -91,6 +94,8 @@ const ICONS = {
   globe: Globe,
   terminal: SquareTerminal,
   folder: Folder,
+  /** A Code project (a git folder); Chat projects use `folder`. */
+  repo: FolderGit2,
   file: File,
   branch: GitBranch,
   more: Ellipsis,
@@ -130,9 +135,12 @@ const ICONS = {
   expand: Maximize2,
   computer: Laptop,
   // Title-bar Chat/Code mode switch (distinct from the per-session chat/code glyphs).
-  modeChat: MessagesSquare,
+  modeChat: MessageCircle,
   modeCode: SquareCode,
   mic: Mic,
+  image: Image,
+  // Model race: answers side by side.
+  compare: Columns3,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

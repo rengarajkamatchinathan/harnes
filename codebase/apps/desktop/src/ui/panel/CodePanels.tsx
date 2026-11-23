@@ -7,6 +7,8 @@ import { Badge, Button, EmptyState, Icon, Input, Menu, Segmented } from "@genie/
 import { t } from "../../i18n";
 import { highlight } from "../../markdown/markdown";
 import { useApp, useAsync, useSession } from "../context";
+import { withTrailer } from "../code/commitLinks";
+import { useDiffFocus } from "../code/diffFocus";
 
 const MARK: Record<string, string> = { added: "A", modified: "M", deleted: "D" };
 
@@ -55,11 +57,13 @@ export function ChangesPanel({ sessionId }: { sessionId: string }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const files = useMemo(() => splitDiff(diff.data?.text ?? ""), [diff.data]);
+  const focus = useDiffFocus(); // a file picked in the "Ready to commit" checklist
 
   const commit = async (then: CommitThen | null) => {
     setBusy(true);
     try {
-      const r = await app.client.git.commit({ session_id: sessionId, message, then });
+      // The trailer links the commit back to this session on the project's git graph.
+      const r = await app.client.git.commit({ session_id: sessionId, message: withTrailer(message, sessionId), then });
       app.toast({ title: `Committed ${r.commit.slice(0, 8)}`, body: r.note ?? r.pr_url ?? undefined, tone: "success", link: null });
       setMessage("");
       status.reload();
@@ -101,7 +105,12 @@ export function ChangesPanel({ sessionId }: { sessionId: string }) {
       {changed.map((f) => {
         const d = files.find((x) => x.path === f.path);
         return (
-          <details key={f.path} className="file-diff">
+          <details
+            key={focus?.path === f.path ? `${f.path}:${focus.n}` : f.path}
+            className="file-diff"
+            open={focus?.path === f.path ? true : undefined}
+            ref={focus?.path === f.path ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+          >
             <summary>
               <Badge tone={f.change === "added" ? "success" : f.change === "deleted" ? "danger" : "warning"}>{MARK[f.change] ?? "?"}</Badge> <code>{f.path}</code>
             </summary>

@@ -35,6 +35,7 @@ pub mod conversation;
 pub mod extract;
 pub mod hooks;
 pub mod host;
+pub mod images;
 pub mod mcp;
 pub mod memory_ctl;
 pub mod models;
@@ -63,8 +64,9 @@ pub use conversation::{
 };
 pub use ports::{
     AllowAllAuthorizer, AuthzDecision, AuthzRequest, BasicInstructions, DefaultAuthorizer,
-    FixedSettings, InstructionProvider, ModelResolver, NoModels, ProvidedTool, ResolveError,
-    ResolvedModel, SessionOverlay, SessionSettings, SettingsSource, ToolAuthorizer, ToolProvider,
+    FixedSettings, InstructionProvider, ModelResolver, NoModels, ProvidedTool, ProviderApi,
+    ResolveError, ResolvedModel, SessionOverlay, SessionSettings, SettingsSource, ToolAuthorizer,
+    ToolProvider,
 };
 
 use crate::runtime::active::ActiveTurns;
@@ -312,7 +314,9 @@ impl AgentRuntime {
                 return t;
             }
         }
-        (kind == ToolKind::External).then(|| format!("the `{tool}` tool"))
+        // Generated images carry no third-party text the model reads: no taint.
+        (kind == ToolKind::External && tool != genie_tools::image::NAME)
+            .then(|| format!("the `{tool}` tool"))
     }
 
     /// `tools.list`: what the session's model sees, with each tool's source.
@@ -492,6 +496,12 @@ impl RuntimeBuilder {
             cfg.taint = Some(self.rt.taints.clone());
         }
         self.tools(genie_tools::web::tools(cfg))
+    }
+
+    /// `image_generate` for Chat and Code; hidden while image generation is off or its
+    /// provider isn't set up (see [`images::EngineImages`]).
+    pub fn images(self, cfg: genie_tools::image::ImageConfig) -> Self {
+        self.tools([Arc::new(genie_tools::image::ImageGenerate::new(cfg)) as Arc<dyn Tool>])
     }
 
     /// The 19 `browser_*` tools for Chat and Code (06 §10), hidden in headless sessions

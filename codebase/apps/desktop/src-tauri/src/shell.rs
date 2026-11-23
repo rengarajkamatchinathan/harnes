@@ -125,6 +125,58 @@ fn host_open_path(path: String) -> Result<(), String> {
     host::os_open(&path)
 }
 
+/// Raw `git log` / `git status` of a project folder for the Code project page's git graph.
+/// Read-only git commands on an existing absolute path; no shell, no user-supplied arguments.
+#[derive(serde::Serialize)]
+struct GitGraph {
+    /// One record per commit, `\x1e`-terminated, fields `\x1f`-separated:
+    /// hash, parents, author, ISO date, refs, subject, body.
+    log: String,
+    /// `git status --porcelain` lines (uncommitted changes).
+    status: String,
+    /// Current branch (`HEAD` when detached).
+    branch: String,
+}
+
+#[tauri::command]
+async fn host_git_graph(path: String, limit: Option<u32>) -> Result<GitGraph, String> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.is_absolute() || !p.is_dir() {
+        return Err("not an existing absolute folder".into());
+    }
+    let limit = limit.unwrap_or(200).clamp(1, 2000).to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let git = |args: &[&str]| -> Result<String, String> {
+            let mut c = std::process::Command::new("git");
+            c.arg("-C").arg(&p).args(args);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flash
+            }
+            let out = c.output().map_err(|e| format!("git not available: {e}"))?;
+            if !out.status.success() {
+                return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+            }
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        };
+        let log = git(&[
+            "log",
+            "--all",
+            "--date-order",
+            "-n",
+            &limit,
+            // Body last, so readers of the older 6-field records still parse these.
+            "--format=%H%x1f%P%x1f%an%x1f%aI%x1f%D%x1f%s%x1f%b%x1e",
+        ])?;
+        let status = git(&["status", "--porcelain"]).unwrap_or_default();
+        let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default().trim().to_string();
+        Ok(GitGraph { log, status, branch })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn host_state_load(app: State<'_, Arc<App>>) -> Value {
     app.state.load()
@@ -369,6 +421,7 @@ pub fn run() -> Result<(), String> {
             host_retry,
             host_open_external,
             host_open_path,
+            host_git_graph,
             host_state_load,
             host_state_save,
             host_save_file,

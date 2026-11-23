@@ -107,6 +107,8 @@ function make(settled: boolean) {
       },
       code({ text, lang }: Tokens.Code) {
         const l = (lang ?? "").trim().split(/\s+/)[0];
+        // Structured questions are answered in the stepper under the reply, not shown as JSON.
+        if (l === "questions") return "";
         if (l === "mermaid" && settled) return `<div class="mermaid-block" data-mermaid="${encodeURIComponent(text)}"><pre><code>${escapeHtml(text)}</code></pre></div>`;
         return `<div class="code-block"><div class="code-block__bar"><span>${escapeHtml(l)}</span><button type="button" class="code-copy" data-copy="${encodeURIComponent(text)}">Copy</button></div><pre><code class="hljs">${highlight(text, l)}</code></pre></div>`;
       },

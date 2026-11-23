@@ -443,7 +443,7 @@ fn build_engine(
         store.as_ref(),
         &models,
         root,
-        hub.as_deref(),
+        hub.as_ref(),
     );
     if let Some(a) = &services.artifacts {
         a.set_ephemeral(ephemeral.clone());
@@ -473,6 +473,24 @@ fn build_engine(
         .shell(shell.clone())
         .preview(&dev)
         .web(genie_tools::web::WebConfig::default());
+    // Image generation (Chat + Code): `imageGeneration.*` settings, provider credentials
+    // from the model resolver, images kept as store blobs.
+    if let Some(store) = &store {
+        match genie_providers::executor::ReqwestTransport::new() {
+            Ok(t) => {
+                let backend = genie_core::runtime::images::EngineImages::new(
+                    models.clone(),
+                    hub.clone(),
+                    Arc::new(t),
+                );
+                rb = rb.images(genie_tools::image::ImageConfig::new(
+                    Arc::new(backend),
+                    Arc::new(genie_core::runtime::images::BlobImages(store.clone())),
+                ));
+            }
+            Err(e) => tracing::warn!(error = %e, "no HTTP client; image generation is off"),
+        }
+    }
     // Code file tools on the shared path locks + shadow-git checkpoints (06 §4.2, D49).
     let code_cfg = genie_core::runtime::code::code_config(
         registry.clone(),

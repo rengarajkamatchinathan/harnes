@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "@genie/protocol";
 import { BlockSplitter, renderSettled, renderTail, splitAll, withCitations } from "../src/markdown/markdown";
 import { coerce, controlFor, keySchema, sectionOf, uiKeys, matches } from "../src/ui/settings/schema";
-import { groupReads, headTail, summarizeTool } from "../src/ui/chat/toolInfo";
+import { generatedImages, groupReads, headTail, summarizeTool } from "../src/ui/chat/toolInfo";
 import { describeRules, permissionHeading } from "../src/ui/chat/AskCard";
 import { keyAction } from "../src/ui/chat/Composer";
 import { groupByDate } from "../src/ui/Sidebar";
@@ -269,5 +269,31 @@ describe("permission card text", () => {
     expect(permissionHeading({ ...base, tool: "shell", preview: { type: "command", command: "ls", cwd: "/a/AIO" } })).toMatchObject({ title: "Run a command", sub: "in AIO" });
     expect(permissionHeading({ ...base, tool: "edit", preview: { type: "diff", path: "/a/src/x.ts", unified: "" } })).toMatchObject({ title: "Edit x.ts", sub: "/a/src" });
     expect(permissionHeading({ ...base, tool: "mcp__github__create_issue" })).toMatchObject({ title: "Use create_issue", sub: "from github" });
+  });
+});
+
+describe("image_generate tool rows", () => {
+  const result = JSON.stringify({
+    model: "openai/gpt-image-1",
+    images: [
+      { blob_id: "blob_a", mime: "image/png", bytes: 10, revised_prompt: "a red fox" },
+      { blob_id: "blob_b", mime: "application/pdf" },
+      { mime: "image/png" },
+    ],
+  });
+
+  it("reads image blobs from the JSON result and skips anything else", () => {
+    expect(generatedImages(result)).toEqual([{ blob_id: "blob_a", mime: "image/png", revised_prompt: "a red fox" }]);
+    expect(generatedImages("not json")).toEqual([]);
+    expect(generatedImages({ images: [{ blob_id: "b", mime: "image/webp" }] })).toEqual([{ blob_id: "b", mime: "image/webp" }]);
+  });
+
+  it("summarises running and finished calls", () => {
+    expect(summarizeTool("image_generate", { prompt: "a fox" }, null)).toEqual({ icon: "image", title: "Image · a fox" });
+    const done = summarizeTool("image_generate", { prompt: "a fox" }, "ok", result);
+    expect(done.title).toBe("Generated an image");
+    expect(done.images).toHaveLength(1);
+    expect(summarizeTool("image_generate", { prompt: "x" }, "error", "image generation failed").images).toBeUndefined();
+    expect(sectionOf("imageGeneration.model")).toBe("capabilities");
   });
 });

@@ -85,6 +85,8 @@
       <string id="BrowserAgentLocalOnly_Explain">Enabled: the agent's browser tools only open and read local addresses (localhost, 127.0.0.1, ::1). Outside pages are blocked.</string>
       <string id="BrowserUserLocalOnly">Browser tab: local addresses only</string>
       <string id="BrowserUserLocalOnly_Explain">Enabled: the user can only open local addresses (localhost, 127.0.0.1, ::1) in the Browser tab. Other links open in the system browser.</string>
+      <string id="ImageGenerationEnabled">Image generation</string>
+      <string id="ImageGenerationEnabled_Explain">Disabled hides the image_generate tool in Chat and Code.</string>
       <string id="BrowserSiteAllowlist">Agent browser allowed sites</string>
       <string id="BrowserSiteAllowlist_Explain">Only these sites can be opened by the agent browser.</string>
       <string id="BrowserSiteBlocklist">Agent browser blocked sites</string>

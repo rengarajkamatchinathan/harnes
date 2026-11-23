@@ -7,6 +7,7 @@ import { formatCost, formatTokens, t } from "../../i18n";
 import { errorKind, type CliInstall } from "../../platform";
 import { useApp, useAsync } from "../context";
 import { DeleteAllData } from "./ManageSections";
+import { OverallBudget } from "../BudgetGuard";
 
 function Unavailable({ error }: { error: unknown }) {
   const app = useApp();
@@ -250,6 +251,49 @@ export function ConnectorsSection() {
   );
 }
 
+/** All usage at a glance: today, last 7 days, last 30 days and all time (tokens in/out, cost). */
+function UsageOverview() {
+  const app = useApp();
+  const rows = useAsync(() => app.client.usage.query({ from: "2000-01-01T00:00:00Z", to: new Date().toISOString(), group_by: ["day"] }), []);
+  if (!rows.data?.rows.length) return null;
+  const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+  const sum = (sinceDay: string | null) => {
+    const s = { input: 0, output: 0, usd: 0, days: 0 };
+    for (const r of rows.data!.rows) {
+      const d = r.keys[0] ?? "";
+      if (sinceDay && d < sinceDay) continue;
+      s.input += r.usage.input_tokens ?? 0;
+      s.output += r.usage.output_tokens ?? 0;
+      s.usd += r.cost.usd;
+      s.days += 1;
+    }
+    return s;
+  };
+  const cards = [
+    { k: t("usage.today"), s: sum(day(0)) },
+    { k: t("usage.last7"), s: sum(day(6)) },
+    { k: t("usage.last30short"), s: sum(day(29)) },
+    { k: t("usage.allTime"), s: sum(null) },
+  ];
+  return (
+    <>
+      <div className="settings-subhead">
+        <h3 className="section-title">{t("usage.overview")}</h3>
+      </div>
+      <div className="usage-cards">
+        {cards.map(({ k, s }) => (
+          <div key={k} className="usage-card">
+            <span className="usage-card__label">{k}</span>
+            <strong className="usage-card__value">{formatTokens(s.input + s.output)}</strong>
+            <span className="usage-card__meta">{t("usage.inOut", { input: formatTokens(s.input), output: formatTokens(s.output) })}</span>
+            {s.usd > 0 && <span className="usage-card__meta">{formatCost(s.usd)}</span>}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function UsageSection() {
   const app = useApp();
   const to = new Date();
@@ -257,9 +301,15 @@ export function UsageSection() {
   const [group, setGroup] = useState<"day" | "provider" | "model" | "project">("provider");
   const rows = useAsync(() => app.client.usage.query({ from: from.toISOString(), to: to.toISOString(), group_by: [group] }), [group]);
   const [budget, setBudget] = useState("");
-  const max = Math.max(1e-9, ...(rows.data?.rows ?? []).map((r) => r.cost.usd));
+  // Bars follow cost, or tokens when every model is free (e.g. a company deployment).
+  const tokensOf = (r: { usage: { input_tokens?: number; output_tokens?: number } }) => (r.usage.input_tokens ?? 0) + (r.usage.output_tokens ?? 0);
+  const byCost = (rows.data?.rows ?? []).some((r) => r.cost.usd > 0);
+  const barOf = (r: NonNullable<typeof rows.data>["rows"][number]) => (byCost ? r.cost.usd : tokensOf(r));
+  const max = Math.max(1e-9, ...(rows.data?.rows ?? []).map(barOf));
   return (
     <div className="settings-group">
+      <UsageOverview />
+      <OverallBudget />
       <div className="settings-subhead">
         <h3 className="section-title">{t("usage.last30")}</h3>
         <Segmented label={t("usage.groupBy")} value={group} onChange={setGroup} options={(["day", "provider", "model", "project"] as const).map((g) => ({ value: g, label: t(`usage.by.${g}`) }))} />
@@ -283,7 +333,7 @@ export function UsageSection() {
                 <td className="num">{formatTokens((r.usage.input_tokens ?? 0) + (r.usage.output_tokens ?? 0))}</td>
                 <td className="num">{formatCost(r.cost.usd)}</td>
                 <td style={{ width: "40%" }}>
-                  <div className="bar" style={{ width: `${(r.cost.usd / max) * 100}%` }} />
+                  <div className="bar" style={{ width: `${(barOf(r) / max) * 100}%` }} />
                 </td>
               </tr>
             ))}
