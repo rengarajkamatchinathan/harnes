@@ -1,6 +1,7 @@
 // Tauri implementation of the Platform adapter. This folder is the ONLY place that may
 // import `@tauri-apps/*` (01 §1.3; enforced by test/architecture.test.ts).
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { CliInstall, HostInfo, HostMessage, Platform, WireError } from "../types";
@@ -44,6 +45,7 @@ export function createTauriPlatform(): Platform {
       if (!ok) ok = (await requestPermission()) === "granted";
       if (ok) sendNotification({ title, body });
     },
+    setWindowTheme: (theme) => getCurrentWindow().setTheme(theme),
     installCli: () => invoke<CliInstall>("host_install_cli"),
     notices: () => invoke<string | null>("host_notices"),
     artifactUrl(artifactId, n) {

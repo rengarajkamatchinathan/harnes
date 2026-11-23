@@ -729,6 +729,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
     async notify(title, body) {
       notifications.push({ title, body });
     },
+    async setWindowTheme() {},
     async installCli() {
       return { path: "~/.local/bin/genie", target: "/Applications/Genie.app/Contents/MacOS/genie", dir: "~/.local/bin", on_path: false };
     },

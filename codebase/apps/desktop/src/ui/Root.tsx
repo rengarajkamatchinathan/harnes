@@ -17,6 +17,11 @@ export function Root() {
   const { appearance } = app.ui;
 
   useEffect(() => applyAppearance(appearance), [appearance]);
+  // The native title bar follows the OS theme unless told otherwise; match the app's choice
+  // ("system" hands it back to the OS, which is also what the page follows then).
+  useEffect(() => {
+    void app.platform.setWindowTheme(appearance.theme === "system" ? null : appearance.theme).catch(() => {});
+  }, [app.platform, appearance.theme]);
   // macOS draws its window buttons over our title-bar strip (Overlay title bar), so CSS
   // leaves room for them there only.
   useEffect(() => {

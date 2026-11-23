@@ -88,6 +88,8 @@ export interface Platform {
   pickSavePath(defaultName: string, filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   /** OS notification (paused asks, workspace `notification`) when the window is in the background. */
   notify(title: string, body?: string): Promise<void>;
+  /** Native window chrome (title bar) theme; null follows the OS. Keeps the title bar matching the app's theme setting. */
+  setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
   /** "Install `genie` command in PATH" (D40). */
   installCli(): Promise<CliInstall>;
   /** Third-party licence notices shipped with the app; null when not bundled. */
