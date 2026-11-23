@@ -70,6 +70,9 @@ pub struct Services {
     pub authz: Option<Arc<genie_core::runtime::permissions::PermissionAuthorizer>>,
     /// The pending `data.delete_all.confirm` confirmation token and when it expires.
     pub delete_token: Mutex<Option<(String, std::time::Instant)>>,
+    /// The store could not be opened: nothing is persisted this run. Sent to every
+    /// client in `InitializeResult.storage`; `storage.recover/start_fresh` act on it.
+    pub storage_problem: Option<genie_protocol::handshake::StorageProblem>,
 }
 
 pub(crate) enum Handled {

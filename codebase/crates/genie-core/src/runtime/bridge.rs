@@ -330,3 +330,39 @@ impl MemoryPort for StoreMemory {
             .map_err(|e| e.to_string())
     }
 }
+
+/// Spilled tool output per session: ephemeral (incognito) sessions in process memory,
+/// the rest in `durable` (store blobs).
+pub struct RoutedSpill {
+    durable: Arc<dyn SpillStore>,
+    memory: genie_tools::MemorySpill,
+    ephemeral: crate::journal::Ephemeral,
+}
+
+impl RoutedSpill {
+    pub fn new(durable: Arc<dyn SpillStore>, ephemeral: crate::journal::Ephemeral) -> Self {
+        RoutedSpill {
+            durable,
+            memory: genie_tools::MemorySpill::new(),
+            ephemeral,
+        }
+    }
+
+    fn pick(&self, session_id: &str) -> &dyn SpillStore {
+        if (self.ephemeral)(session_id) {
+            &self.memory
+        } else {
+            &*self.durable
+        }
+    }
+}
+
+impl SpillStore for RoutedSpill {
+    fn put(&self, session_id: &str, text: &str) -> Result<String, String> {
+        self.pick(session_id).put(session_id, text)
+    }
+
+    fn read(&self, session_id: &str, reference: &str) -> Result<String, String> {
+        self.pick(session_id).read(session_id, reference)
+    }
+}

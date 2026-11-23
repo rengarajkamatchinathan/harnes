@@ -1,10 +1,10 @@
-# Genie brand: "Magic Braces"
+# Genie brand: "Split Gear"
 
-Two curly braces around a four-point star. Ink `#111827`, Wish Violet `#7C3AED` (on dark: Paper `#F9FAFB` braces, `#A78BFA` star). Wordmark: Manrope ExtraBold, lowercase, tracking −3%.
+Two crossed triangles with flat-cut tips that read as a six-tooth gear. The upper triangle is crimson and sits on the lower plate, with a transparent gap cut between them (an SVG mask, so it works on any background). Ink `#111827`, Crimson `#C8102E` (on dark: Paper `#F9FAFB` plate, `#E8344E` triangle). Wordmark: Manrope ExtraBold, lowercase, tracking −3%.
 
-- `genie-mark*.svg` — the mark (light, dark, mono); `-idle` / `-thinking` are animated (CSS, honours reduced motion).
-- `genie-app-icon.svg` — full-bleed app icon (Windows/Linux); `genie-app-icon-macos.svg` — inset to the macOS icon grid.
-- `genie-favicon.svg` — heavier strokes for 32 px and below.
+- `genie-mark*.svg`: the mark in light, dark and mono. `-idle` breathes the crimson triangle; `-thinking` turns the gear 120° per beat. Both are CSS-animated and honour reduced motion.
+- `genie-app-icon.svg`: full-bleed app icon (Windows/Linux). `genie-app-icon-macos.svg`: inset to the macOS icon grid.
+- `genie-favicon.svg`: larger mark and wider gap for 32 px and below.
 - In the app the mark is `src/ui/GenieMark.tsx`.
 
 Regenerating `src-tauri/icons/` (the CLI writes extra platform files; keep only the five in `tauri.conf.json`):

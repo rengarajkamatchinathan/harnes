@@ -170,6 +170,13 @@ impl FileVault {
         self.path.exists()
     }
 
+    /// Account names in the unlocked file (for moving them to another backend).
+    pub fn accounts(&self) -> Result<Vec<String>, SecretsError> {
+        let g = self.guard();
+        let o = g.as_ref().ok_or(SecretsError::Locked)?;
+        Ok(o.entries.keys().cloned().collect())
+    }
+
     fn guard(&self) -> std::sync::MutexGuard<'_, Option<Open>> {
         self.open.lock().unwrap_or_else(|p| p.into_inner())
     }

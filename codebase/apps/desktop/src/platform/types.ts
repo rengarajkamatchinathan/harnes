@@ -13,7 +13,17 @@ export interface HostStatus {
   engine_version?: string;
   /** The secrets store is locked; `secrets.unlock` with the passphrase (D26). */
   locked?: string;
+  /** The engine can't open its database: nothing is being saved (04 §2). */
+  storage?: StorageProblem;
   running?: number;
+}
+
+/** Mirrors `genie_protocol::handshake::StorageProblem`. */
+export interface StorageProblem {
+  /** `key_missing` | `open_failed` */
+  reason: string;
+  detail: string;
+  recovery_available?: boolean;
 }
 
 /** A daemon notification as relayed: `{method, params}`. */
@@ -78,6 +88,8 @@ export interface Platform {
   pickSavePath(defaultName: string, filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   /** OS notification (paused asks, workspace `notification`) when the window is in the background. */
   notify(title: string, body?: string): Promise<void>;
+  /** Native window chrome (title bar) theme; null follows the OS. Keeps the title bar matching the app's theme setting. */
+  setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
   /** "Install `genie` command in PATH" (D40). */
   installCli(): Promise<CliInstall>;
   /** Third-party licence notices shipped with the app; null when not bundled. */

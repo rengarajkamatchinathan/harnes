@@ -470,35 +470,116 @@ impl ConversationStore for StoreConversation {
 
     fn record_usage(&self, session: &str, line: &UsageLine) -> Result<(), Defect> {
         let u = &line.usage;
-        let tin = i64::try_from(u.input_total).unwrap_or(i64::MAX);
-        let tout = i64::try_from(u.output_total).unwrap_or(i64::MAX);
-        let day = crate::runtime::context::utc_day(crate::bus::now_ms());
+        let row = usage_row(line);
         self.store
             .write(|tx| {
                 genie_store::sessions::ensure(tx, session)?;
-                genie_store::sessions::add_usage(tx, session, tin, tout, line.cost_usd)?;
+                genie_store::sessions::add_usage(
+                    tx,
+                    session,
+                    row.tokens_in,
+                    row.tokens_out,
+                    line.cost_usd,
+                )?;
                 if let Some(id) = &line.message_id {
                     let v = serde_json::to_value(u)?;
                     genie_store::messages::set_usage(tx, id, &v, line.cost_usd)?;
                 }
-                genie_store::kv::add_usage(
-                    tx,
-                    &genie_store::kv::Usage {
-                        day,
-                        provider: line.provider.clone(),
-                        model: line.model.clone(),
-                        project_id: line.project_id.clone().unwrap_or_default(),
-                        kind: line.kind.to_string(),
-                        tokens_in: tin,
-                        tokens_out: tout,
-                        cache_read: i64::try_from(u.cache_read).unwrap_or(i64::MAX),
-                        cache_write: i64::try_from(u.cache_write_5m + u.cache_write_1h)
-                            .unwrap_or(i64::MAX),
-                        calls: 1,
-                        cost_usd: line.cost_usd,
-                    },
-                )
+                genie_store::kv::add_usage(tx, &row)
             })
             .map_err(sd)
+    }
+}
+
+/// The day/provider/model spend row (Settings → Usage & spend, D34). No content.
+fn usage_row(line: &UsageLine) -> genie_store::kv::Usage {
+    let u = &line.usage;
+    genie_store::kv::Usage {
+        day: crate::runtime::context::utc_day(crate::bus::now_ms()),
+        provider: line.provider.clone(),
+        model: line.model.clone(),
+        project_id: line.project_id.clone().unwrap_or_default(),
+        kind: line.kind.to_string(),
+        tokens_in: i64::try_from(u.input_total).unwrap_or(i64::MAX),
+        tokens_out: i64::try_from(u.output_total).unwrap_or(i64::MAX),
+        cache_read: i64::try_from(u.cache_read).unwrap_or(i64::MAX),
+        cache_write: i64::try_from(u.cache_write_5m + u.cache_write_1h).unwrap_or(i64::MAX),
+        calls: 1,
+        cost_usd: line.cost_usd,
+    }
+}
+
+// ------------------------------------------------------------------ routed
+
+/// Routes each session's conversation: ephemeral (incognito) sessions live in process
+/// memory only, the rest go to `durable`. Their spend still counts in the usage totals
+/// (`totals`, day/provider/model rows without content), since it is real money.
+pub struct RoutedConversation {
+    durable: Arc<dyn ConversationStore>,
+    memory: MemoryConversation,
+    ephemeral: crate::journal::Ephemeral,
+    totals: Option<Arc<genie_store::Store>>,
+}
+
+impl RoutedConversation {
+    pub fn new(
+        durable: Arc<dyn ConversationStore>,
+        ephemeral: crate::journal::Ephemeral,
+        totals: Option<Arc<genie_store::Store>>,
+    ) -> Self {
+        RoutedConversation {
+            durable,
+            memory: MemoryConversation::new(),
+            ephemeral,
+            totals,
+        }
+    }
+
+    fn pick(&self, session: &str) -> &dyn ConversationStore {
+        if (self.ephemeral)(session) {
+            &self.memory
+        } else {
+            &*self.durable
+        }
+    }
+}
+
+impl ConversationStore for RoutedConversation {
+    fn path(&self, session: &str) -> Result<Vec<StoredMessage>, Defect> {
+        self.pick(session).path(session)
+    }
+    fn get(&self, session: &str, id: &str) -> Result<Option<StoredMessage>, Defect> {
+        self.pick(session).get(session, id)
+    }
+    fn append(&self, session: &str, m: &StoredMessage) -> Result<(), Defect> {
+        self.pick(session).append(session, m)
+    }
+    fn set_leaf(&self, session: &str, leaf: Option<&str>) -> Result<(), Defect> {
+        self.pick(session).set_leaf(session, leaf)
+    }
+    fn meta(&self, session: &str) -> Result<SessionMeta, Defect> {
+        self.pick(session).meta(session)
+    }
+    fn set_meta(&self, session: &str, meta: &SessionMeta) -> Result<(), Defect> {
+        self.pick(session).set_meta(session, meta)
+    }
+    fn wire_records(&self, session: &str) -> Vec<WireRecord> {
+        self.pick(session).wire_records(session)
+    }
+    fn add_wire_records(&self, session: &str, records: Vec<WireRecord>) {
+        self.pick(session).add_wire_records(session, records)
+    }
+    fn record_usage(&self, session: &str, line: &UsageLine) -> Result<(), Defect> {
+        if !(self.ephemeral)(session) {
+            return self.durable.record_usage(session, line);
+        }
+        self.memory.record_usage(session, line)?;
+        if let Some(store) = &self.totals {
+            let row = usage_row(line);
+            store
+                .write(|tx| genie_store::kv::add_usage(tx, &row))
+                .map_err(sd)?;
+        }
+        Ok(())
     }
 }

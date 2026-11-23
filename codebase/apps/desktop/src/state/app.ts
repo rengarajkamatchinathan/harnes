@@ -198,6 +198,8 @@ export class App extends Emitter {
 
   /** The first outside link from chat, waiting for "Browser tab or default browser?". */
   linkAsk: { sid: string; href: string } | null = null;
+  /** The user chose "Continue without saving" on the storage problem screen. */
+  storageDismissed = false;
 
   askLinks(sid: string, href: string) {
     this.linkAsk = { sid, href };
@@ -357,6 +359,12 @@ export class App extends Emitter {
         void this.open.get(m.session_id)?.reload();
         break;
     }
+  }
+
+  /** Hide (or, with `false`, show again) the storage problem screen. */
+  setStorageDismissed(v: boolean) {
+    this.storageDismissed = v;
+    this.changedNow();
   }
 
   /** `secrets.unlock` succeeded: the engine is usable now (D26). */

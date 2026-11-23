@@ -62,6 +62,30 @@
     },
     {
       "direction": "request",
+      "ident": "StorageRecover",
+      "name": "storage.recover",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/StorageRecoverParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "StorageStartFresh",
+      "name": "storage.start_fresh",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/Empty"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "DoctorRun",
       "name": "doctor.run",
       "needs_lease": false,

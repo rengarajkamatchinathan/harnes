@@ -7,7 +7,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use genie_protocol::Channel;
 use genie_protocol::common::Mode;
 
-/// The channel is a build-time setting (01 §2.1 rule 6, D40).
+/// The channel is a build-time setting (01 §2.1 rule 6, D40). Debug and release builds
+/// share it: a DB written by either opens in the other (`open_store_any_key`).
 pub const BUILD_CHANNEL: &str = match option_env!("GENIE_CHANNEL") {
     Some(c) => c,
     None => "stable",

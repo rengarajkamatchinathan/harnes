@@ -28,16 +28,27 @@ pub struct Migration {
     pub step: Step,
 }
 
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    id: 1,
-    name: "init",
-    step: Step::Sql(include_str!("../migrations/0001_init.sql")),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        id: 1,
+        name: "init",
+        step: Step::Sql(include_str!("../migrations/0001_init.sql")),
+    },
+    Migration {
+        id: 2,
+        name: "session_meta",
+        step: Step::Sql(include_str!("../migrations/0002_session_meta.sql")),
+    },
+];
 
-/// The full current schema used to bootstrap a fresh DB. While there is only one
-/// migration it is that migration; later it is regenerated from a migrated DB (and a
-/// test checks that bootstrap and the migration chain agree).
-pub const CURRENT_SCHEMA: &str = include_str!("../migrations/0001_init.sql");
+/// The full current schema used to bootstrap a fresh DB: the SQL migrations in order
+/// (a test checks that bootstrap and the migration chain agree). Regenerate it from a
+/// migrated DB once a migration needs a Rust step.
+pub const CURRENT_SCHEMA: &str = concat!(
+    include_str!("../migrations/0001_init.sql"),
+    "\n",
+    include_str!("../migrations/0002_session_meta.sql"),
+);
 
 const JOURNAL: &str =
     "CREATE TABLE IF NOT EXISTS migration (id INTEGER PRIMARY KEY, completed_at INTEGER NOT NULL)";

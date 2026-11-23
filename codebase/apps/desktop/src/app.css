@@ -310,23 +310,18 @@ code { font-size: 0.92em; }
 @keyframes turn-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
 @media (prefers-reduced-motion: reduce) { .turn__label { animation: none; color: var(--text-muted); background: none; } }
 
-/* Genie brand mark (GenieMark.tsx): braces breathe, star turns; faster while thinking. */
-:root { --genie-star: #7C3AED; }
-[data-theme="dark"] { --genie-star: #A78BFA; }
+/* Genie brand mark (GenieMark.tsx): split gear. Upper triangle breathes when idle; the gear turns while thinking. */
+:root { --genie-accent: #C8102E; }
+[data-theme="dark"] { --genie-accent: #E8344E; }
 .genie-mark { display: block; flex: none; overflow: visible; }
-.genie-mark path { transform-box: fill-box; transform-origin: center; }
-.genie-mark__star { fill: var(--genie-star); }
-.genie-mark--idle .genie-mark__l { animation: genie-l 2.4s ease-in-out infinite; }
-.genie-mark--idle .genie-mark__r { animation: genie-r 2.4s ease-in-out infinite; }
-.genie-mark--idle .genie-mark__star { animation: genie-star 2.4s ease-in-out infinite; }
-.genie-mark--thinking .genie-mark__l { animation: genie-l 0.8s ease-in-out infinite; }
-.genie-mark--thinking .genie-mark__r { animation: genie-r 0.8s ease-in-out infinite; }
-.genie-mark--thinking .genie-mark__star { animation: genie-spin 1.2s linear infinite; }
-@keyframes genie-l { 50% { transform: translateX(-7px); } }
-@keyframes genie-r { 50% { transform: translateX(7px); } }
-@keyframes genie-star { 0%, 100% { transform: scale(0.8) rotate(0deg); } 50% { transform: scale(1.12) rotate(90deg); } }
-@keyframes genie-spin { 0% { transform: rotate(0deg) scale(0.9); } 50% { transform: rotate(180deg) scale(1.15); } 100% { transform: rotate(360deg) scale(0.9); } }
-@media (prefers-reduced-motion: reduce) { .genie-mark path { animation: none !important; } }
+.genie-mark__gear, .genie-mark__tri { transform-box: view-box; transform-origin: 32px 32px; }
+.genie-mark__plate { fill: currentColor; }
+.genie-mark__tri { fill: var(--genie-accent); }
+.genie-mark--idle .genie-mark__tri { animation: genie-breathe 2.4s ease-in-out infinite; }
+.genie-mark--thinking .genie-mark__gear { animation: genie-turn 0.9s cubic-bezier(.6, 0, .3, 1) infinite; }
+@keyframes genie-breathe { 0%, 100% { transform: scale(0.9); } 50% { transform: scale(1); } }
+@keyframes genie-turn { from { transform: rotate(0deg); } to { transform: rotate(120deg); } }
+@media (prefers-reduced-motion: reduce) { .genie-mark * { animation: none !important; } }
 
 .markdown .md > :first-child { margin-top: 0; }
 .markdown .md > :last-child { margin-bottom: 0; }

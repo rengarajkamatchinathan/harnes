@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "App origin only. The artifact origin (genie-artifact://) gets no capabilities (05 §8).",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:allow-open", "dialog:allow-save", "notification:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-set-theme", "dialog:allow-open", "dialog:allow-save", "notification:default"]
 }

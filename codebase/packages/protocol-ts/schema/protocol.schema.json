@@ -2759,6 +2759,17 @@
             "boolean",
             "null"
           ]
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StorageProblem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when sessions are NOT being persisted."
         }
       },
       "required": [
@@ -6816,6 +6827,40 @@
         "step",
         "model",
         "route"
+      ],
+      "type": "object"
+    },
+    "StorageProblem": {
+      "description": "The daemon could not open its database, so nothing is being saved (04 §2). Clients\nmust say so plainly and offer `storage.recover` / `storage.start_fresh`.",
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "reason": {
+          "description": "`key_missing` (the DB exists but its key is in no reachable key store) or\n`open_failed` (anything else; see `detail`).",
+          "type": "string"
+        },
+        "recovery_available": {
+          "default": false,
+          "description": "A `recovery.bin` exists, so `storage.recover` with the recovery key can work.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reason",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "StorageRecoverParams": {
+      "description": "`storage.recover`: the recovery key shown when it was created (04 §2, SA-16).",
+      "properties": {
+        "recovery_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "recovery_key"
       ],
       "type": "object"
     },

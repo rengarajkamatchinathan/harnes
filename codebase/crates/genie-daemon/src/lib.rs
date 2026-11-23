@@ -154,28 +154,71 @@ pub fn open_store(
     if let Err(e) = secrets::migrate_placeholder(&ep.data_dir, keys) {
         tracing::error!(error = %e, "placeholder keystore migration failed; file kept");
     }
-    match genie_store::Store::open_with_keystore(&opts, keys) {
-        // A development build switched from the keychain to its local secrets file, so
-        // the old DB's key is out of reach. Set the DB aside (renamed, never deleted,
-        // 04 §2) and start fresh instead of running without a store.
-        Err(genie_store::StoreError::KeyMissing { .. })
-            if secrets::dev_secrets_mode(&ep.config_dir) =>
-        {
-            let date = genie_protocol::rfc3339_ms(genie_core::bus::now_ms());
-            let date = date.get(..10).unwrap_or("unknown");
-            let moved =
-                genie_store::keys::quarantine_unreadable(&ep.data_dir, &opts_name(ep), date)?;
-            tracing::warn!(
-                ?moved,
-                "dev build: previous DB is unreadable without its keychain key; set aside, starting fresh"
-            );
-            genie_store::Store::open_with_keystore(&opts, keys).map(Arc::new)
+    // A missing key is never resolved here by setting the DB aside: that needs the
+    // user's say (04 §2), through `storage.start_fresh`.
+    genie_store::Store::open_with_keystore(&opts, keys).map(Arc::new)
+}
+
+/// [`open_store`], and when the key is missing, look in the key store this build does
+/// not use ([`secrets::alternate_backend`]): a DB written by a dev build has its key in
+/// `secrets.enc`, one written by a release build in the keychain. A key found there
+/// must open the DB before anything is copied; then it (and every other secret the
+/// current store lacks, e.g. provider credentials) is copied into the current store,
+/// so the next start needs no fallback.
+pub fn open_store_any_key(
+    ep: &Endpoint,
+    secrets: &Secrets,
+) -> Result<Arc<genie_store::Store>, genie_store::StoreError> {
+    use genie_store::StoreError;
+    let backend = secrets.backend();
+    let missing = match open_store(ep, &SecretsKeyStore(backend.clone())) {
+        Err(e @ StoreError::KeyMissing { .. }) => e,
+        r => return r,
+    };
+    let Some(alt) = secrets::alternate_backend(ep, backend.kind()) else {
+        return Err(missing);
+    };
+    let Ok(Some(raw)) = alt.backend.get(genie_store::keys::DATA_KEY_ACCOUNT) else {
+        return Err(missing);
+    };
+    let key = genie_store::crypto::Key::from_bytes(&raw)?;
+    let opts = genie_store::StoreOptions::new(ep.data_dir.clone(), opts_name(ep));
+    let store = match genie_store::Store::open(&opts, key) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "the other key store's data key does not open this DB");
+            return Err(missing);
         }
-        r => r.map(Arc::new),
+    };
+    let copied = secrets::adopt_accounts(&*alt.backend, &*backend, &alt.accounts);
+    tracing::warn!(
+        from = alt.backend.kind().as_str(),
+        to = backend.kind().as_str(),
+        copied,
+        "DB key found in the other key store (a dev/release build switch); copied over"
+    );
+    Ok(Arc::new(store))
+}
+
+/// What clients are told when the store could not be opened.
+fn storage_problem(e: &genie_store::StoreError) -> genie_protocol::handshake::StorageProblem {
+    match e {
+        genie_store::StoreError::KeyMissing { recovery_available } => {
+            genie_protocol::handshake::StorageProblem {
+                reason: "key_missing".into(),
+                detail: "The database's encryption key is not in this computer's key store.".into(),
+                recovery_available: *recovery_available,
+            }
+        }
+        e => genie_protocol::handshake::StorageProblem {
+            reason: "open_failed".into(),
+            detail: e.to_string(),
+            recovery_available: false,
+        },
     }
 }
 
-fn opts_name(ep: &Endpoint) -> String {
+pub(crate) fn opts_name(ep: &Endpoint) -> String {
     format!("genie{}.db", ep.channel.dir_suffix())
 }
 
@@ -317,10 +360,24 @@ fn build_engine(
         t.install_panic_hook();
     }
     services.secrets = Some(secrets.clone());
-    let store = match open_store(ep, &SecretsKeyStore(secrets.backend())) {
-        Ok(s) => Some(s),
+    let store = match open_store_any_key(ep, &secrets) {
+        Ok(s) => {
+            match registry.attach_store(s.clone()) {
+                Ok(r) => tracing::info!(
+                    loaded = r.loaded,
+                    recovered = r.recovered,
+                    dropped_incognito = r.dropped_incognito,
+                    "sessions loaded from the store"
+                ),
+                Err(e) => tracing::error!(error = %e, "saved sessions could not be loaded"),
+            }
+            Some(s)
+        }
         Err(e) => {
-            tracing::error!(error = %e, "store unavailable; sessions are not persisted");
+            // Clients are told (`InitializeResult.storage`) and offered recovery; the
+            // daemon still serves so that the user can act on it.
+            tracing::error!(error = %e, "store unavailable; sessions are NOT persisted");
+            services.storage_problem = Some(storage_problem(&e));
             None
         }
     };
@@ -342,12 +399,35 @@ fn build_engine(
     let turns = Arc::new(genie_core::runtime::active::ActiveTurns::new());
     let mut rb = RuntimeBuilder::new(registry.clone(), models.clone()).turns(turns.clone());
     let mut eb = EngineBuilder::new();
-    if let Some(store) = &store {
-        rb = rb.store(store.clone());
+    // Incognito sessions (and their subagents) never reach disk (D24, D31): their events,
+    // messages, spilled output and artifacts stay in process memory. Only their spend is
+    // added to the usage totals.
+    let ephemeral: genie_core::journal::Ephemeral = {
+        let reg = registry.clone();
+        Arc::new(move |id: &str| reg.is_incognito(id))
+    };
+    let conversation: Option<Arc<dyn ConversationStore>> = store.as_ref().map(|s| {
+        Arc::new(genie_core::runtime::RoutedConversation::new(
+            Arc::new(genie_core::runtime::StoreConversation::new(s.clone())),
+            ephemeral.clone(),
+            Some(s.clone()),
+        )) as Arc<dyn ConversationStore>
+    });
+    if let (Some(store), Some(conv)) = (&store, &conversation) {
+        rb = rb
+            .store(store.clone())
+            .conversation(conv.clone())
+            .spill(Some(Arc::new(genie_core::runtime::RoutedSpill::new(
+                Arc::new(genie_core::runtime::bridge::BlobSpill::new(store.clone())),
+                ephemeral.clone(),
+            ))));
     }
     // Durable events → audit (tool calls, usage, browser actions) + usage analytics.
     let journal: Arc<dyn genie_core::journal::Journal> = match &store {
-        Some(store) => Arc::new(StoreJournal::new(store.clone())),
+        Some(store) => Arc::new(genie_core::journal::RoutedJournal::new(
+            Arc::new(StoreJournal::new(store.clone())),
+            ephemeral.clone(),
+        )),
         None => Arc::new(genie_core::journal::MemoryJournal::new()),
     };
     eb = eb.journal(observe::EventTap::wrap(
@@ -365,6 +445,9 @@ fn build_engine(
         root,
         hub.as_deref(),
     );
+    if let Some(a) = &services.artifacts {
+        a.set_ephemeral(ephemeral.clone());
+    }
     // Shell (Code, 06 §13) with background jobs bound to the engine below; web tools
     // (Chat + Code, 06 §8) tainting the turn.
     let jobs = genie_core::runtime::host::EngineJobs::new(store.clone());
@@ -416,10 +499,7 @@ fn build_engine(
         );
         host.models = Some(models.clone());
         host.store = store.clone();
-        host.conversation = store.as_ref().map(|s| {
-            Arc::new(genie_core::runtime::StoreConversation::new(s.clone()))
-                as Arc<dyn genie_core::runtime::ConversationStore>
-        });
+        host.conversation = conversation.clone();
         let host = Arc::new(host);
         let sites = Arc::new(genie_browser::SitePolicy::new());
         if let Some(h) = &hub {
@@ -472,10 +552,8 @@ fn build_engine(
             blocked_domains: p.strings("webSearch.blockedDomains"),
         }));
         let mut authz = PermissionAuthorizer::new(hub.clone(), registry.clone());
-        if let Some(store) = &store {
-            authz = authz.with_conversation(Arc::new(genie_core::runtime::StoreConversation::new(
-                store.clone(),
-            )));
+        if let Some(c) = &conversation {
+            authz = authz.with_conversation(c.clone());
         }
         if let Some(a) = &services.audit {
             authz = authz.with_audit(a.clone());
@@ -729,6 +807,11 @@ pub async fn run(cfg: DaemonConfig) -> Result<ShutdownReason, DaemonError> {
             remaining = root.task_count(),
             "tasks still running after grace period"
         );
+    }
+    // Close the store explicitly: subsystems bound to the engine keep `Arc`s to it in
+    // reference cycles, so dropping ours would not release the DB files.
+    if let Some(s) = &services.store {
+        s.close();
     }
     listener::cleanup(&ep.address);
     let _ = std::fs::remove_file(ep.token_path());

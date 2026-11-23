@@ -17,6 +17,11 @@ export function Root() {
   const { appearance } = app.ui;
 
   useEffect(() => applyAppearance(appearance), [appearance]);
+  // The native title bar follows the OS theme unless told otherwise; match the app's choice
+  // ("system" hands it back to the OS, which is also what the page follows then).
+  useEffect(() => {
+    void app.platform.setWindowTheme(appearance.theme === "system" ? null : appearance.theme).catch(() => {});
+  }, [app.platform, appearance.theme]);
   // macOS draws its window buttons over our title-bar strip (Overlay title bar), so CSS
   // leaves room for them there only.
   useEffect(() => {
@@ -96,6 +101,7 @@ export function Root() {
     );
   if (st.state === "busy_updating") return <Splash text={t("conn.busy", { n: st.running ?? 0 })} />;
   if (st.locked) return <Unlock />;
+  if (st.storage && !app.storageDismissed) return <StorageProblemScreen />;
   const ready = st.state === "ready" || st.state === "degraded";
   if (!ready && !app.models.length && !app.sessions.size) return <Splash text={st.state === "starting" ? t("conn.starting") : st.state === "restarting" ? t("conn.restarting") : t("conn.connecting")} />;
   if (!app.ui.firstRunDone) return <FirstRun />;
@@ -153,6 +159,21 @@ function Shell() {
           <div className="top-banner">
             <Banner tone="warning" icon="refresh">
               {t("conn.reconnecting")}
+            </Banner>
+          </div>
+        )}
+        {status.storage && (
+          <div className="top-banner">
+            <Banner
+              tone="danger"
+              icon="warning"
+              actions={
+                <Button size="sm" onClick={() => app.setStorageDismissed(false)}>
+                  {t("storage.fix")}
+                </Button>
+              }
+            >
+              {t("storage.banner")}
             </Banner>
           </div>
         )}
@@ -256,6 +277,76 @@ function Unlock() {
             {t("unlock.submit")}
           </Button>
         </form>
+      </Card>
+    </Center>
+  );
+}
+
+/** The engine runs without its database (04 §2): say so before anything else, and offer
+ *  the recovery key, a fresh start (old files set aside, never deleted) or going on
+ *  unsaved. Both fixes restart the engine; the relay reconnects by itself. */
+function StorageProblemScreen() {
+  const app = useApp();
+  const problem = app.status.storage!;
+  const keyMissing = problem.reason === "key_missing";
+  const [key, setKey] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirmFresh, setConfirmFresh] = useState(false);
+  const run = async (f: () => Promise<unknown>) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await f();
+    } catch (e) {
+      setErr(app.describeError(e));
+      setBusy(false);
+    }
+  };
+  if (busy && !err) return <Splash text={t("storage.restarting")} />;
+  return (
+    <Center>
+      <Card>
+        <h2 style={{ marginTop: 0 }}>{t("storage.title")}</h2>
+        <p className="muted">{keyMissing ? t("storage.keyMissing") : t("storage.openFailed", { detail: problem.detail })}</p>
+        {keyMissing && problem.recovery_available && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void run(() => app.client.storage.recover({ recovery_key: key }));
+            }}
+            className="stack"
+          >
+            <Input aria-label={t("storage.recoveryLabel")} placeholder="XXXX-XXXX-…" value={key} onChange={(e) => setKey(e.target.value)} autoFocus />
+            <Button type="submit" variant="primary" disabled={!key.trim() || busy}>
+              {t("storage.recover")}
+            </Button>
+          </form>
+        )}
+        {err && <div className="error-text">{err}</div>}
+        {confirmFresh ? (
+          <div className="stack">
+            <p>{t("storage.startFreshConfirm")}</p>
+            <div className="row">
+              <Button variant="danger" disabled={busy} onClick={() => void run(() => app.client.storage.start_fresh())}>
+                {t("storage.startFreshYes")}
+              </Button>
+              <Button variant="ghost" onClick={() => setConfirmFresh(false)}>
+                {t("common.cancel")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="row">
+            {keyMissing && <Button onClick={() => setConfirmFresh(true)}>{t("storage.startFresh")}</Button>}
+            <Button variant="ghost" onClick={() => app.setStorageDismissed(true)}>
+              {t("storage.continue")}
+            </Button>
+            <Button variant="ghost" onClick={() => (app.setStorageDismissed(true), app.openDeepLink("genie://settings/developer"))}>
+              {t("conn.openLogs")}
+            </Button>
+          </div>
+        )}
       </Card>
     </Center>
   );

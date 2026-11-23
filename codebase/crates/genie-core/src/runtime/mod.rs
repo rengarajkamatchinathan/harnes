@@ -57,7 +57,10 @@ use genie_tools::{
     MemoryPort, MemorySpill, OutputLimits, SpillStore, Tool, ToolKind, ToolRegistry,
 };
 
-pub use conversation::{ConversationStore, MemoryConversation, StoreConversation};
+pub use bridge::RoutedSpill;
+pub use conversation::{
+    ConversationStore, MemoryConversation, RoutedConversation, StoreConversation,
+};
 pub use ports::{
     AllowAllAuthorizer, AuthzDecision, AuthzRequest, BasicInstructions, DefaultAuthorizer,
     FixedSettings, InstructionProvider, ModelResolver, NoModels, ProvidedTool, ResolveError,

@@ -102,6 +102,11 @@ methods! {
     DaemonStatusMethod = "daemon.status", Request, false, Empty => DaemonStatus;
     DaemonRestart = "daemon.restart", Request, false, DaemonRestartParams => Empty;
     SecretsUnlock = "secrets.unlock", Request, false, daemon::UnlockParams => OkResult;
+    /// The DB key is missing: restore it from the recovery key, then the daemon restarts.
+    StorageRecover = "storage.recover", Request, false, daemon::StorageRecoverParams => Empty;
+    /// The DB key is missing: set the old data aside (renamed, never deleted), start a new
+    /// DB, then the daemon restarts.
+    StorageStartFresh = "storage.start_fresh", Request, false, Empty => Empty;
     DoctorRun = "doctor.run", Request, false, Empty => daemon::DoctorResult;
     DiagnosticsCollect = "diagnostics.collect", Request, false, daemon::DiagnosticsParams => daemon::DiagnosticsResult;
 

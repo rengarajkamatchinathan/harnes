@@ -48,8 +48,9 @@ pub struct Store {
     dir: PathBuf,
     db_path: PathBuf,
     data_key: Key,
-    writer: Mutex<Connection>,
-    readers: Vec<Mutex<Connection>>,
+    /// `None` once [`Store::close`] ran.
+    writer: Mutex<Option<Connection>>,
+    readers: Vec<Mutex<Option<Connection>>>,
     next_reader: AtomicUsize,
     blobs: BlobFiles,
     /// Serialises blob writes against blob GC, so GC never removes a file that a
@@ -85,13 +86,13 @@ impl Store {
         let migration = migrate::run(&mut writer, &backup)?;
         let blob_key = load_or_create_blob_key(&writer, &data_key)?;
         let readers = (0..opts.readers.max(1))
-            .map(|_| open_conn(&db_path, &data_key, true).map(Mutex::new))
+            .map(|_| open_conn(&db_path, &data_key, true).map(|c| Mutex::new(Some(c))))
             .collect::<Result<Vec<_>>>()?;
         Ok(Store {
             dir: opts.dir.clone(),
             db_path,
             data_key,
-            writer: Mutex::new(writer),
+            writer: Mutex::new(Some(writer)),
             readers,
             next_reader: AtomicUsize::new(0),
             blobs: BlobFiles::new(opts.dir.join("blobs"), blob_key),
@@ -132,26 +133,85 @@ impl Store {
         let n = self.readers.len();
         let start = self.next_reader.fetch_add(1, Ordering::Relaxed) % n;
         for i in 0..n {
-            if let Ok(conn) = self.readers[(start + i) % n].try_lock() {
-                return f(&conn);
+            if let Ok(g) = self.readers[(start + i) % n].try_lock() {
+                let c = ConnGuard::new(g)?;
+                return f(&c);
             }
         }
-        let conn = self.readers[start]
+        let g = self.readers[start]
             .lock()
             .map_err(|_| StoreError::Invalid("reader lock poisoned".into()))?;
-        f(&conn)
+        let c = ConnGuard::new(g)?;
+        f(&c)
     }
 
-    pub(crate) fn writer(&self) -> Result<MutexGuard<'_, Connection>> {
+    pub(crate) fn writer(&self) -> Result<ConnGuard<'_>> {
+        let g = self
+            .writer
+            .lock()
+            .map_err(|_| StoreError::Invalid("writer lock poisoned".into()))?;
+        ConnGuard::new(g)
+    }
+
+    /// Close every connection (checkpointing the WAL) so the DB files are released even
+    /// while other parts of the daemon still hold this `Store` (01 §4.3 "close store";
+    /// on Windows an open handle blocks renaming or deleting the files). Every later
+    /// call fails with "store is closed". Idempotent.
+    pub fn close(&self) {
+        let mut w = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(conn) = w.as_ref()
+            && let Err(e) = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        {
+            tracing::warn!(error = %e, "WAL checkpoint on close failed");
+        }
+        for r in &self.readers {
+            r.lock().unwrap_or_else(|e| e.into_inner()).take();
+        }
+        w.take();
+    }
+
+    pub fn is_closed(&self) -> bool {
         self.writer
             .lock()
-            .map_err(|_| StoreError::Invalid("writer lock poisoned".into()))
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
     }
 
     /// An encrypted copy of the DB via `sqlcipher_export` (04 §5).
     pub fn backup_to(&self, dest: &Path) -> Result<()> {
         let conn = self.writer()?;
         export_encrypted(&conn, dest, &self.data_key)
+    }
+}
+
+/// A locked connection that is still open (see [`Store::close`]).
+pub(crate) struct ConnGuard<'a>(MutexGuard<'a, Option<Connection>>);
+
+impl<'a> ConnGuard<'a> {
+    fn new(g: MutexGuard<'a, Option<Connection>>) -> Result<Self> {
+        if g.is_none() {
+            return Err(StoreError::Invalid("store is closed".into()));
+        }
+        Ok(ConnGuard(g))
+    }
+}
+
+impl std::ops::Deref for ConnGuard<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        match self.0.as_ref() {
+            Some(c) => c,
+            None => unreachable!("ConnGuard is only built over an open connection"),
+        }
+    }
+}
+
+impl std::ops::DerefMut for ConnGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        match self.0.as_mut() {
+            Some(c) => c,
+            None => unreachable!("ConnGuard is only built over an open connection"),
+        }
     }
 }
 
