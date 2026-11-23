@@ -297,6 +297,80 @@ pub fn migrate_placeholder(
     Ok(moved)
 }
 
+/// The key store this run is NOT using, when it may hold this data dir's keys. Builds
+/// differ on purpose (a dev build uses `secrets.enc`, a release build the keychain,
+/// [`dev_secrets_mode`]), so a DB written by one is unreadable to the other unless the
+/// key is looked up in both places.
+///
+/// * Using the keychain → an existing `secrets.enc`, opened with the dev passphrase
+///   file or `GENIE_PASSPHRASE` (never created here).
+/// * Using `secrets.enc` → the OS keychain, if reachable.
+pub fn alternate_backend(ep: &Endpoint, current: BackendKind) -> Option<AltKeys> {
+    match current {
+        BackendKind::Keychain => {
+            let path = ep.data_dir.join(genie_secrets::vault::FILE_NAME);
+            if !path.exists() {
+                return None;
+            }
+            let v = FileVault::at(path, KdfParams::default());
+            let dev = std::fs::read_to_string(ep.data_dir.join(DEV_PASSPHRASE_FILE))
+                .ok()
+                .map(|s| s.trim().to_string());
+            let env = std::env::var(PASSPHRASE_ENV).ok();
+            for p in [dev, env].into_iter().flatten().filter(|p| !p.is_empty()) {
+                if v.unlock(&SecretString::from(p)).is_ok() {
+                    let accounts = v.accounts().unwrap_or_default();
+                    return Some(AltKeys {
+                        backend: Arc::new(v),
+                        accounts,
+                    });
+                }
+            }
+            None
+        }
+        BackendKind::File => {
+            let k = KeyringBackend::new(keychain_service(ep));
+            k.probe().ok().map(|()| AltKeys {
+                backend: Arc::new(k),
+                // A keychain can't be enumerated: only the DB key is looked for.
+                accounts: vec![genie_store::keys::DATA_KEY_ACCOUNT.into()],
+            })
+        }
+        BackendKind::Memory => None,
+    }
+}
+
+/// Another key store and the accounts worth copying out of it.
+pub struct AltKeys {
+    pub backend: Arc<dyn SecretBackend>,
+    pub accounts: Vec<String>,
+}
+
+/// Copy the accounts `to` lacks from `from` (the DB data key, provider credentials, …),
+/// so switching between a dev and a release build keeps both the chats and the keys.
+/// Existing values in `to` are never overwritten. `accounts` lists what to try (a
+/// keychain can't be enumerated). Returns how many were copied.
+pub fn adopt_accounts(
+    from: &dyn SecretBackend,
+    to: &dyn SecretBackend,
+    accounts: &[String],
+) -> usize {
+    let mut n = 0;
+    for a in accounts {
+        match (to.get(a), from.get(a)) {
+            (Ok(None), Ok(Some(v))) => match to.set(a, &v) {
+                Ok(()) => n += 1,
+                Err(e) => tracing::warn!(account = %a, error = %e, "secret not copied"),
+            },
+            (Err(e), _) | (_, Err(e)) => {
+                tracing::warn!(account = %a, error = %e, "secret not read while copying");
+            }
+            _ => {}
+        }
+    }
+    n
+}
+
 /// Methods a locked daemon still answers.
 pub(crate) const LOCKED_ALLOWED: &[&str] = &[
     "secrets.unlock",
@@ -432,6 +506,99 @@ mod tests {
         );
         assert!(!dir.path().join(crate::keystore::PLACEHOLDER_FILE).exists());
         assert_eq!(migrate_placeholder(dir.path(), &ks).unwrap(), 0);
+    }
+
+    /// A memory backend that reports itself as the OS keychain.
+    struct FakeKeychain(MemoryBackend);
+    impl SecretBackend for FakeKeychain {
+        fn kind(&self) -> BackendKind {
+            BackendKind::Keychain
+        }
+        fn get(&self, a: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretsError> {
+            self.0.get(a)
+        }
+        fn set(&self, a: &str, s: &[u8]) -> Result<(), SecretsError> {
+            self.0.set(a, s)
+        }
+        fn delete(&self, a: &str) -> Result<(), SecretsError> {
+            self.0.delete(a)
+        }
+    }
+
+    /// The Nov 2026 incident: a dev build wrote the DB with its key in `secrets.enc`; a
+    /// release build (keychain) then found no key and ran with no store at all.
+    #[test]
+    fn release_build_opens_a_dev_build_db_and_adopts_its_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let ep = Endpoint::in_dir(dir.path(), genie_protocol::Channel::Dev).unwrap();
+        {
+            let vault = Arc::new(FileVault::at(
+                ep.data_dir.join(genie_secrets::vault::FILE_NAME),
+                KdfParams::insecure_for_tests(),
+            ));
+            std::fs::create_dir_all(&ep.data_dir).unwrap();
+            std::fs::write(ep.data_dir.join(DEV_PASSPHRASE_FILE), "devpass").unwrap();
+            vault.unlock(&SecretString::from("devpass")).unwrap();
+            vault.set("provider.azure", b"api-key").unwrap();
+            let dev = Secrets::open(&SecretsChoice::Backend(vault), &ep);
+            let store = crate::open_store_any_key(&ep, &dev).unwrap();
+            store
+                .write(|tx| genie_store::sessions::ensure(tx, "ses_old"))
+                .unwrap();
+        }
+
+        let keychain = Arc::new(FakeKeychain(MemoryBackend::new()));
+        let release = Secrets::open(&SecretsChoice::Backend(keychain.clone()), &ep);
+        let store = crate::open_store_any_key(&ep, &release).expect("falls back to secrets.enc");
+        assert!(
+            store
+                .read(|c| genie_store::sessions::get(c, "ses_old"))
+                .unwrap()
+                .is_some()
+        );
+        // Copied, so the next start needs no fallback; the API key came along.
+        assert!(
+            keychain
+                .get(genie_store::keys::DATA_KEY_ACCOUNT)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            keychain.get("provider.azure").unwrap().unwrap().as_slice(),
+            b"api-key"
+        );
+    }
+
+    #[test]
+    fn a_key_that_does_not_open_the_db_is_not_adopted() {
+        let dir = tempfile::tempdir().unwrap();
+        let ep = Endpoint::in_dir(dir.path(), genie_protocol::Channel::Dev).unwrap();
+        // DB written with a key that lives nowhere any more.
+        let lost = Secrets::open(&SecretsChoice::Backend(Arc::new(MemoryBackend::new())), &ep);
+        drop(crate::open_store_any_key(&ep, &lost).unwrap());
+        // `secrets.enc` holds a different data key.
+        let vault = FileVault::at(
+            ep.data_dir.join(genie_secrets::vault::FILE_NAME),
+            KdfParams::insecure_for_tests(),
+        );
+        std::fs::write(ep.data_dir.join(DEV_PASSPHRASE_FILE), "devpass").unwrap();
+        vault.unlock(&SecretString::from("devpass")).unwrap();
+        vault
+            .set(genie_store::keys::DATA_KEY_ACCOUNT, &[7u8; 32])
+            .unwrap();
+
+        let keychain = Arc::new(FakeKeychain(MemoryBackend::new()));
+        let release = Secrets::open(&SecretsChoice::Backend(keychain.clone()), &ep);
+        assert!(matches!(
+            crate::open_store_any_key(&ep, &release),
+            Err(StoreError::KeyMissing { .. })
+        ));
+        assert!(
+            keychain
+                .get(genie_store::keys::DATA_KEY_ACCOUNT)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

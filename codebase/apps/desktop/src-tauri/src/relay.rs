@@ -63,6 +63,9 @@ pub struct HostStatus {
     /// `initialize.locked.reason`: the secrets store needs `secrets.unlock` (D26).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locked: Option<String>,
+    /// `initialize.storage`: the engine can't open its DB, so nothing is being saved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage: Option<genie_protocol::handshake::StorageProblem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub running: Option<u32>,
 }
@@ -74,6 +77,7 @@ impl HostStatus {
             detail: None,
             engine_version: None,
             locked: None,
+            storage: None,
             running: None,
         }
     }
@@ -482,6 +486,7 @@ impl Relay {
         });
         st.engine_version = Some(conn.init.engine_version.clone());
         st.locked = conn.init.locked.as_ref().map(|l| l.reason.clone());
+        st.storage = conn.init.storage.clone();
         let conn = Arc::new(conn);
         *lock(&self.conn) = Some((generation, conn.clone()));
         self.resubscribe_all(&conn).await;

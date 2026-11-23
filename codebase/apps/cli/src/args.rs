@@ -7,9 +7,12 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use genie_protocol::Channel;
 use genie_protocol::common::Mode;
 
-/// The channel is a build-time setting (01 §2.1 rule 6, D40).
+/// The channel is a build-time setting (01 §2.1 rule 6, D40). Without one, a debug
+/// build is `dev` so it never shares a data dir (and DB) with an installed release
+/// build: the two keep the DB key in different key stores (`secrets::dev_secrets_mode`).
 pub const BUILD_CHANNEL: &str = match option_env!("GENIE_CHANNEL") {
     Some(c) => c,
+    None if cfg!(debug_assertions) => "dev",
     None => "stable",
 };
 const COMMIT: &str = match option_env!("GENIE_COMMIT") {

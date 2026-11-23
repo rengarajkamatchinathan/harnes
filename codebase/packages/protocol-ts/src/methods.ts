@@ -8,6 +8,8 @@ export interface Requests {
   "daemon.status": { params: T.Empty; result: T.DaemonStatus };
   "daemon.restart": { params: T.DaemonRestartParams; result: T.Empty };
   "secrets.unlock": { params: T.UnlockParams; result: T.OkResult };
+  "storage.recover": { params: T.StorageRecoverParams; result: T.Empty };
+  "storage.start_fresh": { params: T.Empty; result: T.Empty };
   "doctor.run": { params: T.Empty; result: T.DoctorResult };
   "diagnostics.collect": { params: T.DiagnosticsParams; result: T.DiagnosticsResult };
   "session.subscribe": { params: T.SubscribeParams; result: T.SubscribeResult };
@@ -180,6 +182,8 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "daemon.status", direction: "request", needsLease: false },
   { name: "daemon.restart", direction: "request", needsLease: false },
   { name: "secrets.unlock", direction: "request", needsLease: false },
+  { name: "storage.recover", direction: "request", needsLease: false },
+  { name: "storage.start_fresh", direction: "request", needsLease: false },
   { name: "doctor.run", direction: "request", needsLease: false },
   { name: "diagnostics.collect", direction: "request", needsLease: false },
   { name: "session.subscribe", direction: "request", needsLease: false },
@@ -555,6 +559,10 @@ export class GenieClient {
     list: (params: T.Empty = {}): Promise<T.SkillListResult> => this.t.request("skill.list", params) as Promise<T.SkillListResult>,
     set_enabled: (params: T.SkillSetEnabledParams): Promise<T.Empty> => this.t.request("skill.set_enabled", params) as Promise<T.Empty>,
     upload: (params: T.BlobIdParams): Promise<T.IdResult> => this.t.request("skill.upload", params) as Promise<T.IdResult>,
+  };
+  readonly storage = {
+    recover: (params: T.StorageRecoverParams): Promise<T.Empty> => this.t.request("storage.recover", params) as Promise<T.Empty>,
+    start_fresh: (params: T.Empty = {}): Promise<T.Empty> => this.t.request("storage.start_fresh", params) as Promise<T.Empty>,
   };
   readonly terminal = {
     attach: (params: T.TerminalAttachParams): Promise<T.TerminalAttachResult> => this.t.request("terminal.attach", params) as Promise<T.TerminalAttachResult>,

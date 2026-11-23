@@ -13,7 +13,17 @@ export interface HostStatus {
   engine_version?: string;
   /** The secrets store is locked; `secrets.unlock` with the passphrase (D26). */
   locked?: string;
+  /** The engine can't open its database: nothing is being saved (04 §2). */
+  storage?: StorageProblem;
   running?: number;
+}
+
+/** Mirrors `genie_protocol::handshake::StorageProblem`. */
+export interface StorageProblem {
+  /** `key_missing` | `open_failed` */
+  reason: string;
+  detail: string;
+  recovery_available?: boolean;
 }
 
 /** A daemon notification as relayed: `{method, params}`. */

@@ -1,11 +1,14 @@
 //! Session metadata for `session.create/list/get/update/delete` and the workspace feed.
 //!
-//! In-memory until `genie-store` (spec 04) owns the `session` table; the shape matches
-//! the wire `SessionInfo` so the swap is local to this module.
+//! The map is the in-memory cache. With a store attached ([`Registry::attach_store`])
+//! every change is written through to the session row's `meta` column (04 §3.2,
+//! migration 2) and the map is reloaded from it on start, so the session list survives
+//! a daemon restart. Incognito sessions are never written, and their rows are dropped on
+//! start (D24).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use genie_core::bus::now_ms;
 use genie_core::runtime::{SessionOverlay, SessionSettings, SettingsSource};
@@ -36,6 +39,50 @@ pub struct Registry {
     map: Mutex<HashMap<String, SessionInfo>>,
     extra: Mutex<HashMap<String, Extra>>,
     listener: std::sync::OnceLock<std::sync::Arc<ListedFn>>,
+    store: OnceLock<Arc<genie_store::Store>>,
+}
+
+/// kv flag: rows from before migration 2 were given a registry record (done once).
+const BACKFILLED_KV: &str = "registry.backfilled";
+const META_VERSION: u32 = 1;
+
+/// What [`Registry::attach_store`] found.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct LoadReport {
+    pub loaded: usize,
+    /// Old rows (messages but no registry record) listed again as chats.
+    pub recovered: usize,
+    /// Incognito rows removed.
+    pub dropped_incognito: usize,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Meta {
+    v: u32,
+    info: SessionInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    worktree_name: Option<String>,
+    #[serde(default)]
+    headless: bool,
+}
+
+fn store_kind(k: genie_protocol::common::SessionKind) -> genie_store::sessions::SessionKind {
+    match k {
+        genie_protocol::common::SessionKind::Code => genie_store::sessions::SessionKind::Code,
+        _ => genie_store::sessions::SessionKind::Chat,
+    }
+}
+
+/// A title for a recovered chat: the first line of its first prompt, shortened.
+fn title_from(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let mut t: String = line.chars().take(60).collect();
+    if line.chars().count() > 60 {
+        t.push('…');
+    }
+    Some(t)
 }
 
 impl Registry {
@@ -52,6 +99,184 @@ impl Registry {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, SessionInfo>> {
         self.map.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Use `store` from now on and load the sessions saved in it. Call once, before
+    /// clients connect.
+    pub fn attach_store(&self, store: Arc<genie_store::Store>) -> genie_store::Result<LoadReport> {
+        let mut report = LoadReport::default();
+        let rows = store.read(genie_store::sessions::all_meta)?;
+        let mut incognito = vec![];
+        {
+            let mut map = self.lock();
+            let mut extra = self.extra.lock().unwrap_or_else(|e| e.into_inner());
+            for (id, v) in rows {
+                let m: Meta = match serde_json::from_value(v) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!(session = %id, error = %e, "session record unreadable; skipped");
+                        continue;
+                    }
+                };
+                if m.info.incognito {
+                    incognito.push(id);
+                    continue;
+                }
+                let mut info = m.info;
+                info.summary.status = LiveStatus::Idle;
+                info.driver = None;
+                extra.insert(
+                    id.clone(),
+                    Extra {
+                        workspace: m.workspace,
+                        overlay: None,
+                        worktree_name: m.worktree_name,
+                        headless: m.headless,
+                    },
+                );
+                map.insert(id, info);
+                report.loaded += 1;
+            }
+        }
+        if !incognito.is_empty() {
+            store.write(|tx| {
+                for id in &incognito {
+                    genie_store::sessions::delete(tx, id)?;
+                }
+                Ok(())
+            })?;
+            report.dropped_incognito = incognito.len();
+        }
+        let _ = self.store.set(store.clone());
+        report.recovered = self.backfill(&store)?;
+        Ok(report)
+    }
+
+    /// Once per DB: rows written before the registry was persisted hold messages but no
+    /// record, so they never showed up after a restart. List them again as chats.
+    fn backfill(&self, store: &genie_store::Store) -> genie_store::Result<usize> {
+        if store
+            .read(|c| genie_store::kv::get(c, BACKFILLED_KV))?
+            .is_some()
+        {
+            return Ok(0);
+        }
+        let old = store.read(genie_store::sessions::without_meta)?;
+        let mut n = 0;
+        for (row, first) in old {
+            if self.exists(&row.id) {
+                continue;
+            }
+            let kind = match row.kind {
+                genie_store::sessions::SessionKind::Code => {
+                    genie_protocol::common::SessionKind::Code
+                }
+                genie_store::sessions::SessionKind::Chat => {
+                    genie_protocol::common::SessionKind::Chat
+                }
+            };
+            let info = SessionInfo {
+                summary: SessionSummary {
+                    session_id: row.id.clone(),
+                    kind,
+                    title: row
+                        .title
+                        .clone()
+                        .or_else(|| first.as_deref().and_then(title_from)),
+                    status: LiveStatus::Idle,
+                    pinned: row.pinned,
+                    archived: row.archived,
+                    project_id: None,
+                    workspace_id: None,
+                    updated_at: rfc3339_ms(u64::try_from(row.updated).unwrap_or(0)),
+                },
+                model: row.model.clone().unwrap_or_default(),
+                effort: row.effort.clone(),
+                mode: row
+                    .mode
+                    .as_deref()
+                    .and_then(|m| serde_json::from_value(serde_json::json!(m)).ok())
+                    .unwrap_or(Mode::Default),
+                agent: row.agent.clone(),
+                parent_session_id: None,
+                active_leaf_id: row.active_leaf_id.clone(),
+                driver: None,
+                head_seq: 0,
+                incognito: false,
+                created_at: rfc3339_ms(u64::try_from(row.created).unwrap_or(0)),
+                web_search: true,
+                code_execution: false,
+            };
+            self.lock().insert(row.id.clone(), info);
+            self.extra
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(row.id.clone(), Extra::default());
+            self.persist_with_times(&row.id, row.created, row.updated);
+            n += 1;
+        }
+        store.write(|tx| genie_store::kv::set(tx, BACKFILLED_KV, &serde_json::json!(true)))?;
+        if n > 0 {
+            tracing::info!(
+                recovered = n,
+                "listed chats saved before the session registry was persisted"
+            );
+        }
+        Ok(n)
+    }
+
+    /// Write `id`'s record through to the store (no-op without one). A failed write is
+    /// logged, never surfaced: the in-memory record stays correct for this run.
+    ///
+    /// Incognito sessions get a record too, only so that [`Self::attach_store`] finds and
+    /// deletes their rows on the next start: the journal and conversation store still
+    /// write their events and messages while they run.
+    fn persist(&self, id: &str) {
+        let now = i64::try_from(now_ms()).unwrap_or(i64::MAX);
+        self.persist_with_times(id, now, now);
+    }
+
+    fn persist_with_times(&self, id: &str, created: i64, updated: i64) {
+        let Some(store) = self.store.get() else {
+            return;
+        };
+        let Some(info) = self.get(id) else { return };
+        let x = self.extra(id);
+        let row = genie_store::sessions::MetaRow {
+            id: id.to_string(),
+            kind: store_kind(info.summary.kind),
+            project_id: info.summary.project_id.clone(),
+            parent_session_id: info.parent_session_id.clone(),
+            agent: info.agent.clone(),
+            title: info.summary.title.clone(),
+            model: Some(info.model.clone()).filter(|m| !m.is_empty()),
+            effort: info.effort.clone(),
+            mode: serde_json::to_value(info.mode)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from)),
+            pinned: info.summary.pinned,
+            archived: info.summary.archived,
+            created,
+            updated,
+            meta: serde_json::Value::Null,
+        };
+        let meta = Meta {
+            v: META_VERSION,
+            info,
+            workspace: x.workspace,
+            worktree_name: x.worktree_name,
+            headless: x.headless,
+        };
+        let row = match serde_json::to_value(&meta) {
+            Ok(meta) => genie_store::sessions::MetaRow { meta, ..row },
+            Err(e) => {
+                tracing::error!(session = %id, error = %e, "session record not serialisable");
+                return;
+            }
+        };
+        if let Err(e) = store.write(|tx| genie_store::sessions::upsert_meta(tx, &row)) {
+            tracing::error!(session = %id, error = %e, "session record not saved");
+        }
     }
 
     pub fn create(&self, id: &str, p: &CreateParams, parent: Option<String>) -> SessionInfo {
@@ -98,6 +323,7 @@ impl Registry {
             code_execution: p.code_execution.unwrap_or(false),
         };
         self.lock().insert(id.to_string(), info.clone());
+        self.persist(id);
         info
     }
 
@@ -116,6 +342,12 @@ impl Registry {
 
     /// Apply an update; returns the new record.
     pub fn update(&self, p: &UpdateParams) -> Option<SessionInfo> {
+        let info = self.update_in_memory(p)?;
+        self.persist(&p.session_id);
+        Some(info)
+    }
+
+    fn update_in_memory(&self, p: &UpdateParams) -> Option<SessionInfo> {
         let mut map = self.lock();
         let s = map.get_mut(&p.session_id)?;
         if let Some(t) = &p.title {
@@ -155,15 +387,26 @@ impl Registry {
     pub fn touch(&self, id: &str) {
         if let Some(s) = self.lock().get_mut(id) {
             s.summary.updated_at = rfc3339_ms(now_ms());
+        } else {
+            return;
         }
+        self.persist(id);
     }
 
+    /// Forget a session. With a store this is the real delete (04 §8): it cascades to
+    /// the session's messages, events and child sessions.
     pub fn remove(&self, id: &str) -> Option<SessionInfo> {
         self.extra
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(id);
-        self.lock().remove(id)
+        let out = self.lock().remove(id);
+        if let Some(store) = self.store.get()
+            && let Err(e) = store.write(|tx| genie_store::sessions::delete(tx, id).map(|_| ()))
+        {
+            tracing::error!(session = %id, error = %e, "session not deleted from the store");
+        }
+        out
     }
 
     pub fn extra(&self, id: &str) -> Extra {
@@ -184,7 +427,10 @@ impl Registry {
             .get_mut(id)
         {
             x.workspace = workspace;
+        } else {
+            return;
         }
+        self.persist(id);
     }
 
     /// The project folder clients group a session under (`summary.workspace_id`): the folder the
@@ -196,6 +442,7 @@ impl Registry {
             s.summary.workspace_id = Some(folder.display().to_string());
             s.summary.clone()
         };
+        self.persist(id);
         self.notify(ListedChange::Updated, summary);
     }
 
@@ -266,6 +513,71 @@ impl SettingsSource for Registry {
         if let Some(s) = self.lock().get_mut(session_id) {
             s.summary.title = Some(title.to_string());
             s.summary.updated_at = rfc3339_ms(now_ms());
+        } else {
+            return;
         }
+        self.persist(session_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store(dir: &std::path::Path) -> Arc<genie_store::Store> {
+        let opts = genie_store::StoreOptions::new(dir, "genie.db");
+        let keys = genie_store::MemoryKeyStore::new();
+        keys.set(genie_store::keys::DATA_KEY_ACCOUNT, &[3u8; 32])
+            .unwrap();
+        Arc::new(genie_store::Store::open_with_keystore(&opts, &keys).unwrap())
+    }
+
+    use genie_store::KeyStore as _;
+
+    /// Chats written before the registry was persisted (bare `session` rows with
+    /// messages) are listed again once, titled from their first prompt.
+    #[test]
+    fn old_chats_are_backfilled_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        s.write(|tx| {
+            genie_store::sessions::ensure(tx, "ses_old")?;
+            genie_store::sessions::ensure(tx, "ses_empty")?;
+            let m = genie_store::messages::Message::new("ses_old", None, "user");
+            genie_store::messages::insert(tx, &m)?;
+            genie_store::messages::insert_part(
+                tx,
+                &genie_store::messages::Part::text(
+                    &m.id,
+                    0,
+                    "\n  How do I rotate the Azure key?\nmore",
+                ),
+            )
+        })
+        .unwrap();
+
+        let r = Registry::default();
+        let rep = r.attach_store(s.clone()).unwrap();
+        assert_eq!(rep.recovered, 1, "only rows with messages");
+        let info = r.get("ses_old").unwrap();
+        assert_eq!(
+            info.summary.title.as_deref(),
+            Some("How do I rotate the Azure key?")
+        );
+        assert!(!r.exists("ses_empty"));
+
+        // Now a normal record: loaded, not recovered again.
+        let r2 = Registry::default();
+        let rep = r2.attach_store(s).unwrap();
+        assert_eq!((rep.loaded, rep.recovered), (1, 0));
+        assert!(r2.exists("ses_old"));
+    }
+
+    #[test]
+    fn titles_are_trimmed_to_one_short_line() {
+        assert_eq!(title_from("  \n hi \n there").as_deref(), Some("hi"));
+        let long = "x".repeat(80);
+        assert_eq!(title_from(&long).unwrap().chars().count(), 61);
+        assert_eq!(title_from("   "), None);
     }
 }

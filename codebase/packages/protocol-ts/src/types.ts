@@ -824,6 +824,8 @@ export interface InitializeResult {
   protocol: string;
   /** Version-skew path (01 §4.2): the daemon will drain and exit; re-run ensure. */
   restart_pending?: boolean | null;
+  /** Set when sessions are NOT being persisted. */
+  storage?: StorageProblem | null;
 }
 
 export type InputEvent = ({ action: string; button?: string | null; click_count?: number; modifiers?: number; type: "mouse"; x: number; y: number }) | ({ action: string; code: string; key: string; modifiers?: number; text?: string | null; type: "key" }) | { delta_x: number; delta_y: number; type: "wheel"; x: number; y: number } | { selection_end: number; selection_start: number; text: string; type: "ime" } | { text: string; type: "insert_text" };
@@ -1710,6 +1712,26 @@ export interface StepStarted {
   /** Provider route, e.g. `anthropic/default`. */
   route: string;
   step: number;
+}
+
+/**
+ * The daemon could not open its database, so nothing is being saved (04 §2). Clients
+ * must say so plainly and offer `storage.recover` / `storage.start_fresh`.
+ */
+export interface StorageProblem {
+  detail: string;
+  /**
+   * `key_missing` (the DB exists but its key is in no reachable key store) or
+   * `open_failed` (anything else; see `detail`).
+   */
+  reason: string;
+  /** A `recovery.bin` exists, so `storage.recover` with the recovery key can work. */
+  recovery_available?: boolean;
+}
+
+/** `storage.recover`: the recovery key shown when it was created (04 §2, SA-16). */
+export interface StorageRecoverParams {
+  recovery_key: string;
 }
 
 export interface StreamIdParams {

@@ -297,6 +297,100 @@ pub fn add_usage(
     Ok(())
 }
 
+/// A session's registry record (the `meta` column, migration 2) plus the plain columns
+/// mirrored from it so store queries (list, FTS titles, chat search) see them too.
+#[derive(Debug, Clone, Default)]
+pub struct MetaRow {
+    pub id: String,
+    pub kind: SessionKind,
+    /// Only kept when that project row exists (FK).
+    pub project_id: Option<String>,
+    /// Only kept when that session row exists (FK).
+    pub parent_session_id: Option<String>,
+    pub agent: Option<String>,
+    pub title: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub mode: Option<String>,
+    pub pinned: bool,
+    pub archived: bool,
+    pub created: i64,
+    pub updated: i64,
+    /// Opaque JSON owned by the daemon's registry.
+    pub meta: serde_json::Value,
+}
+
+/// Insert or update a session's registry record. Leaves `active_leaf_id`, usage and the
+/// event-log columns alone: the conversation and journal own those.
+pub fn upsert_meta(conn: &Connection, m: &MetaRow) -> Result<()> {
+    conn.execute(
+        "INSERT INTO session (id, kind, project_id, parent_session_id, agent, title, model,
+             effort, mode, pinned, archived, created, updated, meta)
+         VALUES (?1, ?2, (SELECT id FROM project WHERE id = ?3),
+             (SELECT id FROM session WHERE id = ?4), ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT (id) DO UPDATE SET
+             kind = excluded.kind, project_id = excluded.project_id,
+             parent_session_id = excluded.parent_session_id, agent = excluded.agent,
+             title = excluded.title, model = excluded.model, effort = excluded.effort,
+             mode = excluded.mode, pinned = excluded.pinned, archived = excluded.archived,
+             updated = excluded.updated, meta = excluded.meta",
+        params![
+            m.id,
+            m.kind.as_str(),
+            m.project_id,
+            m.parent_session_id,
+            m.agent,
+            m.title,
+            m.model,
+            m.effort,
+            m.mode,
+            m.pinned,
+            m.archived,
+            m.created,
+            m.updated,
+            m.meta.to_string(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Every session that has a registry record: `(id, meta)`.
+pub fn all_meta(conn: &Connection) -> Result<Vec<(String, serde_json::Value)>> {
+    let mut st = conn.prepare("SELECT id, meta FROM session WHERE meta IS NOT NULL")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    rows.map(|r| {
+        let (id, text) = r?;
+        let v = serde_json::from_str(&text)
+            .map_err(|e| StoreError::Format(format!("session {id} meta: {e}")))?;
+        Ok((id, v))
+    })
+    .collect()
+}
+
+/// Rows written before the registry was persisted (no `meta`) that hold at least one
+/// message: `(session, first user text if any)`. Used once to bring old chats back.
+pub fn without_meta(conn: &Connection) -> Result<Vec<(Session, Option<String>)>> {
+    let mut st = conn.prepare(&format!(
+        "SELECT {COLS} FROM session s WHERE meta IS NULL AND parent_session_id IS NULL
+           AND EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id)
+         ORDER BY updated DESC"
+    ))?;
+    let rows = st.query_map([], from_row)?;
+    let sessions: Vec<Session> = rows.map(|r| finish(r?)).collect::<Result<_>>()?;
+    let mut first = conn.prepare(
+        "SELECT json_extract(p.body, '$.text') FROM message m JOIN part p ON p.message_id = m.id
+         WHERE m.session_id = ?1 AND m.role = 'user' AND p.kind = 'text'
+         ORDER BY m.created, p.ordinal LIMIT 1",
+    )?;
+    sessions
+        .into_iter()
+        .map(|s| {
+            let text: Option<String> = first.query_row([&s.id], |r| r.get(0)).optional()?.flatten();
+            Ok((s, text))
+        })
+        .collect()
+}
+
 /// A real delete (04 §8): cascades to messages, parts, wire records, events, inbox,
 /// asks, artifacts, browser actions and child sessions; triggers release blob refs and
 /// FTS rows. Returns whether the session existed.

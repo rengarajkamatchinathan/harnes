@@ -52,6 +52,18 @@ impl std::fmt::Debug for UnlockParams {
     }
 }
 
+/// `storage.recover`: the recovery key shown when it was created (04 §2, SA-16).
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StorageRecoverParams {
+    pub recovery_key: String,
+}
+
+impl std::fmt::Debug for StorageRecoverParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StorageRecoverParams { recovery_key: [redacted] }")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {

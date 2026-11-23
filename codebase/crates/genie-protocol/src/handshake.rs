@@ -66,6 +66,19 @@ pub struct LockedInfo {
     pub reason: String,
 }
 
+/// The daemon could not open its database, so nothing is being saved (04 §2). Clients
+/// must say so plainly and offer `storage.recover` / `storage.start_fresh`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StorageProblem {
+    /// `key_missing` (the DB exists but its key is in no reachable key store) or
+    /// `open_failed` (anything else; see `detail`).
+    pub reason: String,
+    pub detail: String,
+    /// A `recovery.bin` exists, so `storage.recover` with the recovery key can work.
+    #[serde(default)]
+    pub recovery_available: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InitializeResult {
     pub engine_version: String,
@@ -79,6 +92,9 @@ pub struct InitializeResult {
     pub restart_pending: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<LockedInfo>,
+    /// Set when sessions are NOT being persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<StorageProblem>,
 }
 
 /// `Debug` never prints the token (01 §7 rule 2).

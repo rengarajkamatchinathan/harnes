@@ -271,6 +271,10 @@ impl DaemonState {
             capabilities: DaemonCapabilities { features: vec![] },
             restart_pending: restart_pending.then_some(true),
             locked: self.services.as_ref().and_then(|s| s.locked_info()),
+            storage: self
+                .services
+                .as_ref()
+                .and_then(|s| s.storage_problem.clone()),
         }
     }
 
@@ -868,6 +872,8 @@ fn dispatch(state: &Arc<DaemonState>, conn: &Arc<Conn>, r: Request) -> Option<Re
         m::PING => empty(),
         m::DAEMON_STATUS => to_result(&state.status()),
         m::DAEMON_RESTART => daemon_restart(state, &r),
+        n if n == m::StorageRecover::NAME => storage_recover(state, &r),
+        n if n == m::StorageStartFresh::NAME => storage_start_fresh(state),
         m::INITIALIZE => Err(RpcError::invalid_request("already initialized")),
 
         n if n == m::SessionSubscribe::NAME => match params::<m::SessionSubscribe>(&r) {
@@ -1047,6 +1053,64 @@ fn daemon_restart(state: &DaemonState, r: &Request) -> Result<Value, RpcError> {
         state.request_shutdown(ShutdownReason::Restart);
         empty()
     }
+}
+
+/// The store failed with a missing key; `storage.*` only acts then (04 §2).
+fn key_missing(state: &DaemonState) -> Result<Arc<crate::secrets::Secrets>, RpcError> {
+    let svc = state.services.as_ref();
+    match svc.and_then(|s| s.storage_problem.as_ref()) {
+        Some(p) if p.reason == "key_missing" => {}
+        Some(_) => {
+            return Err(RpcError::invalid_request(
+                "the database failed to open for another reason; see the daemon log",
+            ));
+        }
+        None => return Err(RpcError::invalid_request("the database is open")),
+    }
+    svc.and_then(|s| s.secrets.clone())
+        .ok_or_else(|| RpcError::internal("no secrets backend"))
+}
+
+/// `storage.recover`: unwrap the data key from `recovery.bin` with the recovery key, put
+/// it in the key store, and restart so the DB opens.
+fn storage_recover(state: &DaemonState, r: &Request) -> Result<Value, RpcError> {
+    let p = params::<m::StorageRecover>(r)?;
+    let secrets = key_missing(state)?;
+    let rk = genie_store::keys::RecoveryKey::parse(&p.recovery_key)
+        .map_err(|_| RpcError::invalid_params("that is not a valid recovery key"))?;
+    genie_store::keys::restore_data_key(
+        &state.cfg.endpoint.data_dir,
+        &rk,
+        &crate::SecretsKeyStore(secrets.backend()),
+    )
+    .map_err(|e| {
+        tracing::warn!(error = %e, "recovery key did not restore the data key");
+        RpcError::invalid_params("the recovery key does not match this data")
+    })?;
+    tracing::info!("data key restored from the recovery key; restarting");
+    state.request_shutdown(ShutdownReason::Restart);
+    empty()
+}
+
+/// `storage.start_fresh`: move the unreadable DB, blobs and recovery file aside as
+/// `<name>.unreadable-<date>` (never deleted) and restart with a new, empty DB.
+fn storage_start_fresh(state: &DaemonState) -> Result<Value, RpcError> {
+    key_missing(state)?;
+    let ep = &state.cfg.endpoint;
+    let date = genie_protocol::rfc3339_ms(genie_core::bus::now_ms());
+    let date = date.get(..10).unwrap_or("unknown").to_string();
+    let moved =
+        genie_store::keys::quarantine_unreadable(&ep.data_dir, &crate::opts_name(ep), &date)
+            .map_err(|e| {
+                tracing::error!(error = %e, "could not set the old data aside");
+                RpcError::internal(format!("could not set the old data aside: {e}"))
+            })?;
+    tracing::warn!(
+        ?moved,
+        "old data set aside on the user's request; restarting with a new DB"
+    );
+    state.request_shutdown(ShutdownReason::Restart);
+    empty()
 }
 
 fn handle(state: &DaemonState, session: &str) -> Result<SessionHandle, RpcError> {
