@@ -126,9 +126,18 @@ export function SessionUsage({ store, code }: { store: SessionStore; code: boole
   ];
   return (
     <span className="sessusage" ref={boxRef}>
-      <button type="button" className="textbtn sessusage__btn" aria-expanded={open} aria-haspopup="dialog" aria-label={code ? t("usage.thisSession") : t("usage.thisChat")} onClick={() => setOpen((o) => !o)}>
-        {ratio != null && <Ring value={ratio} size={14} warn={ratio > 0.8} label={`${Math.round(ratio * 100)}%`} />}
-        {total > 0 && <span>{t("chat.usageTokens", { tokens: fmtTokens(total) })}</span>}
+      {/* Only the context ring shows; the token total is in the tooltip and the card. Without a
+          known context window the ring stays empty rather than turning into text. */}
+      <button
+        type="button"
+        className="textbtn sessusage__btn sessusage__btn--ring"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label={code ? t("usage.thisSession") : t("usage.thisChat")}
+        title={total > 0 ? t("chat.usageTokens", { tokens: fmtTokens(total) }) : undefined}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Ring value={ratio ?? 0} size={16} warn={ratio != null && ratio > 0.8} label={ratio != null ? `${Math.round(ratio * 100)}%` : t("chat.usageTokens", { tokens: fmtTokens(total) })} />
       </button>
       {open && (
         <span className="usagepop usagepop--right" role="dialog" aria-label={code ? t("usage.thisSession") : t("usage.thisChat")}>

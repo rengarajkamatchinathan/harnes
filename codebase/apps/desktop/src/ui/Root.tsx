@@ -7,7 +7,8 @@ import { preloadOnIdle } from "../markdown/markdown";
 import { useApp } from "./context";
 import { Sidebar } from "./Sidebar";
 import { ChatView } from "./chat/ChatView";
-import { PANEL_ICON, RightPanel, effectiveTab } from "./panel/RightPanel";
+import { PANEL_ICON, RightPanel, activeTab, dockState, togglePanelTab } from "./panel/RightPanel";
+import { DetailsPane } from "./panel/DetailsPane";
 import { SettingsPage } from "./settings/SettingsPage";
 import { FirstRun } from "./FirstRun";
 import { ProjectPage, ProjectsPage } from "./ProjectPage";
@@ -121,9 +122,10 @@ function Shell() {
       app.pickHandoffFile = null;
     };
   }, [app, handoffImport.open]);
-  const panelShown = ui.view !== "project" && ui.view !== "handoff" && ui.panelOpen && !ui.panelMinimized;
+  const { panelShown, detailsShown } = dockState(ui);
   const panelPill = ui.view !== "project" && ui.view !== "handoff" && ui.panelOpen && ui.panelMinimized;
-  const { narrow, overlay, panelWidth } = layoutFor(width, { sidebarWidth: ui.sidebarWidth, panelOpen: panelShown, panelWidth: ui.panelWidth });
+  const pillTab = activeTab(ui);
+  const { narrow, overlay, panelWidth, panelMax, sidebarMax } = layoutFor(width, { sidebarWidth: ui.sidebarWidth, panelOpen: panelShown, panelWidth: ui.panelWidth, detailsOpen: detailsShown });
   const [drawerOpen, setDrawer] = useState(false);
   // The drawer is transient: it closes when the layout widens or the user goes somewhere.
   useEffect(() => {
@@ -136,7 +138,7 @@ function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
-  // Cmd/Ctrl+Shift+B shows or hides the Browser tab (as in Claude Code Desktop, t47).
+  // Panel-tab shortcuts: Cmd/Ctrl+Shift+B shows or hides the Browser tab (t47); Code adds Changes, Files, Terminal, Side chat (⌘;).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Cmd/Ctrl+Shift+S: Element select in the Browser tab (ticket 47).
@@ -145,16 +147,20 @@ function Shell() {
         app.setSelectingElement(!app.selectingElement);
         return;
       }
-      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "b") return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      const code = app.ui.mode === "code";
+      // Panel tabs: ⇧⌘B Browser, and in Code ⇧⌘D Changes, ⇧⌘F Files, ⌘J Terminal.
+      const tab = e.shiftKey ? (k === "b" ? "browser" : code && k === "d" ? "changes" : code && k === "f" ? "files" : null) : code && k === "j" ? "terminal" : code && k === ";" ? "sidechat" : null;
+      if (!tab) return;
       e.preventDefault();
-      const shown = app.ui.panelOpen && app.ui.panelTab === "browser";
-      app.setUi(shown ? { panelOpen: false } : { panelOpen: true, panelTab: "browser" });
+      togglePanelTab(app, tab);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [app]);
   const sidebarHidden = overlay ? !drawerOpen : ui.sidebarCollapsed;
-  const shell = useMemo<ShellState>(() => ({ width, overlay, narrow, drawerOpen, setDrawer, sidebarHidden }), [width, overlay, narrow, drawerOpen, sidebarHidden]);
+  const shell = useMemo<ShellState>(() => ({ width, overlay, narrow, drawerOpen, setDrawer, sidebarHidden, panelWidth, panelMax, sidebarMax }), [width, overlay, narrow, drawerOpen, sidebarHidden, panelWidth, panelMax, sidebarMax]);
   const cls = ["shell", overlay ? "shell--overlay" : ui.sidebarCollapsed ? "shell--collapsed" : "", overlay && drawerOpen ? "shell--drawer" : "", narrow ? "shell--narrow" : ""].filter(Boolean).join(" ");
   return (
     <ShellContext.Provider value={shell}>
@@ -201,11 +207,16 @@ function Shell() {
           <ChatView key={ui.activeSession ?? "new"} id={ui.activeSession} />
         )}
       </main>
-      {panelShown && <RightPanel />}
+      {(panelShown || detailsShown) && (
+        <div className="dock">
+          {panelShown && <RightPanel />}
+          {detailsShown && <DetailsPane />}
+        </div>
+      )}
       {panelPill && (
         <button className="panel-pill" onClick={() => app.setUi({ panelMinimized: false })} title={t("panel.restore")}>
-          <Icon name={PANEL_ICON[effectiveTab(ui.mode, ui.panelTab)]} size={14} />
-          <span>{t(`panel.${effectiveTab(ui.mode, ui.panelTab)}` as Parameters<typeof t>[0])}</span>
+          <Icon name={pillTab ? PANEL_ICON[pillTab] : "panel"} size={14} />
+          <span>{pillTab ? t(`panel.${pillTab}` as Parameters<typeof t>[0]) : t("panel.show")}</span>
           <Icon name="chevronLeft" size={12} />
         </button>
       )}

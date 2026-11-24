@@ -405,8 +405,15 @@ export interface MenuItem {
   danger?: boolean;
   disabled?: boolean;
   title?: string;
-  /** Keyboard shortcut shown at the right edge (display only). */
+  /**
+   * Keyboard shortcut shown at the right edge. A single digit (1–9) also works while the menu
+   * is open: pressing it picks this item. The check replaces it on the current choice.
+   */
   shortcut?: string;
+  /** Current value shown muted at the right edge (e.g. "High" on an "Effort ›" row). */
+  value?: ReactNode;
+  /** Opens a nested menu instead of acting (hover, click or → opens it; ← closes it). */
+  submenu?: MenuItem[];
   /** Opens outside the app: shows an arrow at the right edge. */
   external?: boolean;
   /** Draws a separator above this item (without a group label). */
@@ -416,7 +423,8 @@ export interface MenuItem {
    * trigger when the menu closes, or it would blur (and so cancel) what the action just opened.
    */
   keepFocus?: boolean;
-  onSelect: () => void;
+  /** Not called for an item with a `submenu`. */
+  onSelect?: () => void;
 }
 
 /**
@@ -451,6 +459,78 @@ export function Menu({
   const open = openProp ?? own;
   const setOpen = (v: boolean) => (onOpenChange ? onOpenChange(v) : setOwn(v));
   const keepFocus = useRef(false);
+  const pick = (it: MenuItem) => {
+    keepFocus.current = !!it.keepFocus;
+    it.onSelect?.();
+  };
+  // Digit shortcuts: "2" picks the item labelled 2 in the list that has focus.
+  const digitKeys = (list: MenuItem[]) => (e: ReactKeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || !/^[1-9]$/.test(e.key)) return;
+    const it = list.find((x) => x.shortcut === e.key && !x.disabled && !x.submenu);
+    if (!it) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pick(it);
+    setOpen(false);
+  };
+  const trailing = (it: MenuItem) => (
+    <>
+      {it.value != null && <span className="g-menu__value">{it.value}</span>}
+      {it.shortcut && !it.checked && <span className="g-menu__shortcut">{it.shortcut}</span>}
+      {it.external && (
+        <span className="g-menu__external" aria-hidden>
+          <Icon name="external" size={14} />
+        </span>
+      )}
+      {(it.checked || it.icon === "check") && (
+        <span className="g-menu__check" aria-label="Selected">
+          <Icon name="check" />
+        </span>
+      )}
+    </>
+  );
+  const body = (it: MenuItem) => (
+    <>
+      {it.icon && it.icon !== "check" && <Icon name={it.icon} />}
+      <span className="g-menu__text">
+        <span className="g-menu__label-text">{it.label}</span>
+        {it.hint && <span className="g-menu__hint">{it.hint}</span>}
+      </span>
+    </>
+  );
+  const renderItems = (list: MenuItem[]) =>
+    list.map((it, i) => (
+      <Fragment key={it.id}>
+        {it.group && it.group !== list[i - 1]?.group && (
+          <>
+            {i > 0 && <RMenu.Separator className="g-menu__sep" />}
+            <RMenu.Label className="g-menu__label">{it.group}</RMenu.Label>
+          </>
+        )}
+        {it.separatorBefore && i > 0 && <RMenu.Separator className="g-menu__sep" />}
+        {it.submenu ? (
+          <RMenu.Sub>
+            <RMenu.SubTrigger className="g-menu__item g-menu__item--sub" disabled={it.disabled} title={it.title}>
+              {body(it)}
+              {trailing(it)}
+              <span className="g-menu__chev" aria-hidden>
+                <Icon name="chevronRight" size={14} />
+              </span>
+            </RMenu.SubTrigger>
+            <RMenu.Portal>
+              <RMenu.SubContent className={cx("g-menu__list g-menu__list--sub", className)} sideOffset={6} alignOffset={-5} collisionPadding={8} loop onKeyDown={digitKeys(it.submenu)}>
+                {renderItems(it.submenu)}
+              </RMenu.SubContent>
+            </RMenu.Portal>
+          </RMenu.Sub>
+        ) : (
+          <RMenu.Item className={cx("g-menu__item", it.danger && "g-menu__item--danger")} disabled={it.disabled} title={it.title} onSelect={() => pick(it)}>
+            {body(it)}
+            {trailing(it)}
+          </RMenu.Item>
+        )}
+      </Fragment>
+    ));
   return (
     <div className="g-menu">
       <RMenu.Root open={open} onOpenChange={setOpen} modal={false}>
@@ -468,37 +548,10 @@ export function Menu({
             collisionPadding={8}
             loop
             aria-label={label}
+            onKeyDown={digitKeys(items)}
           >
             {header && <div className="g-menu__header">{header}</div>}
-            {items.map((it, i) => (
-              <Fragment key={it.id}>
-                {it.group && it.group !== items[i - 1]?.group && (
-                  <>
-                    {i > 0 && <RMenu.Separator className="g-menu__sep" />}
-                    <RMenu.Label className="g-menu__label">{it.group}</RMenu.Label>
-                  </>
-                )}
-                {it.separatorBefore && i > 0 && <RMenu.Separator className="g-menu__sep" />}
-                <RMenu.Item className={cx("g-menu__item", it.danger && "g-menu__item--danger")} disabled={it.disabled} title={it.title} onSelect={() => ((keepFocus.current = !!it.keepFocus), it.onSelect())}>
-                  {it.icon && it.icon !== "check" && <Icon name={it.icon} />}
-                  <span className="g-menu__text">
-                    <span className="g-menu__label-text">{it.label}</span>
-                    {it.hint && <span className="g-menu__hint">{it.hint}</span>}
-                  </span>
-                  {it.shortcut && <span className="g-menu__shortcut">{it.shortcut}</span>}
-                  {it.external && (
-                    <span className="g-menu__external" aria-hidden>
-                      <Icon name="external" size={14} />
-                    </span>
-                  )}
-                  {(it.checked || it.icon === "check") && (
-                    <span className="g-menu__check" aria-label="Selected">
-                      <Icon name="check" />
-                    </span>
-                  )}
-                </RMenu.Item>
-              </Fragment>
-            ))}
+            {renderItems(items)}
           </RMenu.Content>
         </RMenu.Portal>
       </RMenu.Root>

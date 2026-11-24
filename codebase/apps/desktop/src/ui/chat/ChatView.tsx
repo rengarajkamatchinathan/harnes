@@ -17,8 +17,8 @@ import { useEmitter } from "../../state/emitter";
 import { CodeProjectPicker, folderName, NewProject, TitlebarControls } from "../Sidebar";
 import { GenieMark } from "../GenieMark";
 import { useShell } from "../shell";
-import { effectiveTab, PANEL_ICON, panelTabs } from "../panel/RightPanel";
-import { sameWorkspace, type PanelTab } from "../../state/app";
+import { DockToggles, dockState } from "../panel/RightPanel";
+import { sameWorkspace } from "../../state/app";
 import { Transcript } from "./Transcript";
 import { RewindDialog, WorktreeFooter } from "../code/CodeExtras";
 import { NewCodeSession } from "../code/NewCodeSession";
@@ -41,45 +41,20 @@ export function greeting(name: string, now: Date = new Date()): string {
 }
 
 /** Top strip of the main column: drag region, title, right-side panel buttons. */
-function Header({ children, right, panels = true, hasArtifacts = false }: { children?: ReactNode; right?: ReactNode; panels?: boolean; hasArtifacts?: boolean }) {
+function Header({ children, right, panels = true }: { children?: ReactNode; right?: ReactNode; panels?: boolean }) {
+  const app = useApp();
   const shell = useShell();
+  const { panelShown, detailsShown } = dockState(app.ui);
   return (
     <header className={`chat__header ${shell.sidebarHidden ? "chat__header--collapsed" : ""}`} data-tauri-drag-region>
       {shell.sidebarHidden && <TitlebarControls />}
       {children}
       <span className="grow" data-tauri-drag-region />
       {right}
-      {panels && <PanelButtons hasArtifacts={hasArtifacts} />}
+      {/* The toggles sit in the rightmost column: here only while the details column is closed;
+          the panel toggle moves to the panel's head while the panel is open. */}
+      {panels && !detailsShown && <DockToggles panel={!panelShown} />}
     </header>
-  );
-}
-
-
-/** One icon per right-panel tab; the active one is pressed (D54). */
-function PanelButtons({ hasArtifacts }: { hasArtifacts: boolean }) {
-  const app = useApp();
-  const { ui } = app;
-  // The artifact button only appears once the chat has made one; otherwise it opens an empty panel.
-  const order: PanelTab[] = ui.mode === "code" ? ["terminal", "browser", "files", "changes"] : panelTabs(ui.mode).filter((tab) => tab !== "artifact" || hasArtifacts);
-  const current = effectiveTab(ui.mode, ui.panelTab);
-  return (
-    <div className="header-icons">
-      {order.map((tab) => {
-        const on = ui.panelOpen && current === tab;
-        return (
-          <IconButton
-            key={tab}
-            icon={PANEL_ICON[tab]}
-            size="sm"
-            className={on ? "is-on" : ""}
-            aria-pressed={on}
-            label={t(`panel.${tab}` as Parameters<typeof t>[0])}
-            shortcut={tab === "browser" ? (/Mac/i.test(navigator.platform) ? "⌘⇧B" : "Ctrl+Shift+B") : undefined}
-            onClick={() => app.setUi(on ? { panelOpen: false } : { panelOpen: true, panelTab: tab })}
-          />
-        );
-      })}
-    </div>
   );
 }
 
@@ -184,7 +159,6 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
   const app = useApp();
   // Shared with the sidebar's project switcher.
   const path = app.ui.codeWorkspace;
-  const setPath = (w: string) => app.setUi({ codeWorkspace: w });
   const [dialog, setDialog] = useState(false);
   const pick = () =>
     void app.platform.pickFolder(t("code.folder")).then(
@@ -194,11 +168,9 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
       },
       () => {},
     );
-  const choices = app.codeWorkspaces.slice(0, 5);
-  if (path && !choices.some((w) => sameWorkspace(w, path))) choices.unshift(path);
   return (
     <div className="chat">
-      <Header panels={false}>
+      <Header>
         <span className="chat__title chat__title--muted">{t("sidebar.newSession")}</span>
       </Header>
       <div className="hero hero--code">
@@ -206,29 +178,27 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
           <span className="hero__mark folder-card__mark" aria-hidden>
             <GenieMark size={30} />
           </span>
+          <div className="folder-card__box folder-card__box--picker">
+            <CodeProjectPicker app={app} variant="card" />
+          </div>
           <div className="folder-card__box">
-            <button className="folder-card__row" onClick={() => setPath("")}>
-              <Icon name="chat" />
-              <span className="sidebar__title">{t("code.noProject")}</span>
-              {!path && <Icon name="check" />}
-            </button>
-            {choices.map((w) => (
-              <button key={w} className="folder-card__row" title={w} onClick={() => setPath(w)}>
-                <Icon name="repo" />
-                <span className="sidebar__title">{folderName(w)}</span>
-                {!!path && sameWorkspace(w, path) && <Icon name="check" />}
+            {noProvider && (
+              <button className="folder-card__row" onClick={() => app.openDeepLink("genie://settings/providers")}>
+                <Icon name="plug" />
+                <span className="folder-card__label">{t("code.suggest.provider")}</span>
+                <span className="folder-card__hint">{t("code.suggest.providerHint")}</span>
               </button>
-            ))}
-            <button className="folder-card__row folder-card__row--muted" onClick={pick}>
-              <Icon name="plus" />
-              <span className="sidebar__title">{t("code.openFolder")}</span>
+            )}
+            <button className="folder-card__row" onClick={pick}>
+              <Icon name="folder" />
+              <span className="folder-card__label">{t("code.suggest.folder")}</span>
+              <span className="folder-card__hint">{t("code.suggest.folderHint")}</span>
+            </button>
+            <button className="folder-card__row" onClick={() => app.pickHandoffFile?.()}>
+              <Icon name="terminal" />
+              <span className="folder-card__label">{t("code.suggest.handoff")}</span>
             </button>
           </div>
-          {noProvider && (
-            <Button variant="primary" onClick={() => app.openDeepLink("genie://settings/providers")}>
-              {t("chat.addProvider")}
-            </Button>
-          )}
         </div>
       </div>
       <div className="chat__bottom">
@@ -245,18 +215,39 @@ function EmptyCode({ noProvider }: { noProvider: boolean }) {
               }
             }
             const id = await app.createSession({ kind: "code", workspacePath: path || undefined });
+            if (app.ui.codeMode !== "default") await app.client.session.update({ session_id: id, mode: app.ui.codeMode }).catch(() => {});
             const s = app.session(id);
             await waitLoaded(s);
             return s;
           }}
         />
         <div className="composer-foot">
-          <span className="composer-foot__item">
-            <Icon name="computer" size={14} /> {t("code.thisComputer")}
-          </span>
+          <Menu
+            label={t("code.environment")}
+            placement="up"
+            items={[{ id: "local", label: t("code.thisComputer"), icon: "computer", checked: true, onSelect: () => {} }]}
+            trigger={(p) => (
+              <button className="textbtn composer-foot__item" {...p}>
+                <Icon name="computer" size={14} />
+                <span className="composer-foot__label">{t("code.thisComputer")}</span>
+                <Icon name="chevronDown" size={12} />
+              </button>
+            )}
+          />
           <CodeProjectPicker app={app} variant="inline" />
           <span className="grow" />
           <ModelPicker store={null} />
+          <Menu
+            label={t("code.mode")}
+            placement="up"
+            align="right"
+            items={MODES.map((md) => ({ id: md, label: t(`code.mode.${md}` as Parameters<typeof t>[0]), checked: app.ui.codeMode === md, onSelect: () => app.setUi({ codeMode: md }) }))}
+            trigger={(p) => (
+              <button className="textbtn" aria-label={t("code.mode")} {...p}>
+                {t(`code.mode.${app.ui.codeMode}` as Parameters<typeof t>[0])}
+              </button>
+            )}
+          />
         </div>
       </div>
       {dialog && <NewCodeSession initialPath={path} onClose={() => setDialog(false)} />}
@@ -328,7 +319,6 @@ function SessionView({ id }: { id: string }) {
   return (
     <div className="chat">
       <Header
-        hasArtifacts={m.artifacts.length > 0}
         right={
           statusText && (
             <span className="row muted header-status" role="status">
@@ -337,11 +327,7 @@ function SessionView({ id }: { id: string }) {
           )
         }
       >
-        {code ? (
-          <span className="chat__title" title={info?.workspace_id ?? ""}>
-            {info?.title || folderName(info?.workspace_id ?? "") || t("code.repo")}
-          </span>
-        ) : (
+        {
           <Menu
             label={t("chat.options")}
             items={[
@@ -350,13 +336,13 @@ function SessionView({ id }: { id: string }) {
               { id: "json", label: t("row.exportJson"), icon: "download", onSelect: () => void exportAs("json") },
             ]}
             trigger={(p) => (
-              <button className="titlebtn" {...p}>
-                <h1 className="chat__title">{info?.title || firstPrompt(m.messages) || t("sidebar.untitled")}</h1>
+              <button className="titlebtn" title={code ? (info?.workspace_id ?? undefined) : undefined} {...p}>
+                <h1 className="chat__title">{info?.title || firstPrompt(m.messages) || (code ? folderName(info?.workspace_id ?? "") || t("code.repo") : t("sidebar.untitled"))}</h1>
                 <Icon name="chevronDown" size={14} />
               </button>
             )}
           />
-        )}
+        }
       </Header>
 
       <div className="chat__banners">
@@ -427,7 +413,7 @@ function SessionView({ id }: { id: string }) {
       ) : store.loading && !m.messages.length ? (
         <div className="chat__empty muted">{t("common.loading")}</div>
       ) : (
-        <Transcript store={store} compact={code} onRewind={code ? setRewind : undefined} />
+        <Transcript store={store} compact={code} onRewind={code ? setRewind : undefined} lead={code ? <SessionLead workspace={info?.workspace_id ?? null} onError={fail} /> : undefined} />
       )}
 
       <div className="chat__bottom">
@@ -459,20 +445,7 @@ function SessionView({ id }: { id: string }) {
         <ContextBanner store={store} readOnly={!!elsewhere || m.leaseLost} />
         <Composer store={store} readOnly={!!elsewhere || m.leaseLost} placeholder={code ? t("code.placeholder") : t("composer.placeholderReply")} />
         <div className="composer-foot">
-          {code ? (
-            <>
-              <span className="composer-foot__item">
-                <Icon name="computer" size={14} /> {t("code.thisComputer")}
-              </span>
-              {folderName(info?.workspace_id ?? "") && (
-                <span className="composer-foot__item" title={info?.workspace_id ?? ""}>
-                  <Icon name="repo" size={14} /> {folderName(info?.workspace_id ?? "")}
-                </span>
-              )}
-            </>
-          ) : (
-            <span className="composer-foot__item composer-foot__note">{t("chat.disclaimer")}</span>
-          )}
+          {!code && <span className="composer-foot__item composer-foot__note">{t("chat.disclaimer")}</span>}
           <span className="grow" />
           {!code && !elsewhere && !m.leaseLost && <CompareToggle store={store} />}
           <ModelPicker store={store} />
@@ -494,6 +467,38 @@ function SessionView({ id }: { id: string }) {
         {code && info?.workspace_id && <WorktreeFooter sessionId={id} />}
       </div>
       {rewind && <RewindDialog sessionId={id} message={rewind} onClose={() => setRewind(null)} onDone={() => void store.reload()} />}
+    </div>
+  );
+}
+
+/**
+ * The line above a Code session's first message ("Started on this computer · AIO ⌄"), like the
+ * reference: where the session runs, in place of the composer-footer pickers once it has begun.
+ * The folder opens a small menu (show in Finder, copy path).
+ */
+function SessionLead({ workspace, onError }: { workspace: string | null; onError: (e: unknown) => void }) {
+  const app = useApp();
+  const name = workspace ? folderName(workspace) : "";
+  return (
+    <div className="session-lead">
+      <span>{t("code.startedOn")}</span>
+      {name && workspace && (
+        <>
+          <span aria-hidden>·</span>
+          <Menu
+            label={t("code.folder")}
+            items={[
+              { id: "reveal", label: /Mac/i.test(navigator.platform) ? t("code.revealFolder") : t("code.revealFolderOther"), icon: "folder", onSelect: () => void app.platform.openPath(workspace).catch(onError) },
+              { id: "copy", label: t("code.copyPath"), icon: "copy", onSelect: () => void navigator.clipboard?.writeText(workspace) },
+            ]}
+            trigger={(p) => (
+              <button className="session-lead__folder" title={workspace} {...p}>
+                {name}
+              </button>
+            )}
+          />
+        </>
+      )}
     </div>
   );
 }

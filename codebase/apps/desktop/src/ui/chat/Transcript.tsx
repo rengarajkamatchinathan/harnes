@@ -1,6 +1,6 @@
 // The virtualised transcript (05 §2.2, §7): only visible messages are mounted; rows are
 // memoised on `rev`; the view sticks to the bottom while streaming unless the user scrolls.
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Citation, Part } from "@genie/protocol";
 import { Badge, Button, Icon, IconButton, Textarea } from "@genie/ui";
@@ -35,11 +35,20 @@ function LastReplyQuestions({ msg, store }: { msg: MessageView; store: SessionSt
   return questions ? <QuestionStepper key={msg.id} messageId={msg.id} questions={questions} store={store} /> : null;
 }
 
-export function Transcript({ store, compact, onRewind }: { store: SessionStore; compact?: boolean; onRewind?: (m: MessageView) => void }) {
+/** How far above the end (px) the view must be before "Scroll to bottom" shows. */
+const JUMP_GAP = 120;
+
+export function Transcript({ store, compact, onRewind, lead }: { store: SessionStore; compact?: boolean; onRewind?: (m: MessageView) => void; /** A line above the first message (scrolls with it). */ lead?: ReactNode }) {
   const model = store.model;
   const parentRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const [atBottom, setAtBottom] = useState(true);
+  // The jump button follows where the view really is (far enough above the end), not the
+  // follow flag: a stray upward wheel tick at the bottom, or on a transcript too short to
+  // scroll, used to leave it showing although nothing was hidden below.
+  const [away, setAway] = useState(false);
+  const syncAway = (el: HTMLElement) => setAway(el.scrollHeight - el.scrollTop - el.clientHeight > JUMP_GAP);
+  // True while a "scroll to bottom" animation runs, so its own scroll events don't unstick.
+  const jumping = useRef(false);
   const busy = store.busy;
   const code = model.info?.kind === "code";
   const items = useMemo(() => buildRows(model.messages), [model.messages, model.rev]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -60,13 +69,18 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
     if (!el) return;
     const h = el.scrollHeight;
     if (stick.current && h !== lastHeight.current) el.scrollTop = h;
+    // Nothing to scroll: there is no "above", so keep following.
+    if (h <= el.clientHeight + 1) stick.current = true;
     lastHeight.current = h;
+    syncAway(el);
   });
-  // Any upward intent (wheel, touchpad, keys) stops following at once, however small the step.
+  // Any upward intent (wheel, touchpad, keys) stops following at once, however small the step,
+  // as long as there is somewhere to scroll to.
   const unstick = () => {
-    if (!stick.current) return;
+    jumping.current = false;
+    const el = parentRef.current;
+    if (!stick.current || !el || el.scrollHeight <= el.clientHeight + 1) return;
     stick.current = false;
-    setAtBottom(false);
   };
   useEffect(() => {
     if (items.length) virt.scrollToIndex(items.length - 1, { align: "end" });
@@ -104,7 +118,7 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
         if (i < 0) return;
         const key = rows[i].key;
         stick.current = false;
-        setAtBottom(false);
+        jumping.current = false;
         virt.scrollToIndex(i, { align: "start" });
         setFlash(key);
         window.setTimeout(() => setFlash((f) => (f === key ? null : f)), 1600);
@@ -117,7 +131,8 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
     const el = parentRef.current;
     if (!el) return;
     stick.current = true;
-    setAtBottom(true);
+    jumping.current = true;
+    setAway(false);
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
@@ -139,11 +154,12 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
         lastTop.current = el.scrollTop;
         // Moving away from the bottom (scrollbar drag, touch) unsticks; scrolling down to the
         // very bottom re-sticks. Never re-stick on an upward move, however close to the end.
-        if (stick.current && gap > 48) unstick();
-        else if (!stick.current && down && gap < 4) {
-          stick.current = true;
-          setAtBottom(true);
-        }
+        // The jump animation's own scroll events are neither.
+        if (jumping.current) {
+          if (gap < 4) jumping.current = false;
+        } else if (stick.current && gap > 48) unstick();
+        else if (!stick.current && down && gap < 4) stick.current = true;
+        syncAway(el);
       }}
     >
       <div style={{ height: virt.getTotalSize(), position: "relative" }}>
@@ -157,6 +173,7 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
               className={`transcript__item${isNew(row.key) ? " is-new" : ""}${vi.index === lastAssistant && !busy ? " is-last" : ""}${flash === row.key ? " is-flash" : ""}`}
               style={{ transform: `translateY(${vi.start}px)` }}
             >
+              {vi.index === 0 && lead}
               {row.kind === "msg" ? (
                 <>
                   <MessageRow msg={row.msg} rev={row.msg.rev} store={store} model={model} tools={model.tools} busy={busy} compact={!!compact} onRewind={onRewind} turnUsage={row.msg.turnId ? model.turnUsage.get(row.msg.turnId) : undefined} />
@@ -174,7 +191,7 @@ export function Transcript({ store, compact, onRewind }: { store: SessionStore; 
       </div>
       <TurnIndicator store={store} />
     </div>
-    {!atBottom && (
+    {away && (
       <IconButton icon="arrowDown" label={t("chat.scrollToBottom")} variant="secondary" className="transcript__jump" onClick={jumpToBottom} />
     )}
     </div>
@@ -684,10 +701,15 @@ export function turnLabel(m: SessionModel): string {
 type Row = { key: string; kind: "msg"; msg: MessageView } | { key: string; kind: "tools"; parts: PartView[] };
 type Chunk = { kind: "part"; part: PartView } | { kind: "tools"; key: string; parts: PartView[] };
 
-/** Is this part something the transcript draws? Tool results render inside their call. */
+/**
+ * Is this part something the transcript draws? Tool results render inside their call, and
+ * reasoning only while it streams or when there is text to read: withheld ("redacted") or
+ * empty thinking draws nothing, so the tool steps around it fold into one activity line.
+ */
 function visiblePart(p: PartView): boolean {
   if (p.kind === "text") return p.streaming || p.text.trim().length > 0;
-  return p.kind === "reasoning" || p.kind === "tool_call" || p.kind === "media" || p.kind === "compaction";
+  if (p.kind === "reasoning") return p.streaming || (!(p.final?.type === "reasoning" && p.final.redacted) && p.text.trim().length > 0);
+  return p.kind === "tool_call" || p.kind === "media" || p.kind === "compaction";
 }
 
 /** A plain tool call that can fold into a group (memory chips and artifact cards stand alone). */

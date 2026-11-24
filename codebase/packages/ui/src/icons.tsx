@@ -2,6 +2,8 @@
 // Call sites use the stable Genie names below, so swapping a glyph is a one-line change here.
 
 import {
+  GitMerge,
+  GitPullRequest,
   ArrowDown,
   ArrowUp,
   BarChart3,
@@ -68,6 +70,8 @@ import {
   X,
   Laptop,
   ListFilter,
+  List,
+  FileDiff,
   type LucideIcon,
 } from "lucide-react";
 
@@ -98,6 +102,8 @@ const ICONS = {
   repo: FolderGit2,
   file: File,
   branch: GitBranch,
+  merge: GitMerge,
+  pullRequest: GitPullRequest,
   more: Ellipsis,
   incognito: VenetianMask,
   sparkle: Sparkles,
@@ -118,6 +124,8 @@ const ICONS = {
   sidebar: PanelLeft,
   share: Share,
   filter: ListFilter,
+  list: List,
+  diff: FileDiff,
   projects: FolderKanban,
   artifacts: SquareStack,
   customize: SlidersHorizontal,

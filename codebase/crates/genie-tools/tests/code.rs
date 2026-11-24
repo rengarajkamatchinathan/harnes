@@ -641,6 +641,25 @@ async fn worktree_create_merge_and_discard() {
         .unwrap();
     let gone = worktree::finish(&w3, Finish::Discard).await.unwrap();
     assert!(gone.branch_deleted);
+    // A daemon that restarted rebuilds the worktree from git alone (and finishes it).
+    let w4 = worktree::create(&CreateSpec::new(&work, "after restart"))
+        .await
+        .unwrap();
+    let back = worktree::recover(&w4.workspace, "genie/").await.unwrap();
+    assert_eq!(back, w4);
+    assert!(worktree::recover(&work, "genie/").await.is_none(), "main checkout");
+    assert!(worktree::recover(&w4.workspace, "other/").await.is_none(), "foreign prefix");
+    // Worktrees made before the base was recorded fall back to the main checkout's branch.
+    Git::new(&work)
+        .ok(&["config", "--unset", &format!("branch.{}.genieBase", w4.branch)])
+        .await
+        .unwrap();
+    let old = worktree::recover(&w4.workspace, "genie/").await.unwrap();
+    assert_eq!(old.base_branch.as_deref(), Some("main"));
+    assert_eq!(old.base_ref, w4.base_ref);
+    let done = worktree::finish(&old, Finish::Merge).await.unwrap();
+    assert!(done.removed && done.branch_deleted, "{done:?}");
+    assert!(!w4.path.exists());
     // Non-git folders can't have worktrees.
     let plain = base.join("plain");
     std::fs::create_dir(&plain).unwrap();

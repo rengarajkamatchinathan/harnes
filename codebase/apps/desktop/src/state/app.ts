@@ -7,6 +7,7 @@ import {
   type AskParams,
   type ClientRef,
   type LeaseLost,
+  type Mode,
   type ModelInfo,
   type PreviewChanged,
   type ProjectInfo,
@@ -32,7 +33,7 @@ import type { Handoff } from "./handoff";
 import { chatModels } from "./modelFilter";
 
 export type View = "main" | "settings" | "project" | "folder" | "handoff";
-export type PanelTab = "artifact" | "browser" | "changes" | "files" | "terminal";
+export type PanelTab = "artifact" | "browser" | "changes" | "files" | "terminal" | "sidechat" | "tasks";
 
 export interface UiState {
   mode: SessionKind;
@@ -43,6 +44,12 @@ export interface UiState {
   settingsItem: string | null;
   panelOpen: boolean;
   panelTab: PanelTab;
+  /** Tabs open in the right panel, in strip order; none open shows the launcher. */
+  panelTabsOpen: PanelTab[];
+  /** The session details column (environment, context, connectors) at the window's right edge. */
+  detailsOpen: boolean;
+  /** Side chat per Code session (panel tab): main session id → its side chat's session id. */
+  sideChats: Record<string, string>;
   panelWidth: number;
   sidebarWidth: number;
   incognito: boolean;
@@ -54,6 +61,8 @@ export interface UiState {
   recentWorkspaces: string[];
   /** Code mode's current project folder: the sidebar lists its sessions and new sessions open in it ("" = No project). */
   codeWorkspace: string;
+  /** Permission mode new Code sessions start in (picked on the empty Code page). */
+  codeMode: Mode;
   /** Open terminal ids per session, for reattach after a reload (05 §10). */
   terminals: Record<string, { id: string; title: string }[]>;
   /** OS notifications for paused asks when the window is in the background. */
@@ -100,8 +109,11 @@ const DEFAULT_UI: UiState = {
   settingsItem: null,
   panelOpen: false,
   panelTab: "artifact",
+  panelTabsOpen: [],
+  detailsOpen: false,
+  sideChats: {},
   panelWidth: 600,
-  sidebarWidth: 280,
+  sidebarWidth: 320,
   incognito: false,
   appearance: DEFAULT_APPEARANCE,
   firstRunDone: false,
@@ -109,6 +121,7 @@ const DEFAULT_UI: UiState = {
   effort: null,
   recentWorkspaces: [],
   codeWorkspace: "",
+  codeMode: "default",
   terminals: {},
   osNotifications: true,
   codeExecNoticeSeen: false,
@@ -291,6 +304,8 @@ export class App extends Emitter {
   setUi(patch: Partial<UiState>) {
     // Showing a panel tab brings a minimized panel back.
     if (patch.panelOpen === true && patch.panelMinimized === undefined) patch = { ...patch, panelMinimized: false };
+    // Picking a panel tab (header button, shortcut, a link opening the browser…) opens it in the strip.
+    if (patch.panelTab && !patch.panelTabsOpen && !this.ui.panelTabsOpen.includes(patch.panelTab)) patch = { ...patch, panelTabsOpen: [...this.ui.panelTabsOpen, patch.panelTab] };
     const before = locOf(this.ui);
     this.ui = { ...this.ui, ...patch };
     const after = locOf(this.ui);
@@ -580,7 +595,7 @@ export class App extends Emitter {
     return this.preferredModel();
   }
 
-  async createSession(opts: { kind: SessionKind; workspacePath?: string; worktree?: boolean; agent?: string | null; projectId?: string | null }) {
+  async createSession(opts: { kind: SessionKind; workspacePath?: string; worktree?: boolean; agent?: string | null; projectId?: string | null; /** false: create it without opening it (side chat). */ select?: boolean }) {
     const model = await this.defaultModel();
     if (!model) throw new Error("no_provider_configured");
     const r = await this.client.session.create({
@@ -601,6 +616,7 @@ export class App extends Emitter {
       const recent = [opts.workspacePath, ...this.ui.recentWorkspaces.filter((w) => w !== opts.workspacePath)].slice(0, 8);
       this.setUi({ recentWorkspaces: recent });
     }
+    if (opts.select === false) return r.session_id;
     if (opts.kind === "code") this.setUi({ codeWorkspace: opts.workspacePath ?? "" });
     this.selectSession(r.session_id);
     return r.session_id;

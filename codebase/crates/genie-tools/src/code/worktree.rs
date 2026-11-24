@@ -145,6 +145,12 @@ pub async fn create(spec: &CreateSpec) -> Result<WorktreeInfo, String> {
         &head,
     ])
     .await?;
+    // Remember where the branch came from in the repository's own config, so a later daemon
+    // (after a restart) can still finish this worktree: see [`recover`].
+    if let Some(b) = &base_branch {
+        let _ = git.ok(&["config", &format!("branch.{branch}.genieBase"), b]).await;
+    }
+    let _ = git.ok(&["config", &format!("branch.{branch}.genieBaseRef"), &head]).await;
     let path = std::fs::canonicalize(&path).unwrap_or(path);
     let rel = std::fs::canonicalize(&spec.workspace)
         .ok()
@@ -158,6 +164,68 @@ pub async fn create(spec: &CreateSpec) -> Result<WorktreeInfo, String> {
         base_ref: head,
         base_branch,
         main: top,
+    })
+}
+
+/// Rebuild the [`WorktreeInfo`] of a session working in `workspace` from git alone, for a
+/// daemon that didn't create it (it restarted since). `None` unless `workspace` is inside a
+/// linked worktree whose branch starts with `branch_prefix`. The merge target is the branch
+/// recorded at creation, else the branch the main checkout is on now.
+pub async fn recover(workspace: &Path, branch_prefix: &str) -> Option<WorktreeInfo> {
+    let info = repo_info(workspace).await?;
+    // A linked worktree has its own git dir under the shared one; the main checkout doesn't.
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if canon(&info.git_dir) == canon(&info.common_dir) {
+        return None;
+    }
+    let main = canon(info.common_dir.parent()?);
+    let path = canon(&info.top);
+    let head_branch = |dir: PathBuf| async move {
+        Git::new(dir)
+            .run(&["symbolic-ref", "--short", "-q", "HEAD"], None)
+            .await
+            .ok()
+            .filter(|o| o.ok())
+            .map(|o| o.text().trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let branch = head_branch(path.clone()).await?;
+    if !branch.starts_with(branch_prefix) {
+        return None;
+    }
+    let git = Git::new(&main);
+    let config = |key: String| {
+        let git = &git;
+        async move {
+            git.ok(&["config", "--get", &key])
+                .await
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        }
+    };
+    let base_branch = match config(format!("branch.{branch}.genieBase")).await {
+        Some(b) => Some(b),
+        None => head_branch(main.clone()).await,
+    };
+    let base_ref = match config(format!("branch.{branch}.genieBaseRef")).await {
+        Some(r) => r,
+        None => {
+            let against = base_branch.clone().unwrap_or_else(|| "HEAD".into());
+            git.ok(&["merge-base", &branch, &against])
+                .await
+                .map(|r| r.trim().to_string())
+                .unwrap_or_default()
+        }
+    };
+    Some(WorktreeInfo {
+        slug: path.file_name()?.to_string_lossy().into_owned(),
+        workspace: canon(workspace),
+        path,
+        branch,
+        base_ref,
+        base_branch,
+        main,
     })
 }
 

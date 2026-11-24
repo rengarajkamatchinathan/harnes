@@ -3,7 +3,7 @@
 // context meter ring (D32); queued items as chips; the `/` menu (D58).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { CommandInfo, Delivery, InputPart, McpServerInfo, ModelInfo } from "@genie/protocol";
-import { Button, Chip, Dialog, Icon, IconButton, Menu, Ring, Switch } from "@genie/ui";
+import { Button, Chip, Dialog, Icon, IconButton, Menu, Ring, Switch, type MenuItem } from "@genie/ui";
 import { formatCost, formatTokens, t } from "../../i18n";
 import { formatBytes, guessMime, rejectReason, uploadBlob, type Attachment } from "../../state/attachments";
 import type { SessionStore } from "../../state/session";
@@ -79,7 +79,7 @@ function useWidthGlide(ref: RefObject<HTMLElement | null>, key: unknown, ms = 26
   }, [key, ref, ms]);
 }
 
-/** Model + effort as quiet text buttons ("Genie Small  Medium ⌄"), like the reference. */
+/** Model + effort as one quiet button ("Genie Small  Medium") opening one combined menu, like the reference. */
 export function ModelPicker({ store }: { store: SessionStore | null }) {
   const app = useApp();
   const info = store?.model.info;
@@ -113,6 +113,35 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
       </span>
     );
   const multi = new Set(usable.map((x) => x.provider)).size > 1;
+  const cap = (e: string) => e[0].toUpperCase() + e.slice(1);
+  // One menu, like the reference: a short list of models (number keys pick them), then
+  // "Effort ›" and "More models ›" submenus. The current model is always in the short list.
+  const { top, more } = splitModels(usable, currentModel);
+  const modelItem = (m: ModelInfo, i?: number, group?: string): MenuItem => ({
+    id: m.id,
+    label: shortModelName(m.name || m.id),
+    title: [m.name || m.id, m.context_window ? t("composer.modelContext", { n: formatTokens(m.context_window) }) : ""].filter(Boolean).join(" · "),
+    shortcut: i != null ? String(i + 1) : undefined,
+    group,
+    checked: m.id === currentModel,
+    onSelect: () => setModel(m.id),
+  });
+  const items: MenuItem[] = top.map((m, i) => modelItem(m, i));
+  if (effortLevels.length > 0)
+    items.push({
+      id: "effort",
+      label: t("composer.effort"),
+      value: effort ? cap(effort) : undefined,
+      separatorBefore: true,
+      submenu: effortLevels.map((e) => ({ id: `effort:${e}`, label: cap(e), checked: e === effort, onSelect: () => setEffort(e) })),
+    });
+  if (more.length > 0)
+    items.push({
+      id: "more",
+      label: t("composer.moreModels"),
+      separatorBefore: true,
+      submenu: more.map((m) => modelItem(m, undefined, multi ? providerName(m.provider) : undefined)),
+    });
   return (
     <span className="modelpick" ref={boxRef}>
       <Menu
@@ -120,41 +149,54 @@ export function ModelPicker({ store }: { store: SessionStore | null }) {
         placement="up"
         align="right"
         className="modelpick__list"
-        items={usable.map((m) => ({
-          id: m.id,
-          label: m.name || m.id,
-          hint: m.context_window ? t("composer.modelContext", { n: formatTokens(m.context_window) }) : undefined,
-          group: multi ? providerName(m.provider) : undefined,
-          checked: m.id === currentModel,
-          onSelect: () => setModel(m.id),
-        }))}
+        items={items}
         trigger={(p) => (
           <button className="modelbtn" aria-label={t("composer.modelChoose", { name: modelInfo?.name || currentModel || "—" })} {...p}>
             <Icon key={`spark-${currentModel}`} name="sparkle" size={14} />
             {/* Keyed on the model so a new choice re-runs the settle-in animation. */}
-            <span key={currentModel} className="modelbtn__name">
-              {modelInfo?.name || currentModel || "—"}
+            <span key={currentModel} className="modelbtn__name" title={modelInfo?.name || currentModel}>
+              {shortModelName(modelInfo?.name || currentModel || "—")}
             </span>
+            {effort && (
+              <span key={`${currentModel}:${effort}`} className="modelbtn__effort">
+                {cap(effort)}
+              </span>
+            )}
             <Icon name="chevronDown" size={12} />
           </button>
         )}
       />
-      {effortLevels.length > 0 && (
-        <Menu
-          label={t("composer.effort")}
-          placement="up"
-          align="right"
-          items={effortLevels.map((e) => ({ id: e, label: e[0].toUpperCase() + e.slice(1), checked: e === effort, onSelect: () => setEffort(e) }))}
-          trigger={(p) => (
-            <button key={currentModel} className="textbtn textbtn--muted modelpick__effort" aria-label={t("composer.effort")} {...p}>
-              {effort ? effort[0].toUpperCase() + effort.slice(1) : ""}
-              <Icon name="chevronDown" size={12} />
-            </button>
-          )}
-        />
-      )}
     </span>
   );
+}
+
+/**
+ * The name the picker shows (pure, for tests): a trailing "(…)" that only repeats part of the
+ * name goes ("gpt-5.2-atg (gpt-5.2)" → "gpt-5.2-atg"), and a bare id loses its provider prefix
+ * ("openai/gpt-5.2" → "gpt-5.2"). The full name stays in the tooltip.
+ */
+export function shortModelName(name: string): string {
+  const s = name.trim();
+  const m = /^(.*\S)\s*\(([^()]+)\)$/.exec(s);
+  if (m && m[1].toLowerCase().includes(m[2].trim().toLowerCase())) return m[1];
+  if (/^[^\s/]+\/[^\s]+$/.test(s)) return s.slice(s.lastIndexOf("/") + 1);
+  return s;
+}
+
+/** How many models the picker lists before "More models ›". */
+const TOP_MODELS = 4;
+
+/**
+ * The picker's short list and the rest (pure, for tests): the first few usable models, with the
+ * current one swapped in at the end when it would otherwise only be under "More models".
+ * Nothing goes under "More" when everything fits with one row to spare.
+ */
+export function splitModels(models: ModelInfo[], current: string): { top: ModelInfo[]; more: ModelInfo[] } {
+  if (models.length <= TOP_MODELS + 1) return { top: models, more: [] };
+  let top = models.slice(0, TOP_MODELS);
+  const cur = models.find((m) => m.id === current);
+  if (cur && !top.includes(cur)) top = [...top.slice(0, TOP_MODELS - 1), cur];
+  return { top, more: models.filter((m) => !top.includes(m)) };
 }
 
 /** Context-window meter for the composer footer (D32); hidden until the session has usage. */

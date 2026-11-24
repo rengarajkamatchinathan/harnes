@@ -84,6 +84,18 @@ impl CodeServices {
             .cloned()
     }
 
+    /// The session's worktree, rebuilt from git when this daemon has no record of it (the
+    /// worktree was created before a restart). Remembered once found.
+    async fn worktree_or_recover(&self, session: &str) -> Option<WorktreeInfo> {
+        if let Some(w) = self.worktree(session) {
+            return Some(w);
+        }
+        let ws = self.workspace(session).ok()?;
+        let w = worktree::recover(&ws, &CreateSpec::new(&ws, "").branch_prefix).await?;
+        self.set_worktree(session, Some(w.clone()));
+        Some(w)
+    }
+
     fn set_worktree(&self, session: &str, w: Option<WorktreeInfo>) {
         let mut g = self.worktrees.lock().unwrap_or_else(|e| e.into_inner());
         match w {
@@ -401,7 +413,8 @@ async fn worktree_finish(
     action: WorktreeAction,
 ) -> Result<WorktreeFinishResult, RpcError> {
     let w = me
-        .worktree(sid)
+        .worktree_or_recover(sid)
+        .await
         .ok_or_else(|| state_err("this session is not working in a Genie worktree"))?;
     let how = match action {
         WorktreeAction::Merge => Finish::Merge,
@@ -446,7 +459,7 @@ pub(crate) fn session_deleted(state: &Arc<DaemonState>, sid: &str) {
             if let Some(c) = &me.checkpoints {
                 c.drop_session(&sid).await;
             }
-            if let Some(w) = me.worktree(&sid) {
+            if let Some(w) = me.worktree_or_recover(&sid).await {
                 let base = w.base_branch.clone().unwrap_or_else(|| w.base_ref.clone());
                 let clean = worktree::is_clean(&w.path).await.unwrap_or(false);
                 let unpushed = worktree::unpushed(&w.main, &w.branch, &base)

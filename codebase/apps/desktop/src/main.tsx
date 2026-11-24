@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-// Poppins for all UI text (static weights: regular, medium, semibold, bold, plus italic).
+// UI text uses the system face (tokens.css); Poppins is the optional chat font in Appearance.
 import "@fontsource/poppins/400.css";
 import "@fontsource/poppins/400-italic.css";
 import "@fontsource/poppins/500.css";

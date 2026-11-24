@@ -3,7 +3,7 @@
 
 export type ThemePref = "system" | "light" | "dark";
 export type Density = "comfortable" | "compact";
-export type ChatFont = "default" | "system" | "dyslexia";
+export type ChatFont = "default" | "system" | "poppins" | "dyslexia";
 
 export interface Appearance {
   theme: ThemePref;
@@ -21,7 +21,9 @@ export function resolveTheme(pref: ThemePref, systemDark: boolean): "light" | "d
 
 const CHAT_FONTS: Record<ChatFont, string> = {
   default: "var(--font-ui)",
-  system: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  // Kept for saved settings: the default is the system face now.
+  system: "var(--font-ui)",
+  poppins: "var(--font-poppins)",
   // Bundled dyslexia-friendly font is a v1 follow-up; fall back to wide system fonts.
   dyslexia: "'OpenDyslexic', 'Comic Sans MS', 'Verdana', sans-serif",
 };

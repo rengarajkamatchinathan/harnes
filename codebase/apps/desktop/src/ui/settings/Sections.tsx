@@ -30,7 +30,7 @@ export function AppearanceSection() {
         <Segmented<ThemePref> label={t("appearance.theme")} value={a.theme} onChange={(theme) => set({ theme })} options={[{ value: "system", label: t("appearance.system") }, { value: "light", label: t("appearance.light") }, { value: "dark", label: t("appearance.dark") }]} />
       </Field>
       <Field inline label={t("appearance.chatFont")}>
-        <Select value={a.chatFont} onChange={(v) => set({ chatFont: v as ChatFont })} options={(["default", "system", "dyslexia"] as const).map((f) => ({ value: f, label: t(`appearance.font.${f}`) }))} />
+        <Select value={a.chatFont} onChange={(v) => set({ chatFont: v as ChatFont })} options={(["default", "poppins", "dyslexia"] as const).map((f) => ({ value: f, label: t(`appearance.font.${f}`) }))} />
       </Field>
       <Field inline label={t("appearance.fontSize")}>
         <input className="range" type="range" min={12} max={30} value={a.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} aria-label={t("appearance.fontSize")} />

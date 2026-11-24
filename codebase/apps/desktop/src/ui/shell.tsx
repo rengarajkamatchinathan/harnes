@@ -11,7 +11,9 @@ export const NARROW = 860;
 export const MIN_MAIN = 480;
 export const SIDEBAR_MIN = 220;
 export const SIDEBAR_MAX = 420;
-export const SIDEBAR_DEFAULT = 280;
+export const SIDEBAR_DEFAULT = 320;
+export const PANEL_MIN = 320;
+export const PANEL_DEFAULT = 600;
 
 export interface ShellState {
   width: number;
@@ -23,9 +25,13 @@ export interface ShellState {
   setDrawer: (open: boolean) => void;
   /** The sidebar is not visible (collapsed inline, or drawer closed). */
   sidebarHidden: boolean;
+  /** The right panel's width as shown, and how wide each column may be dragged right now. */
+  panelWidth: number;
+  panelMax: number;
+  sidebarMax: number;
 }
 
-export const ShellContext = createContext<ShellState>({ width: 1280, overlay: false, narrow: false, drawerOpen: false, setDrawer: () => {}, sidebarHidden: false });
+export const ShellContext = createContext<ShellState>({ width: 1280, overlay: false, narrow: false, drawerOpen: false, setDrawer: () => {}, sidebarHidden: false, panelWidth: 600, panelMax: 600, sidebarMax: SIDEBAR_MAX });
 export const useShell = () => useContext(ShellContext);
 
 const subscribe = (cb: () => void) => {
@@ -42,11 +48,18 @@ export function useWindowWidth(): number {
 }
 
 /** Pure layout decision (for tests). */
-export function layoutFor(width: number, o: { sidebarWidth: number; panelOpen: boolean; panelWidth: number }) {
+/** Width of the session details column. */
+export const DETAILS_W = 300;
+
+export function layoutFor(width: number, o: { sidebarWidth: number; panelOpen: boolean; panelWidth: number; detailsOpen?: boolean }) {
   const narrow = width < NARROW;
-  const overlay = narrow || (o.panelOpen && width - o.panelWidth - o.sidebarWidth < MIN_MAIN);
-  // Keep the panel from eating the conversation: at most width − sidebar − MIN_MAIN (min 320).
-  const room = width - (overlay ? 0 : o.sidebarWidth) - MIN_MAIN;
-  const panelWidth = narrow ? width : Math.max(320, Math.min(o.panelWidth, room));
-  return { narrow, overlay, panelWidth };
+  const details = !narrow && o.detailsOpen ? DETAILS_W : 0;
+  const overlay = narrow || ((o.panelOpen || details > 0) && width - (o.panelOpen ? o.panelWidth : 0) - details - o.sidebarWidth < MIN_MAIN);
+  // Keep the panel from eating the conversation: at most width − sidebar − details − MIN_MAIN (min 320).
+  const room = width - (overlay ? 0 : o.sidebarWidth) - details - MIN_MAIN;
+  const panelMax = Math.max(PANEL_MIN, room);
+  const panelWidth = narrow ? width : Math.min(Math.max(PANEL_MIN, o.panelWidth), panelMax);
+  // Widening the sidebar must not squeeze the conversation either (nor flip it into a drawer).
+  const sidebarMax = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, width - (o.panelOpen ? panelWidth : 0) - details - MIN_MAIN));
+  return { narrow, overlay, panelWidth, panelMax, sidebarMax };
 }

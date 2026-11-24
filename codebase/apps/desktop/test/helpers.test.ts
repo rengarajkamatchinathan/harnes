@@ -10,7 +10,7 @@ import { formFields } from "../src/ui/chat/AskCard";
 import { parseArtifactMessage } from "../src/ui/panel/ArtifactPanel";
 import { addressText, bannerState, copyChord, isPasteChord, keyText, mapPoint, modifiers } from "../src/ui/panel/BrowserPanel";
 import { sideBySide, splitDiff } from "../src/ui/panel/CodePanels";
-import { panelTabs } from "../src/ui/panel/RightPanel";
+import { activeTab, dockState, openTabs, panelTabs } from "../src/ui/panel/RightPanel";
 import { nextStep } from "../src/ui/FirstRun";
 import { plural, t } from "../src/i18n";
 import { rejectReason, toBase64, fromBase64, MAX_FILE_BYTES } from "../src/state/attachments";
@@ -192,7 +192,23 @@ describe("panels", () => {
       ["b", "c"],
     ]);
     expect(panelTabs("chat")).toEqual(["artifact", "browser"]);
-    expect(panelTabs("code")).toEqual(["changes", "files", "terminal", "browser"]);
+    expect(panelTabs("code")).toEqual(["changes", "browser", "files", "terminal", "sidechat", "tasks"]);
+  });
+
+  it("shows the saved tab when open, else the last open one, else the launcher", () => {
+    const ui = { mode: "code" as const, panelTab: "files" as const, panelTabsOpen: ["artifact", "changes", "files"] as ("artifact" | "changes" | "files")[] };
+    expect(openTabs(ui)).toEqual(["changes", "files"]); // the Chat-only Artifact tab is hidden in Code
+    expect(activeTab(ui)).toBe("files");
+    expect(activeTab({ ...ui, panelTab: "terminal" })).toBe("files");
+    expect(activeTab({ ...ui, panelTabsOpen: [] })).toBeNull();
+    expect(activeTab({ ...ui, mode: "chat", panelTabsOpen: ["changes"] })).toBeNull();
+  });
+
+  it("hides the dock on project and handoff pages and while the panel is minimized", () => {
+    const ui = { view: "main" as const, panelOpen: true, panelMinimized: false, detailsOpen: true };
+    expect(dockState(ui)).toEqual({ panelShown: true, detailsShown: true });
+    expect(dockState({ ...ui, panelMinimized: true })).toEqual({ panelShown: false, detailsShown: true });
+    expect(dockState({ ...ui, view: "project" as const })).toEqual({ panelShown: false, detailsShown: false });
   });
 
   it("walks first run, skipping import when nothing is found (05 §5)", () => {
@@ -244,6 +260,22 @@ describe("transcript rows", () => {
     ] as never);
     expect(rows.map((r) => r.kind)).toEqual(["msg", "tools", "msg"]);
     expect(rows[1].kind === "tools" && rows[1].parts.length).toBe(3);
+  });
+  it("draws no row for withheld thinking, so the tool steps around it fold together", async () => {
+    const { buildRows } = await import("../src/ui/chat/Transcript");
+    const hidden = (id: string) => part(id, "reasoning", { final: { type: "reasoning", id, redacted: true } });
+    const rows = buildRows([
+      msg("u", "user", [part("u1", "text", { text: "explain this repo" })]),
+      msg("a1", "assistant", [hidden("h1"), call("c1", "grep")]),
+      msg("r1", "tool", [part("r1p", "tool_result")]),
+      msg("a2", "assistant", [hidden("h2"), call("c2", "read")]),
+      msg("r2", "tool", [part("r2p", "tool_result")]),
+      msg("a3", "assistant", [hidden("h3"), part("x", "text", { text: "It is a Tauri app." })]),
+    ] as never);
+    expect(rows.map((r) => r.kind)).toEqual(["msg", "tools", "msg"]);
+    // Thinking with text to read still shows (and so still splits the steps).
+    const shown = buildRows([msg("a", "assistant", [part("t", "reasoning", { text: "Let me look.", final: { type: "reasoning", id: "t", text: "Let me look." } }), call("c", "grep")])] as never);
+    expect(shown.map((r) => r.kind)).toEqual(["msg"]);
   });
   it("summarises a folded group", async () => {
     const { toolGroupSummary } = await import("../src/ui/chat/toolInfo");

@@ -1,6 +1,8 @@
 /* App layout (05 §1). Everything reads the tokens from @genie/ui. */
 /* The window never scrolls as a whole; only the transcript, lists and panels do. */
 #root { height: 100%; overflow: hidden; }
+/* Side padding of the conversation column (messages, banners, composer line up on it). */
+:root { --chat-gutter: clamp(16px, 2.5vw, 32px); }
 
 /* Larger UI type on small screens. Laptop-size windows (≤1440px, e.g. 1366×768 / 1280×800)
    get +1px; the narrow layout (<860px, shell.tsx NARROW) gets +2px. The chat text size is
@@ -12,8 +14,7 @@
   :root { --text-xs: 14px; --text-sm: 15px; --text-base: 16px; --text-md: 17px; --text-lg: 20px; --text-xl: 24px; --text-2xl: 30px; }
 }
 /* Windows renders text a little smaller and thinner than macOS at the same px, so on Windows
-   the UI uses the +1px scale at every window size (Poppins is already wide and tall, so +2px
-   would look oversized). Chat text is set inline by Appearance → Font size, so it is unaffected. */
+   the UI uses the +1px scale at every window size (+2px would look oversized). Chat text is set inline by Appearance → Font size, so it is unaffected. */
 :root[data-platform="windows"] { --text-xs: 13px; --text-sm: 14px; --text-base: 15px; --text-md: 16px; --text-lg: 19px; --text-xl: 23px; --text-2xl: 29px; }
 .muted { color: var(--text-muted); }
 .error-text { color: var(--danger); font-size: var(--text-sm); }
@@ -96,10 +97,18 @@ code { font-size: 0.92em; }
 
 /* ---------- sidebar ---------- */
 .sidebar { position: relative; display: flex; flex-direction: column; height: 100%; background: var(--sidebar-bg); border-right: 1px solid var(--border-subtle); min-width: 0; }
-.sidebar__resize { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; z-index: 3; cursor: col-resize; }
-.sidebar__resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: transparent; transition: background-color var(--dur-fast) var(--ease); }
-.sidebar__resize:hover::after, .sidebar__resize:focus-visible::after, .shell--resizing .sidebar__resize::after { background: var(--border); }
-.sidebar__resize:focus-visible { outline: none; }
+/* Column splitters (ResizeHandle): a wide grab strip centred on the edge with a hairline that
+   shows on a deliberate hover, turns accent while dragging, and never steals a click elsewhere. */
+.resize-handle { position: absolute; top: 0; bottom: 0; width: 9px; z-index: 3; cursor: col-resize; touch-action: none; outline: none; }
+.resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent; transition: background-color var(--dur-fast) var(--ease), width var(--dur-fast) var(--ease), left var(--dur-fast) var(--ease); }
+.resize-handle:hover::after { background: var(--border); transition-delay: 150ms; }
+.resize-handle:focus-visible::after, .resize-handle[data-dragging]::after { left: 3px; width: 3px; background: var(--accent); transition-delay: 0ms; }
+/* The sidebar slot clips too: the handle sits just inside the edge, its line on the border. */
+.sidebar__resize { right: -1px; }
+.sidebar__resize::after, .sidebar__resize:focus-visible::after, .sidebar__resize[data-dragging]::after { left: auto; right: 0; }
+/* While a column is dragged: no layout animation, one cursor everywhere, and embedded pages
+   (artifacts, previews) can't swallow the pointer. */
+.shell--resizing iframe, .shell--resizing webview, .shell--resizing canvas { pointer-events: none; }
 .sidebar__nav { display: grid; gap: 2px; padding: var(--space-1) var(--space-2) var(--space-2); }
 .nav-row, .sidebar__row, .profile, .folder-card__row, .palette__item, .idea { -webkit-user-select: none; user-select: none; }
 .nav-row { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; font-size: var(--text-base); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
@@ -213,7 +222,7 @@ code { font-size: 0.92em; }
 .titlebtn .g-icon { color: var(--text-muted); }
 .chat__title { font-size: var(--text-base); font-weight: 400; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
 .chat__title--muted { color: var(--text-muted); }
-.chat__banners { display: grid; gap: var(--space-2); padding: var(--space-2) var(--space-4) 0; max-width: calc(var(--content-max) + 2 * var(--space-4)); width: 100%; margin: 0 auto; }
+.chat__banners { display: grid; gap: var(--space-2); padding: var(--space-2) var(--chat-gutter) 0; max-width: calc(var(--content-max) + 2 * var(--chat-gutter)); width: 100%; margin: 0 auto; }
 .chat__banners:empty { display: none; }
 .chat__empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: var(--space-4); padding: var(--space-6); }
 .chat__empty h1 { font-size: var(--text-2xl); font-weight: 600; margin: 0; }
@@ -261,7 +270,8 @@ code { font-size: 0.92em; }
 /* Switching model: the new name and the effort picker settle in while the box glides to its
    new width (useWidthGlide in Composer.tsx), so the switch reads as one smooth change. */
 .modelbtn__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; animation: g-swap-in var(--dur-slow) var(--ease-out) both; }
-.modelpick__effort { animation: g-swap-in var(--dur-slow) var(--ease-out) both; animation-delay: 40ms; }
+.modelbtn__effort { color: var(--text-muted); font-weight: 400; animation: g-swap-in var(--dur-slow) var(--ease-out) both; animation-delay: 40ms; }
+.modelbtn:hover .modelbtn__effort, .modelbtn[aria-expanded="true"] .modelbtn__effort { color: color-mix(in oklch, var(--text) 70%, var(--text-muted)); }
 .modelbtn > .g-icon:first-child { animation: modelbtn-spark var(--dur-slow) var(--ease-out); }
 @keyframes modelbtn-spark { from { transform: rotate(-30deg) scale(0.85); } to { transform: none; } }
 /* Every menu trigger's chevron turns over while its menu is open. */
@@ -273,12 +283,14 @@ code { font-size: 0.92em; }
 .composer__voice.is-listening { background: var(--danger-subtle); color: var(--danger) !important; animation: voice-pulse 1.4s var(--ease) infinite; }
 @keyframes voice-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--danger) 45%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
 @media (prefers-reduced-motion: reduce) { .composer__voice.is-listening { animation: none; } }
-.modelpick__list { min-width: 240px; max-height: min(420px, var(--radix-dropdown-menu-content-available-height)); }
+.modelpick__list { min-width: 250px; max-height: min(420px, var(--radix-dropdown-menu-content-available-height)); }
+/* The model menu's check is the accent colour, like a native picker's. */
+.modelpick__list .g-menu__check { color: var(--accent); }
 .composer-foot { display: flex; align-items: center; gap: var(--space-2); min-height: 26px; padding: 0 var(--space-2); font-size: var(--text-xs); color: var(--text-muted); }
 .composer-foot__item { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer-foot__item .g-icon { color: var(--text-muted); }
 .composer-foot__note { color: var(--text-muted); font-size: var(--text-xs); }
-.chat__bottom { display: grid; gap: var(--space-2); padding: var(--space-2) var(--space-4) var(--space-3); max-width: calc(var(--content-max) + 2 * var(--space-4)); width: 100%; margin: 0 auto; flex: none; }
+.chat__bottom { display: grid; gap: var(--space-2); padding: var(--space-2) var(--chat-gutter) var(--space-3); max-width: calc(var(--content-max) + 2 * var(--chat-gutter)); width: 100%; margin: 0 auto; flex: none; }
 
 .transcript-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .transcript { flex: 1; overflow: auto; min-height: 0; outline: none; }
@@ -287,9 +299,9 @@ code { font-size: 0.92em; }
 .transcript__jump:hover:not(:disabled) { background: var(--surface-hover); }
 @keyframes jump-in { from { opacity: 0; transform: translate(-50%, 6px) scale(0.92); } }
 .transcript__item { position: absolute; left: 0; top: 0; width: 100%; }
-.msg { max-width: var(--content-max); margin: 0 auto; padding: var(--space-3) var(--space-4); }
+.msg { max-width: calc(var(--content-max) + 2 * var(--chat-gutter)); margin: 0 auto; padding: var(--space-3) var(--chat-gutter); }
 .msg--user { display: flex; flex-direction: column; align-items: flex-end; }
-.bubble { max-width: min(80%, 640px); background: var(--bubble); border-radius: var(--radius-lg); padding: 10px var(--space-4); display: grid; gap: var(--space-2); }
+.bubble { max-width: min(80%, 640px); background: var(--bubble); border-radius: 14px; padding: 9px var(--space-4); line-height: var(--line-read); display: grid; gap: var(--space-2); }
 /* New messages (not ones scrolled back into view) ease in. */
 .transcript__item.is-new > * { animation: msg-in var(--dur-slow) var(--ease-out) both; }
 @keyframes msg-in { from { opacity: 0; transform: translateY(8px); } }
@@ -301,7 +313,7 @@ code { font-size: 0.92em; }
 .msg:hover .msg__actions, .msg:focus-within .msg__actions, .is-last .msg__actions { opacity: 1; }
 .branch { display: inline-flex; align-items: center; gap: 2px; font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 /* Turn indicator: animated Genie mark + shimmering status while a turn runs. */
-.turn { display: flex; align-items: center; gap: 10px; max-width: var(--content-max); margin: 0 auto; padding: var(--space-1) var(--space-4) var(--space-6); position: relative; min-height: 40px; font-size: var(--text-sm); }
+.turn { display: flex; align-items: center; gap: 10px; max-width: calc(var(--content-max) + 2 * var(--chat-gutter)); margin: 0 auto; padding: var(--space-1) var(--chat-gutter) var(--space-6); position: relative; min-height: 40px; font-size: var(--text-sm); }
 .turn__mark { display: inline-grid; place-items: center; width: 22px; height: 22px; color: var(--text); }
 .turn__label { background: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 40%, var(--text) 50%, var(--text-muted) 60%, var(--text-muted) 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: turn-shimmer 2s linear infinite; }
 .turn--tuck { margin-top: -40px; padding-top: 0; }
@@ -323,17 +335,30 @@ code { font-size: 0.92em; }
 
 .markdown .md > :first-child { margin-top: 0; }
 .markdown .md > :last-child { margin-bottom: 0; }
-.markdown .md { margin-bottom: 0.75em; line-height: var(--line-normal); }
-.markdown h1, .markdown h2, .markdown h3 { line-height: var(--line-tight); margin: 1em 0 0.4em; }
-.markdown h1 { font-size: var(--text-xl); }
-.markdown h2 { font-size: var(--text-lg); }
-.markdown h3 { font-size: var(--text-md); }
-.markdown table { border-collapse: collapse; font-size: var(--text-sm); margin: 0.5em 0 0.9em; }
-.markdown th, .markdown td { border-bottom: 1px solid var(--border-subtle); padding: 6px 16px 6px 0; text-align: left; }
-.markdown th { font-weight: 600; border-bottom-color: var(--border); }
-.markdown blockquote { margin: 0; padding-left: var(--space-3); border-left: 3px solid var(--border); color: var(--text-muted); }
-.markdown :not(pre) > code { background: var(--code-bg); padding: 1px 4px; border-radius: var(--radius-sm); }
-.markdown a { color: var(--accent-text); }
+/* Reply typography: a calm reading rhythm. Headings are a small step up from body text (not
+   document-sized), blocks are spaced by the paragraph gap, and every element has a style so
+   nothing falls back to browser defaults (thick white <hr>, bare <code>). */
+.markdown .md { margin-bottom: 0.75em; line-height: var(--line-read); letter-spacing: -0.003em; }
+.markdown p { margin: 0 0 0.8em; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 { line-height: var(--line-tight); margin: 1.15em 0 0.45em; color: var(--text); letter-spacing: -0.005em; }
+.markdown h1 { font-size: 1.25em; }
+.markdown h2 { font-size: 1.13em; }
+.markdown h3, .markdown h4 { font-size: 1em; }
+.markdown ul, .markdown ol { margin: 0 0 0.8em; padding-left: 1.4em; }
+.markdown li { margin: 0.18em 0; padding-left: 0.15em; }
+.markdown li > ul, .markdown li > ol { margin: 0.18em 0 0; }
+.markdown li > p { margin: 0 0 0.3em; }
+.markdown li::marker { color: var(--text-faint); }
+.markdown ol > li::marker { font-variant-numeric: tabular-nums; }
+.markdown hr { border: none; border-top: 1px solid var(--border-subtle); margin: 1.6em 0; height: 0; }
+.markdown table { border-collapse: collapse; font-size: 1em; margin: 0.4em 0 1em; width: 100%; }
+.markdown th, .markdown td { border-bottom: 1px solid var(--border-subtle); padding: 10px 16px 10px 0; text-align: left; vertical-align: top; }
+.markdown th { font-weight: 600; color: var(--text); border-bottom-color: var(--border); }
+.markdown tr:last-child td { border-bottom: none; }
+.markdown blockquote { margin: 0 0 0.85em; padding-left: var(--space-3); border-left: 2px solid var(--border); color: var(--text-muted); }
+.markdown :not(pre) > code { font-size: 0.86em; background: color-mix(in oklch, var(--text) 8%, transparent); color: var(--text); padding: 0.15em 0.4em; border-radius: 5px; white-space: break-spaces; }
+.markdown a { color: var(--accent-text); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; }
+.markdown a:hover { text-decoration-color: currentColor; }
 .code-block { border: 1px solid var(--border-subtle); border-radius: 10px; overflow: hidden; background: var(--code-bg); }
 .code-block__bar { display: flex; justify-content: space-between; align-items: center; padding: 2px var(--space-2); font-size: var(--text-xs); color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
 .code-block pre { margin: 0; padding: var(--space-3); overflow: auto; font-size: var(--text-sm); }
@@ -484,23 +509,30 @@ code { font-size: 0.92em; }
 .composer__model { width: auto; max-width: 220px; height: 28px; }
 .composer__effort { width: auto; height: 28px; }
 .composer__ring { display: inline-flex; }
-.worktree-footer { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-sm); }
+/* Worktree bar under the composer footer: one quiet line, status left (truncates), Finish ⌄ right. */
+.worktree-footer { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 0 0 15px; font-size: var(--text-xs); color: var(--text-muted); }
+.worktree-footer > .g-icon { flex: none; color: var(--text-faint); }
+.worktree-footer__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worktree-footer .worktree-footer__btn { flex: none; font-size: var(--text-xs); color: var(--text-muted); }
+.worktree-footer .worktree-footer__btn:hover { color: var(--text); }
+.worktree-footer__pr { margin: 0; padding: var(--space-3); border-radius: var(--radius-md); background: var(--code-bg); font-size: var(--text-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- right panel ---------- */
 .panel { position: relative; width: var(--panel-w); height: 100%; border-left: 1px solid var(--border-subtle); background: var(--bg); display: flex; flex-direction: column; min-width: 0; overflow: hidden; animation: panel-in var(--dur-slow) var(--ease-out); }
 /* Children keep the final width while the panel grows, so they slide in rather than reflow. */
 .panel > .panel__head, .panel > .panel__body { min-width: calc(var(--panel-w) - 1px); }
 @keyframes panel-in { from { width: 0; } }
-.shell--resizing .panel, .panel.is-resizing { animation: none; }
+/* No `.shell--resizing .panel { animation: none }` here: toggling animation-name off and back on
+   restarts `panel-in`, so every drag release collapsed the panel to 0 and regrew it. Once the
+   open animation has finished, the width simply follows --panel-w while a column is dragged. */
 .shell--narrow .panel { position: fixed; inset: 0; width: auto; z-index: var(--z-panel); border-left: none; animation: panel-cover var(--dur-slow) var(--ease-out); }
 .shell--narrow .panel > .panel__head, .shell--narrow .panel > .panel__body { min-width: 0; }
 .shell--narrow .panel__head { padding-left: calc(var(--space-2) + var(--traffic-w)); }
 .shell--narrow .panel__resize { display: none; }
 @keyframes panel-cover { from { opacity: 0; transform: translateX(32px); } }
-.panel__resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
-.panel__resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; transition: background-color var(--dur-fast) var(--ease); }
-.panel__resize:hover::after, .panel__resize:focus-visible::after { background: var(--border); }
-.panel__resize:focus-visible { outline: none; }
+/* The panel clips its overflow, so its handle sits just inside the edge, the line on the border. */
+.panel__resize { left: -1px; }
+.panel__resize::after, .panel__resize:focus-visible::after, .panel__resize[data-dragging]::after { left: 0; }
 .panel__head { display: flex; align-items: center; gap: 2px; height: var(--titlebar-h); flex: none; padding: 0 var(--space-2); border-bottom: 1px solid var(--border-subtle); -webkit-user-select: none; user-select: none; }
 .panel__head > .g-btn { color: var(--text-muted); }
 .panel__title { margin: 0 0 0 var(--space-2); font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
@@ -836,11 +868,6 @@ a.preview-path { color: var(--accent-text); }
 .panel-pill { position: fixed; right: var(--space-4); bottom: 84px; z-index: var(--z-panel, 20); display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 12px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: var(--text-sm); box-shadow: var(--shadow-pop); cursor: pointer; }
 .panel-pill:hover { background: var(--surface-hover); }
 .link-ask__url { font-family: var(--font-mono); font-size: var(--text-xs); word-break: break-all; }
-/* Code sidebar: the open session isn't filled (it appears under its project and in All sessions); hover still shows. */
-.sidebar__row--code.is-active { background: none; }
-.sidebar__row--code.is-active:hover { background: var(--surface-hover); }
-.sidebar__row--code.is-active .sidebar__more { opacity: 0; }
-.sidebar__row--code.is-active:hover .sidebar__more, .sidebar__row--code.is-active:focus-within .sidebar__more, .sidebar__row--code .sidebar__more[aria-expanded="true"] { opacity: 1; }
 
 /* Project pill in the new-chat composer toolbar (replaces the loose chip under the box). */
 .projpill { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 220px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--text-muted); font: inherit; font-size: var(--text-sm); cursor: pointer; transition: background-color var(--dur-instant) var(--ease), color var(--dur-instant) var(--ease), border-color var(--dur-instant) var(--ease); }
@@ -1140,7 +1167,7 @@ a.preview-path { color: var(--accent-text); }
 .handoff__diff .handoff-pre { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; max-height: 600px; }
 
 /* "Ready to commit": a compact card centred in the chat column (same width as messages). */
-.ready { width: calc(100% - 2 * var(--space-4)); max-width: min(var(--content-max), 620px); margin: var(--space-2) auto var(--space-4); padding: 10px 14px 12px; font-size: var(--text-xs); }
+.ready { width: calc(100% - 2 * var(--chat-gutter)); max-width: min(var(--content-max), 620px); margin: var(--space-2) auto var(--space-4); padding: 10px 14px 12px; font-size: var(--text-xs); }
 .ready__head { font-size: var(--text-sm); }
 .ready__list { margin: 6px 0; gap: 0; }
 .ready__row { min-height: 24px; }
@@ -1163,7 +1190,185 @@ a.preview-path { color: var(--accent-text); }
 .racechip__model { max-width: 220px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .racechip__model.is-current { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
 
-/* Softer reading text: bold and headings in replies/documents use semibold (Poppins bold is heavy),
-   and body text sits a touch lighter than headings. */
+/* Softer reading text: bold and headings in replies/documents use semibold, and body text sits
+   a touch lighter than headings. */
 .markdown strong, .markdown b, .markdown h1, .markdown h2, .markdown h3, .markdown h4 { font-weight: 600; }
 .markdown .md { color: color-mix(in oklch, var(--text) 90%, var(--text-muted)); }
+
+/* ── Empty Code page, sidebar empty state and footer (matched to the Code-mode reference) ── */
+.folder-card { gap: var(--space-3); }
+.folder-card__box--picker { padding: 0; }
+.codeproj--card { width: 100%; height: 40px; padding: 0 12px; gap: 6px; border: none; border-radius: var(--radius-lg); font-size: var(--text-base); }
+.codeproj--card .codeproj__name { flex: 0 1 auto; }
+.folder-card__row { height: 34px; gap: 10px; padding: 0 8px; font-size: var(--text-base); }
+.folder-card__row .g-icon { flex: none; color: var(--text); }
+.folder-card__label { flex: none; white-space: nowrap; }
+.folder-card__hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+
+/* Composer footer: everything is quiet text, like the reference ("This computer ⌄  admin ⌄ … Opus 5.5 High  Auto"). */
+.composer-foot { gap: var(--space-1); }
+.composer-foot .textbtn, .composer-foot .codeproj--inline { height: 28px; padding: 0 8px; font-size: var(--text-sm); color: var(--text); }
+.composer-foot .textbtn.composer-foot__item { overflow: visible; }
+.composer-foot .modelbtn { height: 28px; padding: 0 6px; gap: 6px; border: none; border-radius: var(--radius-md); background: none; font-weight: 400; }
+.composer-foot .modelbtn:hover, .composer-foot .modelbtn[aria-expanded="true"] { background: var(--surface-hover); }
+.composer-foot .modelbtn > .g-icon { display: none; }
+.composer-foot .modelpick { gap: 0; }
+
+/* Sidebar: nothing yet → a centred hint with faint pixel sparkles. */
+.sidebar__blank { display: grid; justify-items: center; gap: var(--space-4); padding: var(--space-6) var(--space-3); text-align: center; font-size: var(--text-sm); }
+.pixel-sparkles { color: var(--text-muted); }
+.nav-row[aria-expanded="true"] { background: var(--surface-hover); }
+
+/* Profile footer: "● Name · Account            ⌄" */
+.sidebar__footer { padding: var(--space-2) var(--space-2); }
+.profile { height: 40px; }
+.profile__name { flex: 1; min-width: 0; display: flex; align-items: baseline; overflow: hidden; white-space: nowrap; }
+.profile__name .sidebar__title { flex: 0 1 auto; }
+.profile__org { flex: none; color: var(--text-muted); font-size: var(--text-sm); white-space: pre; }
+.profile > .g-icon { margin-left: auto; }
+.folder-card { grid-template-columns: minmax(0, 1fr); width: min(320px, 100%); }
+.folder-card__box { min-width: 0; }
+
+/* ── Right dock: tabbed panel + session details column ── */
+.dock { display: flex; height: 100%; min-width: 0; }
+.panel__head { gap: 4px; }
+.panel__tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.panel__tabs::-webkit-scrollbar { display: none; }
+.panel__tab { position: relative; display: flex; align-items: center; flex: none; height: 28px; border-radius: var(--radius-md); color: var(--text-muted); transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.panel__tab:hover { background: var(--surface-hover); color: var(--text); }
+.panel__tab.is-active { background: var(--surface-active); color: var(--text); }
+.panel__tab-btn { display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 4px 0 10px; border: none; background: none; color: inherit; font: inherit; font-size: var(--text-sm); white-space: nowrap; cursor: pointer; }
+.panel__tab-close { display: grid; place-items: center; width: 20px; height: 20px; margin-right: 4px; border: none; border-radius: 5px; background: none; color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+.panel__tab:hover .panel__tab-close, .panel__tab.is-active .panel__tab-close, .panel__tab-close:focus-visible { opacity: 1; }
+.panel__tab-close:hover { background: var(--surface-hover); color: var(--text); }
+.panel__menu { min-width: 220px; }
+
+/* Nothing open: a centred launcher ("Changes ⇧⌘D", "Browser ⇧⌘B", …). */
+.panel-launcher { display: grid; place-items: center; height: 100%; padding: var(--space-4); }
+.panel-launcher__list { display: grid; gap: 0; width: min(280px, 100%); }
+.panel-launcher__row { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; font-size: var(--text-base); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
+.panel-launcher__row:hover { background: var(--surface-hover); }
+.panel-launcher__row:focus-visible { outline: 2px solid var(--gray-8); outline-offset: -2px; }
+.panel-launcher__row > .g-icon { flex: none; color: var(--text); }
+.panel-launcher__label { flex: 1; min-width: 0; }
+.panel-launcher__kbd { flex: none; font: inherit; font-size: var(--text-xs); color: var(--text-muted); letter-spacing: 0.04em; }
+
+/* Session details column. */
+.details { width: 300px; flex: none; height: 100%; display: flex; flex-direction: column; border-left: 1px solid var(--border-subtle); background: var(--bg); animation: details-in var(--dur-slow) var(--ease-out); }
+@keyframes details-in { from { opacity: 0; transform: translateX(16px); } }
+.details__head { height: var(--titlebar-h); flex: none; }
+.details__body { flex: 1; overflow: auto; padding: 0 var(--space-4) var(--space-4); }
+.details__section { display: grid; padding: var(--space-2) 0; }
+.details__section + .details__section { border-top: 1px solid var(--border-subtle); }
+.details__heading { margin: 0 0 4px; font-size: var(--text-sm); font-weight: 500; color: var(--text); }
+.details__row { display: flex; align-items: center; gap: 10px; height: 32px; font-size: var(--text-base); color: var(--text); min-width: 0; }
+.details__row > .g-icon { flex: none; color: var(--text-muted); }
+.details__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.details__link { display: flex; align-items: center; gap: 6px; height: 32px; margin: 0 -8px; padding: 0 8px; border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; font-size: var(--text-sm); font-weight: 500; text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
+.details__link:hover:not(:disabled) { background: var(--surface-hover); }
+.details__link:disabled { cursor: default; }
+.details__link > .g-icon { color: var(--text-muted); transition: transform var(--dur-fast) var(--ease-out); }
+.details__link[aria-expanded="true"] > .g-icon { transform: rotate(90deg); }
+.details__note { color: var(--text-muted); font-weight: 400; white-space: nowrap; }
+.details__note.is-warn { color: var(--text); }
+.details__meter { position: relative; width: 24px; height: 8px; border-radius: 999px; background: var(--surface-active); overflow: hidden; flex: none; }
+.details__meter > span { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--accent); }
+.details__meter.is-warn > span { background: var(--warning, oklch(0.75 0.15 70)); }
+.details__ctx { padding: var(--space-2) 0; }
+.shell--narrow .details { position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--z-panel); box-shadow: var(--shadow-pop); }
+
+/* The composer footer shrinks with the column (an open panel or details column narrows it):
+   names truncate, and "This computer" drops to its icon when space runs out. */
+.chat__bottom { grid-template-columns: minmax(0, 1fr); container-type: inline-size; }
+.composer-foot { min-width: 0; }
+.composer-foot > * { min-width: 0; flex-shrink: 1; }
+.composer-foot > .grow { flex: 1 1 0; }
+.composer-foot .textbtn, .composer-foot .modelbtn { min-width: 0; overflow: hidden; }
+.composer-foot .modelpick { min-width: 0; overflow: hidden; }
+@container (max-width: 600px) { .composer-foot__label { display: none; } }
+
+/* Details column head carries the dock toggles at the window's top-right corner. */
+.details__head { display: flex; align-items: center; padding: 0 var(--space-3) 0 var(--space-2); -webkit-user-select: none; user-select: none; }
+.panel__head > .header-icons { margin-right: calc(var(--space-1) * -1 + 4px); }
+.details__row--link { width: calc(100% + 16px); margin: 0 -8px; padding: 0 8px; border: none; border-radius: var(--radius-md); background: none; font: inherit; font-size: var(--text-base); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
+.details__row--link:hover { background: var(--surface-hover); }
+
+/* Side chat tab. */
+.sidechat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.sidechat__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sidechat__body > .g-empty, .sidechat__body > :only-child { flex: 1; min-height: 0; }
+.sidechat__composer { flex: none; padding: var(--space-2) var(--space-3) var(--space-3); }
+
+/* Background tasks tab. */
+.tasks { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.tasks__section { display: grid; gap: 2px; }
+.tasks__section + .tasks__section { padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); }
+.tasks__heading { margin: 0 0 4px; font-size: var(--text-sm); font-weight: 500; color: var(--text-muted); }
+.tasks__row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 8px; margin: 0 -8px; border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; text-align: left; }
+.tasks__row--link { cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
+.tasks__row--link:hover { background: var(--surface-hover); }
+.tasks__row > .g-icon { color: var(--text-muted); flex: none; }
+.tasks__main { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.tasks__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); }
+.tasks__sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--text-muted); }
+.tasks__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-muted); opacity: 0.6; }
+.tasks__dot--running, .tasks__dot--starting { background: var(--accent); opacity: 1; }
+.tasks__dot--completed { background: var(--success, oklch(0.72 0.15 150)); opacity: 1; }
+.tasks__dot--failed { background: var(--danger, oklch(0.65 0.2 25)); opacity: 1; }
+
+/* ── Composer, matched to the Claude Desktop reference ──────────────────────────────────────
+   A flat, single-line box (44px: "+", text, mic) with a quiet border and no drop shadow; the
+   footer underneath is plain text controls ("This computer ⌄  folder ⌄ … model effort  mode ◔")
+   whose first icon lines up with the "+" inside the box. */
+.composer { border-radius: 12px; box-shadow: none; padding: 7px 8px; }
+.composer:hover { border-color: color-mix(in oklch, var(--border) 55%, var(--gray-8)); }
+.composer:focus-within { border-color: var(--gray-7); box-shadow: none; }
+.composer--hero { border-radius: 14px; padding: var(--space-3) var(--space-2) 7px var(--space-3); }
+.composer--reply .composer__input { padding: 2px 6px; }
+.composer__bar > .g-menu .g-btn, .composer .composer__voice:not(.is-listening) { color: var(--text-muted); }
+.composer__bar > .g-menu .g-btn:hover, .composer .composer__voice:not(.is-listening):hover { color: var(--text); }
+.chat__bottom { gap: 6px; }
+.composer-foot { min-height: 28px; padding: 0 7px; gap: 2px; }
+.composer-foot .textbtn, .composer-foot .codeproj--inline, .composer-foot .modelbtn { color: color-mix(in oklch, var(--text) 82%, var(--text-muted)); font-size: var(--text-sm); }
+.composer-foot .textbtn:hover, .composer-foot .codeproj--inline:hover, .composer-foot .modelbtn:hover { color: var(--text); }
+.composer-foot .textbtn--muted { color: var(--text-muted); }
+.composer-foot .textbtn .g-icon, .composer-foot .codeproj .g-icon { color: var(--text-muted); }
+.composer-foot .textbtn > .g-icon:last-child:not(:first-child), .composer-foot .codeproj .g-icon:last-child { opacity: 0.8; }
+.composer-foot__item { gap: 6px; }
+.sessusage__btn--ring { padding: 0 6px; }
+
+/* ── Conversation, matched to the Claude Desktop reference ──────────────────────────────────
+   Text column a little inside the composer's edges; activity ("Searched the code 6 times ›")
+   as one plain muted line at reading size; an even rhythm between steps; a thin scrollbar. */
+:root { --msg-inset: 18px; }
+.msg { max-width: calc(var(--content-max) - 2 * var(--msg-inset) + 2 * var(--chat-gutter)); padding-inline: calc(var(--chat-gutter) + var(--msg-inset)); }
+@media (max-width: 859px) { :root { --msg-inset: 0px; } }
+.turn { padding-inline: calc(var(--chat-gutter) + var(--msg-inset)); }
+/* Steps of one reply sit 12px apart whether or not they're separate messages. */
+.assistant { gap: var(--space-3); }
+.msg--assistant { padding-block: 6px; }
+.msg--tools { padding-block: 6px; }
+/* Your message: the hover actions don't add a tall empty row under the bubble. */
+.msg--user { padding-bottom: 2px; }
+.msg--user .msg__actions { min-height: 24px; margin-top: 2px; }
+/* Activity rows: no leading icon, reading size, muted; the chevron is always shown. */
+.tool__head, .thought summary { font-size: var(--chat-font-size); color: var(--text-muted); gap: 6px; padding: 2px 0; }
+.tool__head > .g-icon:first-child, .thought summary > .g-icon:first-child { display: none; }
+.tool__head .tool__chev { opacity: 1; color: var(--text-faint); }
+.tool__head:hover, .thought summary:hover { color: var(--text); }
+.tool__head:hover .tool__chev { color: var(--text-muted); }
+.thought summary { list-style: none; }
+.thought summary::-webkit-details-marker { display: none; }
+.thought summary::after { content: "›"; display: inline-block; color: var(--text-faint); margin-left: 2px; transition: transform var(--dur-base) var(--ease-out); }
+.thought[open] summary::after { transform: rotate(90deg); }
+.tool__title code { font-size: 0.86em; }
+/* The conversation keeps a thin scrollbar (everything else stays bare). */
+.transcript { scrollbar-width: auto; scrollbar-color: color-mix(in oklch, var(--text) 22%, transparent) transparent; }
+.transcript::-webkit-scrollbar { display: block; width: 10px; }
+.transcript::-webkit-scrollbar-track { background: transparent; }
+.transcript::-webkit-scrollbar-thumb { background: color-mix(in oklch, var(--text) 18%, transparent); border: 3px solid transparent; border-radius: 999px; background-clip: padding-box; }
+.transcript::-webkit-scrollbar-thumb:hover { background-color: color-mix(in oklch, var(--text) 32%, transparent); }
+/* "Started on this computer · AIO" above a Code session's first message. */
+.session-lead { display: flex; align-items: center; gap: 6px; max-width: calc(var(--content-max) - 2 * var(--msg-inset) + 2 * var(--chat-gutter)); margin: 0 auto; padding: var(--space-4) calc(var(--chat-gutter) + var(--msg-inset)) var(--space-1); font-size: var(--text-sm); color: var(--text-muted); }
+.session-lead__folder { padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 35%, transparent); text-underline-offset: 3px; }
+.session-lead__folder:hover, .session-lead__folder[aria-expanded="true"] { color: var(--text); text-decoration-color: currentColor; }

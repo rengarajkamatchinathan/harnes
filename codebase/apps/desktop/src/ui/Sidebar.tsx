@@ -10,7 +10,8 @@ import { sameWorkspace, type App } from "../state/app";
 import { useApp } from "./context";
 import { NewCodeSession } from "./code/NewCodeSession";
 import { CommandPalette, modKey } from "./CommandPalette";
-import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useShell } from "./shell";
+import { SIDEBAR_DEFAULT, SIDEBAR_MIN, useShell } from "./shell";
+import { ResizeHandle } from "./ResizeHandle";
 import { ShareHandoff } from "./Handoff";
 
 export type DateGroup = "pinned" | "today" | "yesterday" | "week" | "older";
@@ -159,41 +160,18 @@ const isMac = () => typeof navigator !== "undefined" && /Mac/i.test(navigator.pl
 /** Drag the sidebar's right edge to resize it; double-click resets; arrow keys step by 16 px. */
 function SidebarResize() {
   const app = useApp();
-  const drag = useRef<{ x: number; w: number } | null>(null);
-  const clamp = (w: number) => Math.round(Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, w)));
-  const shellEl = () => document.querySelector<HTMLElement>(".shell");
+  const shell = useShell();
   return (
-    <div
+    <ResizeHandle
+      edge="right"
       className="sidebar__resize"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={t("sidebar.resize")}
-      aria-valuemin={SIDEBAR_MIN}
-      aria-valuemax={SIDEBAR_MAX}
-      aria-valuenow={app.ui.sidebarWidth}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "ArrowLeft") app.setUi({ sidebarWidth: clamp(app.ui.sidebarWidth - 16) });
-        if (e.key === "ArrowRight") app.setUi({ sidebarWidth: clamp(app.ui.sidebarWidth + 16) });
-      }}
-      onDoubleClick={() => app.setUi({ sidebarWidth: SIDEBAR_DEFAULT })}
-      onPointerDown={(e) => {
-        drag.current = { x: e.clientX, w: app.ui.sidebarWidth };
-        e.currentTarget.setPointerCapture(e.pointerId);
-        shellEl()?.classList.add("shell--resizing");
-      }}
-      onPointerMove={(e) => {
-        if (!drag.current) return;
-        // Live-update the CSS variable; commit to state (and state.json) on release.
-        shellEl()?.style.setProperty("--sidebar-w", `${clamp(drag.current.w + e.clientX - drag.current.x)}px`);
-      }}
-      onPointerUp={(e) => {
-        if (!drag.current) return;
-        const w = clamp(drag.current.w + e.clientX - drag.current.x);
-        drag.current = null;
-        shellEl()?.classList.remove("shell--resizing");
-        app.setUi({ sidebarWidth: w });
-      }}
+      cssVar="--sidebar-w"
+      label={t("sidebar.resize")}
+      value={app.ui.sidebarWidth}
+      min={SIDEBAR_MIN}
+      max={shell.sidebarMax}
+      defaultValue={SIDEBAR_DEFAULT}
+      onCommit={(w) => app.setUi({ sidebarWidth: w })}
     />
   );
 }
@@ -234,7 +212,9 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [app, shell]);
 
-  const items = useMemo(() => [...app.sessions.values()].filter((s) => s.kind === ui.mode && !s.archived), [app.sessions, ui.mode]);
+  // Side chats belong to their Code session's panel, not the chat list.
+  const sideChatIds = useMemo(() => new Set(Object.values(ui.sideChats)), [ui.sideChats]);
+  const items = useMemo(() => [...app.sessions.values()].filter((s) => s.kind === ui.mode && !s.archived && !sideChatIds.has(s.session_id)), [app.sessions, ui.mode, sideChatIds]);
   const isNew = ui.view === "main" && !ui.activeSession;
   const startNew = () => app.setUi({ activeSession: null, view: "main", activeProject: null });
   const name = app.userName || t("sidebar.you");
@@ -252,6 +232,23 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
         <NavRow icon="search" label={t("sidebar.search")} onClick={() => setSearch(true)} badge={<kbd className="nav-row__kbd">{modKey()}K</kbd>} />
         {ui.mode === "chat" && <NavRow icon="projects" label={t("sidebar.projects")} onClick={() => app.setUi({ view: "project", activeProject: null, activeSession: null })} active={ui.view === "project" && !ui.activeProject} />}
         <NavRow icon="customize" label={t("sidebar.customize")} onClick={() => app.openDeepLink("genie://settings/general")} />
+        <Menu
+          label={t("sidebar.more")}
+          className="nav-more__list"
+          items={[
+            { id: "settings", label: t("sidebar.settings"), icon: "settings", shortcut: isMac() ? "⌘," : "Ctrl+,", onSelect: () => app.setUi({ view: "settings" }) },
+            { id: "usage", label: t("settings.section.usage"), icon: "chart", onSelect: go("usage") },
+            { id: "connectors", label: t("settings.section.connectors"), icon: "plug", onSelect: go("connectors") },
+            { id: "handoff", label: t("handoff.open"), icon: "download", separatorBefore: true, onSelect: () => app.pickHandoffFile?.() },
+            { id: "developer", label: t("settings.section.developer"), icon: "code", onSelect: go("developer") },
+          ]}
+          trigger={(p) => (
+            <button className="nav-row" {...p}>
+              <Icon name="more" />
+              <span className="sidebar__title">{t("sidebar.more")}</span>
+            </button>
+          )}
+        />
         {app.pendingAsks > 0 && (
           <div className="sidebar__asks">
             <Badge tone="warning">
@@ -284,12 +281,14 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
               <span className="avatar" aria-hidden>
                 {initials(app.userName)}
               </span>
-              <span className="sidebar__title">{name}</span>
-              <Icon name="chevronDown" size={12} />
+              <span className="profile__name">
+                <span className="sidebar__title">{name}</span>
+                {account && account !== name && <span className="profile__org"> · {account}</span>}
+              </span>
+              <Icon name="chevronDown" size={14} />
             </button>
           )}
         />
-        <IconButton icon="settings" size="sm" label={t("sidebar.settings")} onClick={() => app.setUi({ view: "settings" })} />
       </div>
 
       {!shell.overlay && <SidebarResize />}
@@ -367,7 +366,7 @@ export const folderName = (p: string) => p.replace(/^\\\\\?\\/, "").split(/[\\/]
  * Code mode's project switcher (D54): pick a project folder, or "No project". The sidebar then
  * lists only that project's sessions, and New starts sessions in it.
  */
-export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; variant?: "sidebar" | "inline" }) {
+export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; variant?: "sidebar" | "inline" | "card" }) {
   const current = app.ui.codeWorkspace;
   const known = app.codeWorkspaces;
   const choose = (w: string) => app.setUi({ codeWorkspace: w, activeSession: null, view: "main" });
@@ -392,8 +391,9 @@ export function CodeProjectPicker({ app, variant = "sidebar" }: { app: App; vari
       items={items}
       trigger={(p) => (
         <button className={`codeproj codeproj--${variant}`} title={current || t("code.noProject")} {...p}>
-          <Icon name={current ? "repo" : "chat"} size={variant === "sidebar" ? 16 : 14} />
-          <span className="codeproj__name">{current ? folderName(current) : t("code.noProject")}</span>
+          {variant === "sidebar" && <Icon name={current ? "repo" : "chat"} size={16} />}
+          {variant === "inline" && <Icon name="folder" size={14} />}
+          <span className="codeproj__name">{current ? folderName(current) : variant === "card" ? t("code.chooseProject") : t("code.noProject")}</span>
           <Icon name="chevronDown" size={12} />
         </button>
       )}
@@ -421,8 +421,8 @@ function CodeList({ items, app }: { items: SessionSummary[]; app: App }) {
     );
   return (
     <>
+      {projects.length > 0 && (
       <Section id="code:projects" title={t("code.projects")} action={<IconButton icon="plus" size="sm" label={t("code.openFolder")} onClick={openFolder} />} persistentAction>
-        {projects.length === 0 && <div className="sidebar__empty muted">{t("code.noProjects")}</div>}
         {projects.map((w) => {
           const name = folderName(w);
           const count = sorted.filter((s) => sameWorkspace(s.workspace_id, w)).length;
@@ -439,18 +439,40 @@ function CodeList({ items, app }: { items: SessionSummary[]; app: App }) {
           );
         })}
       </Section>
-      <Section id="code:all" title={t("code.allSessions")}>
-        {sorted.length === 0 ? (
-          <div className="sidebar__empty muted">{t("code.noSessionsAll")}</div>
-        ) : (
-          sorted.map((s) => <SessionRow key={s.session_id} s={s} app={app} code fresh={fresh(s.session_id)} hint={s.workspace_id ? folderName(s.workspace_id) : t("code.noProject")} />)
-        )}
-      </Section>
+      )}
+      {sorted.length === 0 ? (
+        <div className="sidebar__blank">
+          <span className="muted">{t("code.sessionsEmpty")}</span>
+          <PixelSparkles />
+        </div>
+      ) : (
+        <Section id="code:all" title={t("code.allSessions")}>
+          {sorted.map((s) => <SessionRow key={s.session_id} s={s} app={app} code fresh={fresh(s.session_id)} tip={s.workspace_id ? folderName(s.workspace_id) : t("code.noProject")} />)}
+        </Section>
+      )}
     </>
   );
 }
 
-function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App; code?: boolean; fresh?: boolean; hint?: string }) {
+/** Faint pixel-art sparkles under the empty session list (decorative). */
+const SPARKLE_PIXELS: [number, number, number][] = [
+  // [x, y, shade 1–3] on a 10 × 10 grid: one large four-point star and two small ones.
+  [5, 0, 2], [4, 1, 1], [5, 1, 3], [6, 1, 1], [3, 2, 1], [4, 2, 2], [5, 2, 3], [6, 2, 2], [7, 2, 1], [4, 3, 1], [5, 3, 3], [6, 3, 1], [5, 4, 2],
+  [1, 4, 1], [0, 5, 1], [1, 5, 2], [2, 5, 1], [1, 6, 1],
+  [8, 5, 1], [7, 6, 1], [8, 6, 2], [9, 6, 1], [8, 7, 1], [8, 8, 1],
+  [2, 8, 1], [5, 7, 1], [5, 9, 1],
+];
+function PixelSparkles() {
+  return (
+    <svg className="pixel-sparkles" width={80} height={80} viewBox="0 0 10 10" aria-hidden shapeRendering="crispEdges">
+      {SPARKLE_PIXELS.map(([x, y, shade]) => (
+        <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill="currentColor" opacity={shade === 3 ? 0.5 : shade === 2 ? 0.32 : 0.16} />
+      ))}
+    </svg>
+  );
+}
+
+function SessionRow({ s, app, code, fresh, hint, tip }: { s: SessionSummary; app: App; code?: boolean; fresh?: boolean; hint?: string; tip?: string }) {
   const [renaming, setRenaming] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -531,14 +553,17 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
       ) : (
         <button
           className="sidebar__link"
+          title={tip ? `${s.title || untitled} · ${tip}` : undefined}
           onClick={() => app.selectSession(s.session_id)}
           onKeyDown={(e) => e.key === "F2" && (e.preventDefault(), startRename())}
           aria-current={active ? "page" : undefined}
         >
-          {/* Only sessions that need attention get a mark; idle ones keep an empty slot so titles align. */}
-          <span className="sidebar__mark" aria-hidden={!STATUS_TONE[s.status]}>
-            {STATUS_TONE[s.status] && <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} />}
-          </span>
+          {/* Only sessions that need attention get a mark; idle titles sit flush with the headings. */}
+          {STATUS_TONE[s.status] && (
+            <span className="sidebar__mark">
+              <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} />
+            </span>
+          )}
           <span className="sidebar__title">{s.title || untitled}</span>
           {hint ? (
             <span className="sidebar__hint muted">{hint}</span>

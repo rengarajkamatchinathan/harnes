@@ -631,6 +631,14 @@ body {
   letter-spacing: 0.02em;
 }
 .g-menu__external { display: inline-grid; margin-left: auto; color: var(--text-faint); }
+/* Right edge of a row: a muted value ("High"), then the submenu chevron. The first trailing
+   element takes the free space so they all sit flush right. */
+.g-menu__value { margin-left: auto; padding-left: 16px; color: var(--text-muted); white-space: nowrap; }
+.g-menu__value + .g-menu__shortcut, .g-menu__value + .g-menu__check, .g-menu__value + .g-menu__chev { margin-left: 0; }
+.g-menu__chev { display: inline-grid; margin-left: auto; margin-right: -4px; color: var(--text-muted); }
+.g-menu__value + .g-menu__chev { margin-left: 2px; }
+.g-menu__item--sub[data-state="open"] { background: var(--surface-hover); }
+.g-menu__item--sub[data-state="open"] > .g-menu__chev, .g-menu__item--sub[data-highlighted] > .g-menu__chev { color: var(--text); }
 .g-select__item { padding-right: 10px; }
 .g-menu__label {
   padding: 6px 10px 4px;
