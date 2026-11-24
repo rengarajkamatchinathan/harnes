@@ -57,6 +57,10 @@ pub struct Settings {
     /// entries (context window, price, capabilities); validated by the catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models: Option<BTreeMap<String, Value>>,
+    /// Model ids left out of the model pickers (Settings → Models). The models stay in the
+    /// catalog, so they can be turned back on; unlike policy-hidden models (D38) they are not removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_models: Option<Vec<String>>,
     /// `secrets.backend: "file"` forces `secrets.enc` (03 §10.1); read at daemon start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets: Option<Value>,
@@ -257,6 +261,13 @@ pub const UI_META: &[KeyMeta] = &[
         key: "effort",
         title: "Reasoning effort",
         scopes: ALL,
+        restart_required: false,
+        advanced: false,
+    },
+    KeyMeta {
+        key: "hiddenModels",
+        title: "Hidden models",
+        scopes: USER,
         restart_required: false,
         advanced: false,
     },
@@ -587,5 +598,29 @@ mod tests {
         assert!(s.schema["properties"]["permissions"].is_object());
         assert_eq!(s.ui["keys"]["theme"]["scopes_allowed"], json!(["user"]));
         assert!(key_meta("permissions.allow").is_some());
+    }
+
+    #[test]
+    fn hidden_models_is_a_user_list_of_ids() {
+        let s = schema();
+        assert_eq!(
+            s.ui["keys"]["hiddenModels"]["scopes_allowed"],
+            json!(["user"])
+        );
+        // An optional array of strings (schemars writes `type: ["array", "null"]`).
+        let hm = &s.schema["properties"]["hiddenModels"];
+        assert!(hm["type"].to_string().contains("array"), "{hm}");
+        assert_eq!(hm["items"]["type"], "string", "{hm}");
+        let raw = json!({"hiddenModels": ["openai/gpt-x", "mock/genie-test"]});
+        let (ok, diags) = validate(raw.as_object().unwrap(), "user");
+        assert_eq!(
+            ok["hiddenModels"],
+            json!(["openai/gpt-x", "mock/genie-test"])
+        );
+        assert!(diags.is_empty());
+        let bad = json!({"hiddenModels": "openai/gpt-x"});
+        let (ok, diags) = validate(bad.as_object().unwrap(), "user");
+        assert!(!ok.contains_key("hiddenModels"));
+        assert_eq!(diags[0].key.as_deref(), Some("hiddenModels"));
     }
 }

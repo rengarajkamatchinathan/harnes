@@ -1,7 +1,7 @@
 // Budget guard UI: the editor (project page card, Settings → Usage), progress, and the
 // warning shown above the composer. Maths and storage rules live in state/budget.ts.
 import { useEffect, useState } from "react";
-import { Button, Field, Icon, Input, Progress, Segmented, Select } from "@genie/ui";
+import { Button, Field, Icon, Input, Progress, Segmented, Select, SettingsGroup } from "@genie/ui";
 import { t } from "../i18n";
 import type { App } from "../state/app";
 import { useEmitter } from "../state/emitter";
@@ -197,11 +197,12 @@ export function OverallBudget() {
   const app = useApp();
   const spend = useSpend(app, true, true);
   return (
-    <div className="budget-overall">
-      <h3 className="section-title">{t("budget.overallTitle")}</h3>
-      <p className="muted settings-note">{t("budget.overallHint")}</p>
-      <BudgetPanel budget={app.ui.budgets.overall} spent={spend.loadedAt ? spend.total : null} error={spend.error} onSave={(b) => setBudgets(app, (x) => ({ ...x, overall: b }))} />
-      <p className="muted settings-note">{t("budget.codeNote")}</p>
-    </div>
+    <SettingsGroup title={t("budget.overallTitle")}>
+      <div className="budget-overall">
+        <p className="muted settings-note">{t("budget.overallHint")}</p>
+        <BudgetPanel budget={app.ui.budgets.overall} spent={spend.loadedAt ? spend.total : null} error={spend.error} onSave={(b) => setBudgets(app, (x) => ({ ...x, overall: b }))} />
+        <p className="muted settings-note">{t("budget.codeNote")}</p>
+      </div>
+    </SettingsGroup>
   );
 }

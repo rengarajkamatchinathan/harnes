@@ -559,6 +559,122 @@ export function Menu({
   );
 }
 
+/** A titled block of settings: a small label above a rounded card whose rows are split by hairlines. */
+export function SettingsGroup({ title, action, children, className }: { title?: ReactNode; /** Right of the label (e.g. "Reset"). */ action?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={cx("g-sgroup", className)}>
+      {(title || action) && (
+        <div className="g-sgroup__head">
+          {title && <h3 className="g-sgroup__title">{title}</h3>}
+          {action && <div className="g-sgroup__action">{action}</div>}
+        </div>
+      )}
+      <div className="g-sgroup__card">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * One settings row: title with its description shown underneath, the control on the right,
+ * inline "Saved"/error and the admin lock. `stacked` puts the control under the text
+ * (multi-line inputs, forms).
+ */
+export function SettingRow({
+  label,
+  description,
+  error,
+  saved,
+  locked,
+  htmlFor,
+  children,
+  extra,
+  stacked,
+  leading,
+}: {
+  label: ReactNode;
+  description?: ReactNode;
+  error?: string | null;
+  saved?: boolean;
+  locked?: string | null;
+  htmlFor?: string;
+  children?: ReactNode;
+  extra?: ReactNode;
+  stacked?: boolean;
+  /** An icon or logo left of the text (provider marks). */
+  leading?: ReactNode;
+}) {
+  return (
+    <div className={cx("g-setrow", stacked && "g-setrow--stacked", leading != null && "g-setrow--leading")}>
+      {leading != null && <div className="g-setrow__leading">{leading}</div>}
+      <div className="g-setrow__text">
+        <div className="g-setrow__head">
+          <label className="g-setrow__label" htmlFor={htmlFor}>
+            {label}
+          </label>
+          {locked && (
+            <span className="g-field__lock">
+              <Icon name="lock" /> {locked}
+            </span>
+          )}
+          {saved && !error && (
+            <span className="g-field__saved" role="status">
+              Saved
+            </span>
+          )}
+          {extra}
+        </div>
+        {description && <div className="g-setrow__desc">{description}</div>}
+      </div>
+      {children != null && <div className="g-setrow__control">{children}</div>}
+      {error && (
+        <div className="g-field__error g-setrow__error" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** − value + number control (zoom, font sizes). */
+export function Stepper({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  next,
+  format,
+  label,
+  disabled,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  /** Uneven steps (zoom levels): the value after `v` in direction `dir`. */
+  next?: (v: number, dir: 1 | -1) => number;
+  format?: (v: number) => string;
+  label: string;
+  disabled?: boolean;
+}) {
+  const clamp = (v: number) => Math.max(min, Math.min(max, v));
+  const move = (dir: 1 | -1) => onChange(clamp(next ? next(value, dir) : Math.round((value + dir * step) / step) * step));
+  return (
+    <div className="g-stepper" role="group" aria-label={label}>
+      <button type="button" className="g-stepper__btn" aria-label={`Decrease ${label}`} disabled={disabled || value <= min} onClick={() => move(-1)}>
+        <Icon name="minus" size={14} />
+      </button>
+      <output className="g-stepper__value" aria-live="polite">
+        {format ? format(value) : value}
+      </output>
+      <button type="button" className="g-stepper__btn" aria-label={`Increase ${label}`} disabled={disabled || value >= max} onClick={() => move(1)}>
+        <Icon name="plus" size={14} />
+      </button>
+    </div>
+  );
+}
+
 /** Labelled settings row: description, inline "Saved"/error, admin lock (05 §4). */
 export function Field({
   label,

@@ -784,7 +784,11 @@ impl ProviderHub {
             }
             n if n == m::ModelList::NAME => {
                 let p = params::<m::ModelList>(r)?;
-                to_result(&self.model_list(p.provider.as_deref()).await)
+                to_result(
+                    &self
+                        .model_list(p.provider.as_deref(), p.include_hidden.unwrap_or(false))
+                        .await,
+                )
             }
             _ => to_result(&self.catalog_refresh().await?),
         }
@@ -1344,7 +1348,13 @@ impl ProviderHub {
         *self.catalog.write().unwrap_or_else(|p| p.into_inner()) = cat;
     }
 
-    pub async fn model_list(&self, provider: Option<&str>) -> ModelListResult {
+    /// Catalog + discovery + overrides. Models in the user's `hiddenModels` are left out
+    /// unless `include_hidden` (Settings lists them with their switches).
+    pub async fn model_list(
+        &self,
+        provider: Option<&str>,
+        include_hidden: bool,
+    ) -> ModelListResult {
         // Refresh stale discovery for providers that have credentials.
         let stale: Vec<(String, String)> = {
             let g = lock(&self.cat);
@@ -1368,11 +1378,19 @@ impl ProviderHub {
             }
         }
         self.rebuild_catalog();
+        let hidden: Vec<String> = if include_hidden {
+            vec![]
+        } else {
+            self.setting("hiddenModels")
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default()
+        };
         let cat = self.catalog.read().unwrap_or_else(|p| p.into_inner());
         let models = cat
             .entries()
             .filter(|e| provider.is_none_or(|p| e.provider == p))
             .filter(|e| !e.is_deprecated())
+            .filter(|e| !hidden.contains(&e.id))
             .map(model_info)
             .collect();
         ModelListResult { models }

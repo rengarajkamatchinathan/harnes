@@ -147,6 +147,10 @@ pub struct ProviderTestResult {
 pub struct ModelListParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Also list models the user turned off (`hiddenModels`). Model pickers leave this unset;
+    /// Settings → Models sets it to show every model with its switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_hidden: Option<bool>,
 }
 
 /// Model as merged from catalog + discovery + overrides (D27). The full catalog

@@ -174,7 +174,8 @@ fn daemon(fake: &Fake, secrets: SecretsChoice, policy: Option<Value>) -> Mem {
                 "azure-foundry": {"base_url": fake.base, "client_id": "genie-test",
                                   "authority": fake.base}
             },
-            "models": {"anthropic/claude-opus-5-5": {"context_window": 123456}}
+            "models": {"anthropic/claude-opus-5-5": {"context_window": 123456}},
+            "hiddenModels": ["anthropic/claude-haiku-5-5"]
         })
         .to_string(),
     )
@@ -441,6 +442,7 @@ async fn models_from_catalog_discovery_overrides_and_the_resolver() {
         .conn
         .call::<m::ModelList>(ModelListParams {
             provider: Some("openai".into()),
+            ..Default::default()
         })
         .await
         .unwrap()
@@ -460,6 +462,23 @@ async fn models_from_catalog_discovery_overrides_and_the_resolver() {
         .unwrap();
     assert_eq!(opus.context_window, Some(123456));
     assert!(opus.effort_levels.contains(&"high".to_string()));
+
+    // Models the user turned off stay out of the pickers but Settings can still list them.
+    assert!(all.iter().all(|m| m.id != "anthropic/claude-haiku-5-5"));
+    let with_hidden = c
+        .conn
+        .call::<m::ModelList>(ModelListParams {
+            include_hidden: Some(true),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .models;
+    assert!(
+        with_hidden
+            .iter()
+            .any(|m| m.id == "anthropic/claude-haiku-5-5")
+    );
 
     // The engine's resolver sees the discovered model, the Settings endpoint and the key.
     let r = mem.hub.resolver().unwrap();

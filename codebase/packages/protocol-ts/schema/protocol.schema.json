@@ -4044,6 +4044,13 @@
     },
     "ModelListParams": {
       "properties": {
+        "include_hidden": {
+          "description": "Also list models the user turned off (`hiddenModels`). Model pickers leave this unset;\nSettings → Models sets it to show every model with its switch.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "provider": {
           "type": [
             "string",

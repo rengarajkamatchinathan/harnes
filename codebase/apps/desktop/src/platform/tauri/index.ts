@@ -1,6 +1,7 @@
 // Tauri implementation of the Platform adapter. This folder is the ONLY place that may
 // import `@tauri-apps/*` (01 §1.3; enforced by test/architecture.test.ts).
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -47,6 +48,7 @@ export function createTauriPlatform(): Platform {
       if (ok) sendNotification({ title, body });
     },
     setWindowTheme: (theme) => getCurrentWindow().setTheme(theme),
+    setZoom: (scale) => getCurrentWebview().setZoom(scale),
     installCli: () => invoke<CliInstall>("host_install_cli"),
     notices: () => invoke<string | null>("host_notices"),
     artifactUrl(artifactId, n) {

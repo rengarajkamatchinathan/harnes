@@ -2,6 +2,11 @@
 // Call sites use the stable Genie names below, so swapping a glyph is a one-line change here.
 
 import {
+  ArrowLeft,
+  ArrowUpRight,
+  BookOpen,
+  Box,
+  Minus,
   GitMerge,
   GitPullRequest,
   ArrowDown,
@@ -77,6 +82,13 @@ import {
 
 const ICONS = {
   plus: Plus,
+  minus: Minus,
+  arrowLeft: ArrowLeft,
+  /** Marks a nav item that opens outside the app. */
+  arrowUpRight: ArrowUpRight,
+  /** Settings → Models. */
+  model: Box,
+  book: BookOpen,
   x: X,
   search: Search,
   settings: Settings,

@@ -83,14 +83,27 @@ export function description(s: Json | undefined): string | undefined {
   return typeof s?.description === "string" ? s.description : undefined;
 }
 
-export type SectionId = "general" | "appearance" | "genie" | "providers" | "capabilities" | "connectors" | "permissions" | "usage" | "privacy" | "developer" | "account";
+export type SectionId = "general" | "appearance" | "genie" | "models" | "providers" | "capabilities" | "connectors" | "permissions" | "usage" | "privacy" | "developer" | "account";
 
-export const SECTIONS: SectionId[] = ["general", "appearance", "genie", "providers", "capabilities", "connectors", "permissions", "usage", "privacy", "developer", "account"];
+export const SECTIONS: SectionId[] = ["general", "appearance", "genie", "models", "providers", "capabilities", "connectors", "permissions", "usage", "privacy", "developer", "account"];
+
+/** Sections listed in the left column; Account opens from the profile row at its foot. */
+export const NAV_SECTIONS: SectionId[] = SECTIONS.filter((s) => s !== "account");
+
+/** Zoom steps for Appearance → Zoom and ⌘= / ⌘-, as in a browser. */
+export const ZOOM_STEPS = [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+
+/** The next zoom step up (`dir` 1) or down (-1) from `z`. */
+export function stepZoom(z: number, dir: 1 | -1): number {
+  if (dir > 0) return ZOOM_STEPS.find((s) => s > z + 0.001) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  return [...ZOOM_STEPS].reverse().find((s) => s < z - 0.001) ?? ZOOM_STEPS[0];
+}
 
 /** Which Settings section shows a schema key (05 §4 table). */
 export function sectionOf(key: string): SectionId {
   const top = key.split(".")[0];
-  if (["model", "smallModel", "effort", "updates"].includes(top)) return "general";
+  if (["model", "smallModel", "effort", "hiddenModels"].includes(top)) return "models";
+  if (top === "updates") return "general";
   if (top === "theme") return "appearance";
   if (["memory", "chatSearch", "instructions"].includes(top)) return "genie";
   if (["webSearch", "codeExecution", "artifacts", "browser", "imageGeneration"].includes(top)) return "capabilities";
