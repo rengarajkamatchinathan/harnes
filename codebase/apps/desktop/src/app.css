@@ -152,16 +152,11 @@ code { font-size: 0.92em; }
 .sidebar__empty { padding: var(--space-2) 10px; font-size: var(--text-sm); }
 .sidebar__footer { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2); border-top: 1px solid var(--border-subtle); }
 .sidebar__list { mask-image: linear-gradient(to bottom, transparent 0, #000 8px, #000 calc(100% - 16px), transparent 100%); }
-.sidebar__footer .g-menu { flex: 1; min-width: 0; }
+.sidebar__footer > .profile { flex: 1; min-width: 0; }
 .sidebar__footer > .g-btn { color: var(--text-muted); }
 .profile { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 var(--space-2); border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; font-size: var(--text-base); cursor: pointer; text-align: left; transition: background-color var(--dur-fast) var(--ease); }
 .profile:hover { background: var(--surface-hover); }
-.profile > .g-icon { color: var(--text-muted); transition: transform var(--dur-base) var(--ease-out); }
-.profile[aria-expanded="true"] { background: var(--surface-hover); }
-.profile[aria-expanded="true"] > .g-icon { transform: rotate(180deg); }
 /* The account menu opens upward across the footer (profile button + settings icon). */
-.profile-menu { min-width: max(240px, calc(var(--radix-dropdown-menu-trigger-width) + 32px)); }
-.profile-menu .g-menu__item { min-height: 34px; }
 .avatar { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 600; flex: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-7); flex: none; margin: 0 3px; }
 .dot--running { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
@@ -571,9 +566,13 @@ code { font-size: 0.92em; }
 .page__inner { max-width: 760px; margin: 0 auto; padding: var(--space-6) var(--space-4); }
 .title-input { font-size: var(--text-lg); font-weight: 600; }
 /* ---------- Settings: a full-window page (left column + centred column of cards) ---------- */
-.settings { position: fixed; inset: 0; z-index: 90; display: grid; grid-template-columns: 260px minmax(0, 1fr); background: var(--bg); color: var(--text); animation: settings-in var(--dur-fast) var(--ease-out); }
+/* The left column takes the app sidebar's width, so opening Settings doesn't shift the left edge. */
+.settings { position: fixed; inset: 0; z-index: 90; display: grid; grid-template-columns: clamp(220px, var(--sidebar-w, 260px), 480px) minmax(0, 1fr); background: var(--bg); color: var(--text); animation: settings-in var(--dur-fast) var(--ease-out); }
 @keyframes settings-in { from { opacity: 0; } }
-.settings__side { display: flex; flex-direction: column; min-height: 0; padding: 0 var(--space-2) var(--space-2); background: var(--sidebar-bg); border-right: 1px solid var(--border-subtle); }
+.settings__side { display: flex; flex-direction: column; min-height: 0; background: var(--sidebar-bg); border-right: 1px solid var(--border-subtle); }
+/* Same 8px gutter as the app sidebar; the footer (shared with it) spans the full width. */
+.settings__side > .settings__back, .settings__side > .settings__search, .settings__side > .settings__nav { margin-left: var(--space-2); margin-right: var(--space-2); }
+.settings__nav { padding-bottom: var(--space-2); }
 /* Window drag strip; on macOS it also leaves room for the traffic lights. */
 .settings__drag { flex: none; height: var(--titlebar-h); }
 .settings__drag--body { position: sticky; top: 0; z-index: 1; height: var(--titlebar-h); margin-bottom: calc(-1 * var(--titlebar-h)); }
@@ -582,16 +581,12 @@ code { font-size: 0.92em; }
 .settings__search { height: 30px; margin: 0 0 var(--space-3); background: var(--surface); }
 .settings__nav { display: flex; flex-direction: column; gap: 1px; flex: 1; min-height: 0; overflow: auto; }
 .settings__navgroup { display: contents; }
-.settings__navitem, .settings__profile { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
+.settings__navitem { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; border: none; border-radius: var(--radius-md); background: none; color: var(--text); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
 .settings__navitem .g-icon { color: var(--text-muted); flex: none; }
-.settings__navitem:hover, .settings__profile:hover { background: var(--surface-hover); }
-.settings__navitem.is-active, .settings__profile.is-active { background: var(--surface-active); }
+.settings__navitem:hover { background: var(--surface-hover); }
+.settings__navitem.is-active { background: var(--surface-active); }
 .settings__navitem.is-active .g-icon { color: var(--text); }
 .settings__sep { border: none; border-top: 1px solid var(--border-subtle); margin: var(--space-2) 8px; }
-.settings__foot { display: flex; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); }
-.settings__foot > .g-btn { color: var(--text-muted); }
-.settings__profile { flex: 1; min-width: 0; height: 36px; }
-.settings__profile-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings__body { position: relative; overflow: auto; min-width: 0; }
 .settings__inner { width: 100%; max-width: 728px; margin: 0 auto; padding: calc(var(--titlebar-h) + var(--space-2)) var(--space-6) var(--space-8); }
 .settings__header { margin: 0 0 var(--space-5); padding: 0 var(--space-1); }
@@ -624,7 +619,7 @@ code { font-size: 0.92em; }
   .settings__side { border-right: none; border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-2); }
   .settings__nav { flex-direction: row; overflow-x: auto; }
   .settings__navitem { flex: none; }
-  .settings__sep, .settings__foot { display: none; }
+  .settings__sep, .settings__side > .sidebar__footer { display: none; }
   .settings__inner { padding: var(--space-4) var(--space-4) var(--space-8); }
   .settings__drag--body { display: none; }
 }
@@ -1245,7 +1240,6 @@ a.preview-path { color: var(--accent-text); }
 .profile__name { flex: 1; min-width: 0; display: flex; align-items: baseline; overflow: hidden; white-space: nowrap; }
 .profile__name .sidebar__title { flex: 0 1 auto; }
 .profile__org { flex: none; color: var(--text-muted); font-size: var(--text-sm); white-space: pre; }
-.profile > .g-icon { margin-left: auto; }
 .folder-card { grid-template-columns: minmax(0, 1fr); width: min(320px, 100%); }
 .folder-card__box { min-width: 0; }
 

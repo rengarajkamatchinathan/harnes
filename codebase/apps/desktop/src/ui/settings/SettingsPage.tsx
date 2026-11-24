@@ -6,10 +6,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ConfigGetResult, ConfigScope } from "@genie/protocol";
 import type { ReactNode } from "react";
-import { Banner, Button, Icon, IconButton, Input, Segmented, Select, SettingRow, SettingsGroup, Switch, Textarea, type IconName } from "@genie/ui";
+import { Banner, Button, Icon, Input, Segmented, Select, SettingRow, SettingsGroup, Switch, Textarea, type IconName } from "@genie/ui";
 import { t, type MsgKey } from "../../i18n";
 import { useApp, useAsync } from "../context";
-import { initials } from "../Sidebar";
+import { ProfileFooter } from "../Sidebar";
 import { coerce, controlFor, description, keySchema, matches, NAV_SECTIONS, sectionOf, SECTIONS, uiKeys, type Control, type KeyMeta, type SectionId } from "./schema";
 import { AccountSection, AppearanceSection, CapabilitiesSection, ConnectorsSection, DeveloperSection, GeneralSection, GenieSection, PrivacySection, UsageSection } from "./Sections";
 import { ProvidersSection, providerMeta } from "./ProvidersSection";
@@ -194,15 +194,8 @@ export function SettingsPage() {
             </div>
           ))}
         </nav>
-        <div className="settings__foot">
-          <button type="button" className={`settings__profile ${!q && section === "account" ? "is-active" : ""}`} aria-current={!q && section === "account" ? "page" : undefined} onClick={() => go("account")}>
-            <span className="avatar" aria-hidden>
-              {initials(app.userName)}
-            </span>
-            <span className="settings__profile-name">{app.userName || t("sidebar.you")}</span>
-          </button>
-          <IconButton icon="settings" size="sm" label={t("settings.profileSettings")} onClick={() => go("account")} />
-        </div>
+        {/* The app sidebar's own footer, so the avatar and gear stay exactly where they were. */}
+        <ProfileFooter onAccount={() => go("account")} onSettings={() => go("general")} />
       </aside>
       <div className="settings__body">
         <div className="settings__drag settings__drag--body" data-tauri-drag-region />

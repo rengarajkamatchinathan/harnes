@@ -149,6 +149,30 @@ function useFreshIds(ids: string[]): (id: string) => boolean {
   return (id) => (until.current.get(id) ?? 0) > now;
 }
 
+/**
+ * Who you are (opens Account & licence) and a gear that opens Settings. The app sidebar and
+ * the Settings page both draw this one footer, so it doesn't move when Settings opens.
+ */
+export function ProfileFooter({ onAccount, onSettings }: { onAccount: () => void; onSettings: () => void }) {
+  const app = useApp();
+  const name = app.userName || t("sidebar.you");
+  const account = app.info?.user_name?.trim();
+  return (
+    <div className="sidebar__footer">
+      <button type="button" className="profile" onClick={onAccount} title={account ? t("sidebar.signedIn", { name: account }) : t("sidebar.localProfile")}>
+        <span className="avatar" aria-hidden>
+          {initials(app.userName)}
+        </span>
+        <span className="profile__name">
+          <span className="sidebar__title">{name}</span>
+          {account && account !== name && <span className="profile__org"> · {account}</span>}
+        </span>
+      </button>
+      <IconButton icon="settings" size="sm" label={t("sidebar.settings")} shortcut={isMac() ? "⌘," : "Ctrl+,"} onClick={onSettings} />
+    </div>
+  );
+}
+
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "G";
@@ -217,8 +241,6 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const items = useMemo(() => [...app.sessions.values()].filter((s) => s.kind === ui.mode && !s.archived && !sideChatIds.has(s.session_id)), [app.sessions, ui.mode, sideChatIds]);
   const isNew = ui.view === "main" && !ui.activeSession;
   const startNew = () => app.setUi({ activeSession: null, view: "main", activeProject: null });
-  const name = app.userName || t("sidebar.you");
-  const account = app.info?.user_name?.trim();
   const go = (section: string) => () => app.openDeepLink(`genie://settings/${section}`);
 
   return (
@@ -262,34 +284,7 @@ export function Sidebar({ hidden = false }: { hidden?: boolean }) {
         {ui.mode === "chat" ? <ChatList items={items} app={app} onNewProject={() => setNewProject(true)} /> : <CodeList items={items} app={app} />}
       </div>
 
-      <div className="sidebar__footer">
-        <Menu
-          label={t("sidebar.account")}
-          placement="up"
-          className="profile-menu"
-          header={account ? t("sidebar.signedIn", { name: account }) : t("sidebar.localProfile")}
-          items={[
-            { id: "settings", label: t("sidebar.settings"), icon: "settings", shortcut: isMac() ? "⌘," : "Ctrl+,", onSelect: () => app.setUi({ view: "settings" }) },
-            { id: "account", label: t("settings.section.account"), icon: "user", onSelect: go("account") },
-            { id: "usage", label: t("settings.section.usage"), icon: "chart", onSelect: go("usage") },
-            { id: "appearance", label: t("settings.section.appearance"), icon: "palette", onSelect: go("appearance") },
-            { id: "connectors", label: t("settings.section.connectors"), icon: "plug", onSelect: go("connectors") },
-            { id: "developer", label: t("settings.section.developer"), icon: "code", separatorBefore: true, onSelect: go("developer") },
-          ]}
-          trigger={(p) => (
-            <button className="profile" {...p}>
-              <span className="avatar" aria-hidden>
-                {initials(app.userName)}
-              </span>
-              <span className="profile__name">
-                <span className="sidebar__title">{name}</span>
-                {account && account !== name && <span className="profile__org"> · {account}</span>}
-              </span>
-              <Icon name="chevronDown" size={14} />
-            </button>
-          )}
-        />
-      </div>
+      <ProfileFooter onAccount={go("account")} onSettings={() => app.setUi({ view: "settings" })} />
 
       {!shell.overlay && <SidebarResize />}
       {search && <CommandPalette onClose={() => setSearch(false)} onNewProject={() => setNewProject(true)} onNewCode={() => setNewCode("")} />}

@@ -773,7 +773,6 @@ const en = {
   "settings.accountHint": "Your name, licence and app version",
   "settings.manage": "Manage",
   "settings.lede.models": "Choose which models appear in the model picker",
-  "settings.profileSettings": "Account & licence",
   "models.list": "Models",
   "models.search": "Search models",
   "models.refresh": "Refresh models",
