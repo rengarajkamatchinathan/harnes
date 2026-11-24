@@ -3,7 +3,7 @@
 // Privacy → Delete all data (two-step, type-to-confirm, 04 §8).
 import { useState } from "react";
 import type { DeleteAllBeginResult, PermissionRule, TrustedFolder } from "@genie/protocol";
-import { Badge, Banner, Button, Dialog, Field, Icon, Input, Select } from "@genie/ui";
+import { Badge, Banner, Button, Dialog, Icon, Input, Select, SettingRow, SettingsGroup } from "@genie/ui";
 import { t } from "../../i18n";
 import { errorKind } from "../../platform";
 import { formatBytes } from "../../state/attachments";
@@ -26,15 +26,15 @@ export function PermissionsSection() {
 
   const list: PermissionRule[] = rules.data?.rules ?? [];
   return (
-    <div className="settings-group">
-      <h3 className="section-title">{t("permissions.rules")}</h3>
+    <>
+    <SettingsGroup title={t("permissions.rules")}>
       {app.ui.recentWorkspaces.length > 0 && (
-        <Field inline label={t("permissions.folder")}>
+        <SettingRow label={t("permissions.folder")}>
           <Select value={cwd} onChange={setCwd} aria-label={t("permissions.folder")} options={[{ value: "", label: t("permissions.allFolders") }, ...app.ui.recentWorkspaces.map((w) => ({ value: w, label: w }))]} />
-        </Field>
+        </SettingRow>
       )}
       {rules.error ? <p className="muted">{app.describeError(rules.error)}</p> : null}
-      {rules.data && !list.length && <p className="muted settings-note">{t("permissions.none")}</p>}
+      {rules.data && !list.length && <p className="muted">{t("permissions.none")}</p>}
       {list.length > 0 && (
         <table className="table">
           <tbody>
@@ -66,21 +66,24 @@ export function PermissionsSection() {
           </tbody>
         </table>
       )}
-      <h3 className="section-title">{t("permissions.trusted")}</h3>
+    </SettingsGroup>
+    <SettingsGroup title={t("permissions.trusted")}>
       {trust.error ? <p className="muted">{app.describeError(trust.error)}</p> : null}
-      {trust.data && !trust.data.items.length && <p className="muted settings-note">{t("permissions.noTrusted")}</p>}
+      {trust.data && !trust.data.items.length && <p className="muted">{t("permissions.noTrusted")}</p>}
       {(trust.data?.items ?? []).map((f) => (
-        <div key={f.path} className="row settings-row">
-          <Badge tone={f.decision === "trust" ? "success" : "danger"}>{f.decision === "trust" ? t("permissions.trustedBadge") : t("permissions.blockedBadge")}</Badge>
-          <code className="grow">{f.path}</code>
-          {!!f.approvals && <span className="muted">{t("permissions.approvals", { n: f.approvals })}</span>}
-          <span className="muted">{new Date(f.decided_at).toLocaleDateString()}</span>
+        <SettingRow
+          key={f.path}
+          label={<code>{f.path}</code>}
+          extra={<Badge tone={f.decision === "trust" ? "success" : "danger"}>{f.decision === "trust" ? t("permissions.trustedBadge") : t("permissions.blockedBadge")}</Badge>}
+          description={[f.approvals ? t("permissions.approvals", { n: f.approvals }) : "", new Date(f.decided_at).toLocaleDateString()].filter(Boolean).join(" · ")}
+        >
           <Button size="sm" onClick={() => revoke(f)}>
             {t("permissions.revoke")}
           </Button>
-        </div>
+        </SettingRow>
       ))}
-    </div>
+    </SettingsGroup>
+    </>
   );
 }
 
@@ -110,8 +113,8 @@ export function DeleteAllData() {
     }
   };
   return (
-    <Field inline label={t("privacy.deleteAll")} description={t("privacy.deleteAllHint")}>
-      <Button variant="danger" onClick={begin}>
+    <SettingRow label={t("privacy.deleteAll")} description={t("privacy.deleteAllHint")}>
+      <Button size="sm" variant="danger" onClick={begin}>
         {t("privacy.deleteAllShort")}
       </Button>
       <Dialog
@@ -138,6 +141,6 @@ export function DeleteAllData() {
           </div>
         )}
       </Dialog>
-    </Field>
+    </SettingRow>
   );
 }

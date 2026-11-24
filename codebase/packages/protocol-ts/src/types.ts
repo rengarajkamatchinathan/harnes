@@ -1122,6 +1122,11 @@ export interface ModelInfo {
 }
 
 export interface ModelListParams {
+  /**
+   * Also list models the user turned off (`hiddenModels`). Model pickers leave this unset;
+   * Settings → Models sets it to show every model with its switch.
+   */
+  include_hidden?: boolean | null;
   provider?: string | null;
 }
 

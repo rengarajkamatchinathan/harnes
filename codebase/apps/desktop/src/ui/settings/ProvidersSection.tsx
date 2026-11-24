@@ -7,7 +7,7 @@
 // under Advanced; the catalog status is a footnote.
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { CredentialInfo, LoginStartResult, ModelInfo, ProviderInfo } from "@genie/protocol";
-import { Banner, Button, Dialog, Field, Icon, IconButton, Input, Spinner } from "@genie/ui";
+import { Banner, Button, Dialog, Field, Icon, IconButton, Input, SettingRow, SettingsGroup, Spinner } from "@genie/ui";
 import { plural, t, type MsgKey } from "../../i18n";
 import { useApp, useAsync } from "../context";
 
@@ -281,41 +281,40 @@ export function ProvidersSection({ advanced }: { advanced?: ReactNode }) {
 
   return (
     <div className="providers">
-      <p className="muted providers__lede">{t("providers.lede")}</p>
-
       {connected.length > 0 && (
-        <>
-          <h3 className="section-title">{t("providers.connected")}</h3>
-          <div className="prov-list">
-            {connected.map((p) => (
-              <ProviderRow key={p.id} p={p} models={modelsOf(p.id)} cfg={cfg[p.id] ?? {}} open={open.has(p.id)} onToggle={() => toggle(p.id)} />
-            ))}
-          </div>
-        </>
+        <SettingsGroup title={t("providers.connected")}>
+          {connected.map((p) => (
+            <ProviderRow key={p.id} p={p} models={modelsOf(p.id)} cfg={cfg[p.id] ?? {}} open={open.has(p.id)} onToggle={() => toggle(p.id)} />
+          ))}
+        </SettingsGroup>
       )}
 
-      <h3 className="section-title">{connected.length ? t("providers.add") : t("providers.addFirst")}</h3>
-      <div className="prov-grid">
+      <SettingsGroup title={connected.length ? t("providers.add") : t("providers.addFirst")}>
         {available.map((p) => (
           <ProviderTile key={p.id} p={p} onConnect={() => setConnect(p)} />
         ))}
-        <button type="button" className="prov-tile prov-tile--custom" onClick={() => setConnect("custom")}>
-          <span className="prov-mark prov-mark--ghost" aria-hidden>
-            <Icon name="plus" size={14} />
-          </span>
-          <span className="prov-tile__text">
-            <span className="prov-tile__name">{t("providers.custom")}</span>
-            <span className="prov-tile__blurb">{t("providers.customBlurb")}</span>
-          </span>
-        </button>
-      </div>
+        <SettingRow
+          leading={
+            <span className="prov-mark prov-mark--ghost" aria-hidden>
+              <Icon name="plus" size={14} />
+            </span>
+          }
+          label={t("providers.custom")}
+          description={t("providers.customBlurb")}
+        >
+          <Button size="sm" onClick={() => setConnect("custom")}>
+            {t("providers.addCustom")}
+          </Button>
+        </SettingRow>
+      </SettingsGroup>
 
-      <div className="prov-foot">
-        <span className="muted">{catalog.data ? catalogText(catalog.data.source, catalog.data.fetched_at) : t("providers.catalog.loading")}</span>
-        <Button size="sm" variant="ghost" icon="refresh" disabled={refreshing} onClick={() => void refreshCatalog()}>
-          {refreshing ? t("providers.refreshing") : t("providers.refresh")}
-        </Button>
-      </div>
+      <SettingsGroup>
+        <SettingRow label={t("providers.catalogTitle")} description={catalog.data ? catalogText(catalog.data.source, catalog.data.fetched_at) : t("common.loading")}>
+          <Button size="sm" icon="refresh" disabled={refreshing} onClick={() => void refreshCatalog()}>
+            {refreshing ? t("providers.refreshing") : t("providers.refresh")}
+          </Button>
+        </SettingRow>
+      </SettingsGroup>
 
       {advanced && (
         <details className="prov-advanced">
@@ -395,39 +394,23 @@ function Status({ p }: { p: ProviderInfo }) {
   );
 }
 
-/** The whole tile is the button: one click opens setup. */
+/** A provider that isn't connected yet: logo, name and blurb, and Connect (opens setup). */
 function ProviderTile({ p, onConnect }: { p: ProviderInfo; onConnect: () => void }) {
   const meta = providerMeta(p);
   const blocked = p.status === "disabled";
-  const body = (
-    <>
-      <Mark meta={meta} ghost={blocked} />
-      <span className="prov-tile__text">
-        <span className="prov-tile__name">{meta.name}</span>
-        <span className="prov-tile__blurb">
-          {blocked ? (
-            <>
-              <Icon name="lock" size={12} /> {t("providers.blocked")}
-            </>
-          ) : (
-            t(meta.blurb)
-          )}
-        </span>
-      </span>
+  return (
+    <SettingRow
+      leading={<Mark meta={meta} ghost={blocked} />}
+      label={meta.name}
+      description={t(meta.blurb)}
+      locked={blocked ? t("providers.blocked") : null}
+    >
       {!blocked && (
-        <span className="prov-tile__go" aria-hidden>
+        <Button size="sm" onClick={onConnect} aria-label={t("providers.connectTitle", { name: meta.name })}>
           {t("providers.connect")}
-          <Icon name="chevronRight" size={14} />
-        </span>
+        </Button>
       )}
-    </>
-  );
-  return blocked ? (
-    <div className="prov-tile is-blocked">{body}</div>
-  ) : (
-    <button type="button" className="prov-tile" onClick={onConnect} aria-label={t("providers.connectTitle", { name: meta.name })}>
-      {body}
-    </button>
+    </SettingRow>
   );
 }
 
@@ -442,7 +425,7 @@ function ProviderRow({ p, models, cfg, open, onToggle }: { p: ProviderInfo; mode
   const bodyId = `prov-${p.id}`;
   const needsEndpoint = meta.endpoint === "required" && !cfg.base_url && !p.endpoint;
   return (
-    <div className={`prov-row ${open ? "is-open" : ""} ${p.status === "error" ? "is-error" : ""}`}>
+    <div className={`prov-row g-sgroup__flush ${open ? "is-open" : ""} ${p.status === "error" ? "is-error" : ""}`}>
       <button type="button" className="prov-row__head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
         <Mark meta={meta} />
         <span className="prov-row__text">

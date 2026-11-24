@@ -92,6 +92,8 @@ export interface Platform {
   notify(title: string, body?: string): Promise<void>;
   /** Native window chrome (title bar) theme; null follows the OS. Keeps the title bar matching the app's theme setting. */
   setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
+  /** Scale the whole window's content (Settings → Appearance → Zoom); 1 = 100%. */
+  setZoom(scale: number): Promise<void>;
   /** "Install `genie` command in PATH" (D40). */
   installCli(): Promise<CliInstall>;
   /** Third-party licence notices shipped with the app; null when not bundled. */

@@ -31,6 +31,7 @@ import { DevServers } from "./devServers";
 import { Terminals } from "./terminals";
 import type { Handoff } from "./handoff";
 import { chatModels } from "./modelFilter";
+import { playChime } from "./sound";
 
 export type View = "main" | "settings" | "project" | "folder" | "handoff";
 export type PanelTab = "artifact" | "browser" | "changes" | "files" | "terminal" | "sidechat" | "tasks";
@@ -67,6 +68,12 @@ export interface UiState {
   terminals: Record<string, { id: string; title: string }[]>;
   /** OS notifications for paused asks when the window is in the background. */
   osNotifications: boolean;
+  /** Play a short chime when a turn finishes or Genie needs approval (Settings → General). */
+  completionSound: boolean;
+  /** Whole-window zoom, 1 = 100% (Settings → Appearance). */
+  zoom: number;
+  /** Wrap long lines in chat code blocks instead of scrolling sideways. */
+  codeWrap: boolean;
   /** The D35 notice was shown before code execution was first turned on. */
   codeExecNoticeSeen: boolean;
   /** "What should Genie call you?" — greeting and sidebar footer. */
@@ -124,6 +131,9 @@ const DEFAULT_UI: UiState = {
   codeMode: "default",
   terminals: {},
   osNotifications: true,
+  completionSound: false,
+  zoom: 1,
+  codeWrap: false,
   codeExecNoticeSeen: false,
   displayName: "",
   sidebarCollapsed: false,
@@ -147,6 +157,8 @@ interface Loc {
   codeWorkspace: string;
 }
 const locOf = (u: UiState): Loc => ({ mode: u.mode, view: u.view, activeSession: u.activeSession, activeProject: u.activeProject, codeWorkspace: u.codeWorkspace });
+/** An event from just now, not one replayed from history when a session is opened. */
+const isLive = (ts: string) => Date.now() - Date.parse(ts) < 15_000;
 const sameLoc = (a: Loc, b: Loc) => a.mode === b.mode && a.view === b.view && a.activeSession === b.activeSession && a.activeProject === b.activeProject && (a.view !== "folder" || a.codeWorkspace === b.codeWorkspace);
 
 export interface Toast {
@@ -180,6 +192,10 @@ export class App extends Emitter {
   providers: ProviderInfo[] = [];
   /** The `model` setting (default model for new sessions), if any. */
   configModel: string | null = null;
+  /** The view Settings was opened from; its Back button returns there. */
+  settingsFrom: View = "main";
+  /** `hiddenModels` from settings: left out of the model pickers. */
+  hiddenModels: Set<string> = new Set();
   toasts: Toast[] = [];
   /** Month-to-date spend for the budget guard. */
   readonly budgetSpend = new BudgetSpend((p) => this.client.usage.query(p));
@@ -309,7 +325,9 @@ export class App extends Emitter {
     const before = locOf(this.ui);
     this.ui = { ...this.ui, ...patch };
     const after = locOf(this.ui);
-    // Settings is a modal over the current place, so it is not a history step.
+    // Back from Settings returns to the page it was opened from.
+    if (after.view === "settings" && before.view !== "settings") this.settingsFrom = before.view;
+    // Settings covers the current place rather than replacing it, so it is not a history step.
     if (!this.navigating && !sameLoc(before, after) && before.view !== "settings" && after.view !== "settings") {
       this.backStack.push(before);
       if (this.backStack.length > 50) this.backStack.shift();
@@ -431,11 +449,15 @@ export class App extends Emitter {
   }
 
   async refreshLists() {
-    const [projects, models, providers, cfg] = await Promise.allSettled([this.client.project.list({}), this.client.model.list({}), this.client.provider.list({}), this.client.config.get({ keys: ["model"] })]);
+    const [projects, models, providers, cfg] = await Promise.allSettled([this.client.project.list({}), this.client.model.list({ include_hidden: true }), this.client.provider.list({}), this.client.config.get({ keys: ["model", "hiddenModels"] })]);
     if (projects.status === "fulfilled") this.projects = projects.value.projects;
     if (models.status === "fulfilled") this.models = models.value.models;
     if (providers.status === "fulfilled") this.providers = providers.value.providers;
-    if (cfg.status === "fulfilled") this.configModel = typeof cfg.value.values.model === "string" && cfg.value.values.model ? cfg.value.values.model : null;
+    if (cfg.status === "fulfilled") {
+      this.configModel = typeof cfg.value.values.model === "string" && cfg.value.values.model ? cfg.value.values.model : null;
+      const hidden = cfg.value.values.hiddenModels;
+      this.hiddenModels = new Set(Array.isArray(hidden) ? hidden.filter((x): x is string => typeof x === "string") : []);
+    }
     this.changed();
   }
 
@@ -444,6 +466,12 @@ export class App extends Emitter {
    * a provider that is Ready (credential present, endpoint set, not blocked) can serve one.
    */
   get usableModels(): ModelInfo[] {
+    // Models turned off in Settings → Models stay out of the pickers.
+    return this.chatReadyModels.filter((m) => !this.hiddenModels.has(m.id));
+  }
+
+  /** Chat models from ready providers, including ones hidden from the pickers (Settings → Models lists these). */
+  get chatReadyModels(): ModelInfo[] {
     const ready = new Set(this.providers.filter((p) => p.status === "ready").map((p) => p.id));
     // Only models that can chat: special-purpose families (computer use, deep research…) are left out.
     return chatModels(this.models, ready);
@@ -467,6 +495,7 @@ export class App extends Emitter {
           return;
         }
         this.open.get(env.session_id)?.apply(env);
+        if (env.event.type === "turn.settled" && !env.subagent_of && isLive(env.ts)) this.chime();
         return;
       }
       case "terminal.exited":
@@ -511,7 +540,7 @@ export class App extends Emitter {
       case "policy.changed": {
         const keys = (params as { keys?: string[] }).keys ?? [];
         this.configListeners.forEach((f) => f(keys));
-        if (!keys.length || keys.some((k) => k === "model" || k.startsWith("providers"))) void this.refreshLists();
+        if (!keys.length || keys.some((k) => k === "model" || k === "hiddenModels" || k.startsWith("providers"))) void this.refreshLists();
         return;
       }
       case "commands.changed":
@@ -548,6 +577,7 @@ export class App extends Emitter {
     // The turn is paused on us: tell the user if Genie isn't in front (05 §4 notifications).
     const title = this.sessions.get(ask.session_id)?.title;
     this.osNotify("Genie needs your approval", [ask.tool ?? ask.kind, title].filter(Boolean).join(" · "));
+    this.chime();
     const s = this.open.get(ask.session_id);
     if (s) s.addAsk(ask);
     else this.toast({ title: "Genie needs your approval", body: ask.tool ?? ask.kind, tone: "info", link: `genie://session/${ask.session_id}` });
@@ -665,6 +695,11 @@ export class App extends Emitter {
   osNotify(title: string, body?: string) {
     if (!this.ui.osNotifications || this.isForeground()) return;
     void this.platform.notify(title, body).catch((e) => this.platform.log("warn", `notification: ${errorMessage(e)}`));
+  }
+
+  /** The completion sound, when it is on. */
+  chime() {
+    if (this.ui.completionSound) playChime();
   }
 
   onConfigChanged(f: Listener<string[]>) {

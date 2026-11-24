@@ -27,6 +27,9 @@ export interface MockOptions {
   pickFiles?: string[] | null;
   /** Replay ring size of mock terminals (bytes); default 64 KiB. */
   terminalRing?: number;
+  /** Settings keys an admin policy locks (`config.get` → `locked`, `config.set` refuses). In the
+   * browser, `?mockLocked=updates.auto,hiddenModels` sets this. */
+  lockedKeys?: string[];
 }
 
 /** A mock terminal: a line-echoing "shell" with a replay ring and absolute offsets. */
@@ -160,6 +163,14 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
   let nextReq = 1;
   const pendingAsks = new Map<number, (answer: unknown) => void>();
   let state: Record<string, unknown> = opts.firstRun ? {} : { firstRunDone: true };
+  const lockedKeys =
+    opts.lockedKeys ??
+    (typeof location !== "undefined"
+      ? (new URLSearchParams(location.search).get("mockLocked") ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : []);
   const config: Record<string, unknown> = { model: azureConfig ? azureModelId(azureConfig) : "mock/genie-small", theme: "system", "memory.enabled": true };
   const projects = [{ project_id: "prj_demo", name: "Demo project", instructions: "", starred: true }];
   const memory = [{ memory_id: "mem_1", scope: "user", text: "Prefers TypeScript examples.", updated_at: now() }];
@@ -624,8 +635,9 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       projects.push({ project_id, name: p.name, instructions: p.instructions ?? "", starred: false });
       return { project_id };
     },
-    "model.list": () => ({
-      // Like the daemon: the catalog lists every provider's models, connected or not.
+    "model.list": (p) => ({
+      // Like the daemon: the catalog lists every provider's models, connected or not, minus
+      // the ones turned off in Settings → Models unless `include_hidden`.
       models: [
         { id: "anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic", context_window: 200000, effort_levels: ["low", "medium", "high"] },
         { id: "openai/gpt-5.2", name: "GPT-5.2", provider: "openai", context_window: 400000, effort_levels: ["low", "medium", "high"] },
@@ -633,7 +645,7 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         { id: "mock/genie-large", name: "Genie Large", provider: "mock", context_window: 200000, effort_levels: ["low", "medium", "high"] },
         { id: "mock/genie-test", name: "Genie Test", provider: "mock", context_window: mockWindow("mock/genie-test"), effort_levels: [] },
         ...(azureConfig ? [{ id: azureModelId(azureConfig), name: "GPT-5.2 (Azure)", provider: "azure-foundry", context_window: 400000, effort_levels: [] }] : []),
-      ],
+      ].filter((m) => p.include_hidden || !((config.hiddenModels as string[] | undefined) ?? []).includes(m.id)),
     }),
     "provider.list": () => ({ providers }),
     "provider.test": () => ({ ok: true, latency_ms: 120 }),
@@ -654,6 +666,10 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
         type: "object",
         properties: {
           model: { type: "string", description: "Default model id for new sessions." },
+          smallModel: { type: ["string", "null"], description: "Model used for titles and compaction." },
+          effort: { type: ["string", "null"], enum: ["low", "medium", "high", null], description: "Default reasoning effort." },
+          hiddenModels: { type: ["array", "null"], items: { type: "string" }, description: "Model ids left out of the model pickers." },
+          updates: { type: "object", properties: { auto: { type: "boolean", description: "Download and install updates automatically." }, channel: { type: "string", description: "stable or beta." } } },
           theme: { $ref: "#/$defs/Theme" },
           memory: { $ref: "#/$defs/Toggle" },
           telemetry: { type: "object", properties: { crashReports: { type: "boolean" }, usage: { type: "boolean" } } },
@@ -664,6 +680,11 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       ui: {
         keys: {
           model: { title: "Default model", scopes_allowed: ["user", "project", "local"], restart_required: false, advanced: false },
+          smallModel: { title: "Small model", scopes_allowed: ["user", "project", "local"], restart_required: false, advanced: true },
+          effort: { title: "Reasoning effort", scopes_allowed: ["user", "project", "local"], restart_required: false, advanced: false },
+          hiddenModels: { title: "Hidden models", scopes_allowed: ["user"], restart_required: false, advanced: false },
+          "updates.auto": { title: "Automatic updates", scopes_allowed: ["user"], restart_required: false, advanced: false },
+          "updates.channel": { title: "Update channel", scopes_allowed: ["user"], restart_required: true, advanced: true },
           theme: { title: "Theme", scopes_allowed: ["user"], restart_required: false, advanced: false },
           "memory.enabled": { title: "Memory", scopes_allowed: ["user"], restart_required: false, advanced: false },
           "telemetry.crashReports": { title: "Crash reports", scopes_allowed: ["user"], restart_required: false, advanced: false },
@@ -681,9 +702,10 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
           values[k] = config[k];
           sources[k] = "user";
         }
-      return { values, sources, locked: [] };
+      return { values, sources, locked: keys.filter((k) => lockedKeys.includes(k)) };
     },
     "config.set": (p) => {
+      if (lockedKeys.includes(String(p.key))) throw err("locked", "managed by policy", -32011);
       if (p.key === "model" && typeof p.value !== "string") throw err("invalid_params", "model must be a string", -32602);
       // `providers.<id>` writes land inside the `providers` object, as in the daemon.
       const [top, ...rest] = String(p.key).split(".");
@@ -954,6 +976,10 @@ export function createMockPlatform(opts: MockOptions = {}): Platform & { session
       notifications.push({ title, body });
     },
     async setWindowTheme() {},
+    async setZoom(scale) {
+      // No native webview here (browser build, tests): CSS zoom is the closest match.
+      if (typeof document !== "undefined") document.documentElement.style.setProperty("zoom", scale === 1 ? "" : String(scale));
+    },
     async installCli() {
       return { path: "~/.local/bin/genie", target: "/Applications/Genie.app/Contents/MacOS/genie", dir: "~/.local/bin", on_path: false };
     },

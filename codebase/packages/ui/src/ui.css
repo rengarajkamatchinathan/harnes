@@ -243,6 +243,166 @@ body {
   grid-column: 1 / -1;
 }
 
+/* ---------- Settings group / row / stepper ---------- */
+/* A small label over a rounded card; rows inside are split by hairlines (Settings). */
+.g-sgroup + .g-sgroup {
+  margin-top: var(--space-6);
+}
+.g-sgroup__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 24px;
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-1);
+}
+.g-sgroup__title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.g-sgroup__action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.g-sgroup__card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
+}
+/* Rows and blocks inside a card: hairlines between them, never on the outside. */
+.g-sgroup__card > * + * {
+  border-top: 1px solid var(--border-subtle);
+}
+/* Free content (notes, tables, code) gets the card's padding. */
+.g-sgroup__card > :not(.g-setrow, .g-sgroup__flush, table) {
+  padding: var(--space-3);
+}
+.g-sgroup__card > table {
+  width: 100%;
+  margin: 0;
+}
+.g-sgroup__card > p,
+.g-sgroup__card > pre {
+  margin: 0;
+}
+.g-setrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-6);
+  row-gap: var(--space-2);
+  min-height: 60px;
+  padding: 10px var(--space-3);
+}
+.g-setrow--stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+.g-setrow--leading {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+}
+.g-setrow--leading .g-setrow__control {
+  margin-left: var(--space-3);
+}
+.g-setrow__leading {
+  display: grid;
+  place-items: center;
+}
+.g-setrow--stacked .g-setrow__control {
+  justify-content: stretch;
+}
+.g-setrow--stacked .g-setrow__control > * {
+  flex: 1;
+}
+.g-setrow__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.g-setrow__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.g-setrow__label {
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text);
+}
+.g-setrow__desc {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.g-setrow__control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.g-setrow__control .g-input {
+  width: 240px;
+}
+.g-setrow__error {
+  grid-column: 1 / -1;
+}
+/* Compact dropdown in a row: sized to its value, quiet until hovered. */
+.g-setrow__control .g-select {
+  width: auto;
+  min-width: 0;
+  max-width: 260px;
+  height: 28px;
+  gap: 6px;
+  padding: 0 8px 0 10px;
+  font-size: var(--text-sm);
+  background: transparent;
+}
+.g-setrow__control .g-select:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.g-stepper {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.g-stepper__btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 100%;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.g-stepper__btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.g-stepper__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.g-stepper__value {
+  min-width: 56px;
+  text-align: center;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Empty state ---------- */
 .g-empty {
   display: grid;

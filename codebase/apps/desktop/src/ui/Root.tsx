@@ -10,6 +10,7 @@ import { ChatView } from "./chat/ChatView";
 import { PANEL_ICON, RightPanel, activeTab, dockState, togglePanelTab } from "./panel/RightPanel";
 import { DetailsPane } from "./panel/DetailsPane";
 import { SettingsPage } from "./settings/SettingsPage";
+import { stepZoom } from "./settings/schema";
 import { FirstRun } from "./FirstRun";
 import { ProjectPage, ProjectsPage } from "./ProjectPage";
 import { CodeProjectPage } from "./code/CodeProjectPage";
@@ -20,6 +21,27 @@ export function Root() {
   const { appearance } = app.ui;
 
   useEffect(() => applyAppearance(appearance), [appearance]);
+  // Settings → Appearance: whole-window zoom (native webview zoom) and code block wrapping.
+  const { zoom, codeWrap } = app.ui;
+  useEffect(() => {
+    void app.platform.setZoom(zoom).catch(() => {});
+  }, [app.platform, zoom]);
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-code-wrap", codeWrap);
+  }, [codeWrap]);
+  // ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) zoom the window, the same setting as Appearance → Zoom.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // The Browser tab zooms its page with the same keys and marks the event handled.
+      if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const step = e.key === "=" || e.key === "+" ? 1 : e.key === "-" ? -1 : e.key === "0" ? 0 : null;
+      if (step === null) return;
+      e.preventDefault();
+      app.setUi({ zoom: step === 0 ? 1 : stepZoom(app.ui.zoom, step) });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [app]);
   // The native title bar follows the OS theme unless told otherwise; match the app's choice
   // ("system" hands it back to the OS, which is also what the page follows then).
   useEffect(() => {
@@ -159,17 +181,19 @@ function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [app]);
+  // Settings covers the whole window; what is underneath must not take focus or clicks.
+  const settingsOpen = ui.view === "settings";
   const sidebarHidden = overlay ? !drawerOpen : ui.sidebarCollapsed;
   const shell = useMemo<ShellState>(() => ({ width, overlay, narrow, drawerOpen, setDrawer, sidebarHidden, panelWidth, panelMax, sidebarMax }), [width, overlay, narrow, drawerOpen, sidebarHidden, panelWidth, panelMax, sidebarMax]);
   const cls = ["shell", overlay ? "shell--overlay" : ui.sidebarCollapsed ? "shell--collapsed" : "", overlay && drawerOpen ? "shell--drawer" : "", narrow ? "shell--narrow" : ""].filter(Boolean).join(" ");
   return (
     <ShellContext.Provider value={shell}>
     <div className={cls} style={{ ["--sidebar-w" as string]: `${ui.sidebarWidth}px`, ["--panel-w" as string]: `${panelWidth}px` }}>
-      <div className="sidebar-slot">
+      <div className="sidebar-slot" inert={settingsOpen}>
         <Sidebar hidden={sidebarHidden} />
       </div>
       {overlay && <div className="drawer-scrim" aria-hidden onClick={() => setDrawer(false)} />}
-      <main className="main">
+      <main className="main" inert={settingsOpen}>
         {status.state === "reconnecting" && (
           <div className="top-banner">
             <Banner tone="warning" icon="refresh">
@@ -208,7 +232,7 @@ function Shell() {
         )}
       </main>
       {(panelShown || detailsShown) && (
-        <div className="dock">
+        <div className="dock" inert={settingsOpen}>
           {panelShown && <RightPanel />}
           {detailsShown && <DetailsPane />}
         </div>
