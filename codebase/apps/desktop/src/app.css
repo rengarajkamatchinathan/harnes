@@ -522,7 +522,13 @@ code { font-size: 0.92em; }
 .browser__tab:hover .browser__tab-close, .browser__tab[data-active="true"] .browser__tab-close { opacity: 1; }
 .browser__nav { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); }
 .browser__address { flex: 1; min-width: 0; font-size: var(--text-sm); }
-.browser__view { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.browser__view { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.browser__find { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); }
+.browser__find-input { flex: 1; min-width: 0; font-size: var(--text-sm); }
+.browser__find-count { font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; min-width: 6ch; text-align: right; }
+.browser__status { position: absolute; left: 0; bottom: 0; max-width: 70%; padding: 2px 8px; border: 1px solid var(--border-subtle); border-left: 0; border-bottom: 0; border-top-right-radius: var(--radius-sm); background: var(--bg); color: var(--text-muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.browser__ctx { position: absolute; width: 0; height: 0; }
+.browser__ctx .g-menu, .browser__ctx-anchor { display: block; width: 0; height: 0; }
 .browser__canvas { display: block; width: 100%; height: auto; background: var(--bg-subtle); outline: none; }
 .browser__keys { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; padding: 0; border: 0; resize: none; pointer-events: none; }
 .browser__hint { margin: 0; padding: var(--space-1) var(--space-2); font-size: var(--text-xs); color: var(--text-muted); border-top: 1px solid var(--border-subtle); }
@@ -940,6 +946,13 @@ a.preview-path { color: var(--accent-text); }
 .sidebar__mark { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 2px; color: var(--text-muted); opacity: 0.7; transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .sidebar__mark .genie-mark { color: currentColor; }
 .sidebar__row:hover .sidebar__mark, .sidebar__row.is-active .sidebar__mark { opacity: 1; color: var(--text); }
+.sidebar__mark:has(.dot) { opacity: 1; }
+.sidebar__mark .dot { margin: 0; }
+/* Chat rows: last-activity time on the right; the ··· button sits over it and replaces it on hover/focus/menu. */
+.sidebar__row.has-time { position: relative; }
+.sidebar__row.has-time .sidebar__more { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+.sidebar__time { flex: none; margin-left: auto; padding-left: 8px; font-size: var(--text-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar__row.has-time:hover .sidebar__time, .sidebar__row.has-time.is-active .sidebar__time, .sidebar__row.has-time:focus-within .sidebar__time, .sidebar__row.has-time:has(.sidebar__more[aria-expanded="true"]) .sidebar__time { visibility: hidden; }
 
 /* Code project page: git graph (like VS Code's Git Graph). */
 .gitgraph { margin-top: var(--space-6); }

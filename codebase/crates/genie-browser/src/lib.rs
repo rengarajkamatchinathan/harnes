@@ -13,6 +13,7 @@
 //! - [`session`]: the [`Browser`] service, per-session tabs/refs/control/taint/step caps,
 //!   downloads, `browser.action` audit; [`tools`]: the 19 `browser_*` tools.
 //! - [`screencast`]: `browser.screencast.*` with ack flow control and `browser.input`.
+//! - [`view`]: the panel's viewport (size, density, zoom), find in page, hit tests.
 //! - [`testing`]: an in-process fake CDP endpoint that replays recorded messages.
 //!
 //! Dependency rule (01 §2.1 rule 3): `genie-protocol` plus the leaf exceptions
@@ -35,6 +36,7 @@ pub mod testing;
 pub mod time;
 pub mod tools;
 pub mod transport;
+pub mod view;
 
 pub use backend::{
     BrowserBackend, BrowserError, ProfileKind, SystemChromeBackend, SystemChromeConfig,

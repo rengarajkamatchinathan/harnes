@@ -1381,6 +1381,44 @@ async fn real_chrome_panel_flow() {
     assert_eq!(f.stream_id, sc.stream_id);
     assert!(f.w > 0 && f.h > 0 && f.device_scale > 0.0);
 
+    // Sites see a normal browser: no `HeadlessChrome`, no `navigator.webdriver`.
+    let tab = browser.session(SESSION).tab("t1").unwrap();
+    let c = browser.client().await.unwrap();
+    let v = c
+        .call_in(
+            Some(&tab.cdp_session),
+            "Runtime.evaluate",
+            json!({"expression": "[navigator.userAgent, navigator.webdriver, JSON.stringify(navigator.userAgentData?.brands)]", "returnByValue": true}),
+        )
+        .await
+        .unwrap();
+    println!("ua {}", v["result"]["value"]);
+    let ua = v["result"]["value"].to_string();
+    assert!(!ua.contains("Headless"), "{ua}");
+    assert_eq!(v["result"]["value"][1], false, "{ua}");
+
+    // The panel's size: frames report it in CSS px, so clicks below map 1:1.
+    let n = log.0.lock().unwrap().len();
+    browser
+        .set_viewport(&genie_protocol::api::browser::ViewportParams {
+            session_id: SESSION.into(),
+            width: 900,
+            height: 640,
+            device_scale: 1.0,
+        })
+        .await
+        .unwrap();
+    let mut f = next_frame(log.clone(), n).await;
+    for _ in 0..20 {
+        if f.w == 900 {
+            break;
+        }
+        let n = log.0.lock().unwrap().len();
+        f = next_frame(log.clone(), n).await;
+    }
+    println!("frame {}x{} css, scale {}", f.w, f.h, f.device_scale);
+    assert_eq!((f.w, f.h), (900, 640));
+
     // 3. Take over: click the field, type, press Enter (DOM names, as the desktop sends).
     browser.takeover(SESSION);
     let input = |event: InputEvent| {
@@ -1497,6 +1535,31 @@ async fn real_chrome_panel_flow() {
     let out = call("browser_snapshot", json!({})).await;
     assert!(out.contains("note: the user acted"), "{out}");
     assert!(out.contains("heading \"Hello\""), "{out}");
+
+    // 5. The user closes the popped-out window: the tab comes back into the panel at its
+    // page and the stream goes on; then pop out works again.
+    let c = browser.client().await.unwrap();
+    let _ = c.call("Browser.close", json!({})).await;
+    for _ in 0..200 {
+        if c.is_closed() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(c.is_closed());
+    let n = log.0.lock().unwrap().len();
+    let tabs = browser.tabs(SESSION).await.tabs;
+    assert_eq!(tabs.len(), 1, "{tabs:?}");
+    assert_eq!(tabs[0].tab_id, "t1");
+    assert!(tabs[0].url.contains(&port.to_string()), "{tabs:?}");
+    assert!(!genie_browser::BrowserBackend::headed(backend.as_ref()));
+    let f = next_frame(log.clone(), n).await;
+    assert_eq!(f.stream_id, sc.stream_id);
+    browser.popout(SESSION).await.unwrap();
+    assert!(genie_browser::BrowserBackend::headed(backend.as_ref()));
+    let tabs = browser.tabs(SESSION).await.tabs;
+    assert_eq!(tabs.len(), 1, "{tabs:?}");
+    assert!(tabs[0].url.contains(&port.to_string()), "{tabs:?}");
 
     browser
         .screencast_stop(&StreamIdParams {

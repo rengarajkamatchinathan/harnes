@@ -174,6 +174,60 @@ pub struct CopyResult {
     pub text: String,
 }
 
+/// `browser.viewport`: the size the Browser tab shows pages at, so the page fills the
+/// panel (`Emulation.setDeviceMetricsOverride` on the session's tabs while headless).
+/// Zoom is folded in by the client: a smaller CSS viewport at a larger `device_scale`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ViewportParams {
+    pub session_id: String,
+    /// CSS pixels.
+    pub width: u32,
+    pub height: u32,
+    /// Device pixels per CSS pixel (the page's `devicePixelRatio`).
+    pub device_scale: f64,
+}
+
+/// `browser.find`: find in page (the next match is selected and scrolled into view).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FindParams {
+    pub session_id: String,
+    pub tab_id: String,
+    pub query: String,
+    #[serde(default)]
+    pub backwards: bool,
+    /// Start from the top of the page (a new query) instead of after the current match.
+    #[serde(default)]
+    pub restart: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FindResult {
+    /// Case-insensitive occurrences in the page's visible text.
+    pub matches: u32,
+    pub found: bool,
+}
+
+/// `browser.hit`: what is under a screencast point (cursor, link, right-click menu).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct HitParams {
+    pub session_id: String,
+    pub tab_id: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct HitResult {
+    /// The CSS cursor there (`auto` resolved to `text` over text and editable fields).
+    pub cursor: String,
+    /// The link's absolute URL when the point is on one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    pub editable: bool,
+    /// The page handled the last right-click itself (its own menu): show none of ours.
+    pub page_menu: bool,
+}
+
 /// `browser.file_chooser.answer`: the files the user picked; empty cancels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FileChooserAnswerParams {

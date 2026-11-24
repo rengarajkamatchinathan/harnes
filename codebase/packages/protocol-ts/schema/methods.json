@@ -950,6 +950,42 @@
     },
     {
       "direction": "request",
+      "ident": "BrowserViewport",
+      "name": "browser.viewport",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/ViewportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Empty"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserFind",
+      "name": "browser.find",
+      "needs_lease": true,
+      "params": {
+        "$ref": "#/$defs/FindParams"
+      },
+      "result": {
+        "$ref": "#/$defs/FindResult"
+      }
+    },
+    {
+      "direction": "request",
+      "ident": "BrowserHit",
+      "name": "browser.hit",
+      "needs_lease": false,
+      "params": {
+        "$ref": "#/$defs/HitParams"
+      },
+      "result": {
+        "$ref": "#/$defs/HitResult"
+      }
+    },
+    {
+      "direction": "request",
       "ident": "BrowserSitesList",
       "name": "browser.sites.list",
       "needs_lease": false,

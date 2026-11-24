@@ -706,6 +706,22 @@ export interface FilesTreeResult {
   nodes: FileNode[];
 }
 
+/** `browser.find`: find in page (the next match is selected and scrolled into view). */
+export interface FindParams {
+  backwards?: boolean;
+  query: string;
+  /** Start from the top of the page (a new query) instead of after the current match. */
+  restart?: boolean;
+  session_id: string;
+  tab_id: string;
+}
+
+export interface FindResult {
+  found: boolean;
+  /** Case-insensitive occurrences in the page's visible text. */
+  matches: number;
+}
+
 export interface ForkParams {
   message_id: string;
   session_id: string;
@@ -744,6 +760,24 @@ export interface GitCommitResult {
 export interface GitStatusResult {
   branch?: string | null;
   files: FileChange[];
+}
+
+/** `browser.hit`: what is under a screencast point (cursor, link, right-click menu). */
+export interface HitParams {
+  session_id: string;
+  tab_id: string;
+  x: number;
+  y: number;
+}
+
+export interface HitResult {
+  /** The CSS cursor there (`auto` resolved to `text` over text and editable fields). */
+  cursor: string;
+  editable: boolean;
+  /** The link's absolute URL when the point is on one. */
+  link?: string | null;
+  /** The page handled the last right-click itself (its own menu): show none of ours. */
+  page_menu: boolean;
 }
 
 export interface HookRan {
@@ -2026,6 +2060,20 @@ export interface UserNotification {
   link?: string | null;
   session_id?: string | null;
   title: string;
+}
+
+/**
+ * `browser.viewport`: the size the Browser tab shows pages at, so the page fills the
+ * panel (`Emulation.setDeviceMetricsOverride` on the session's tabs while headless).
+ * Zoom is folded in by the client: a smaller CSS viewport at a larger `device_scale`.
+ */
+export interface ViewportParams {
+  /** Device pixels per CSS pixel (the page's `devicePixelRatio`). */
+  device_scale: number;
+  height: number;
+  session_id: string;
+  /** CSS pixels. */
+  width: number;
 }
 
 /** `workspace.snapshot`. */

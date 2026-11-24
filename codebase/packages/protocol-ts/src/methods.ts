@@ -81,6 +81,9 @@ export interface Requests {
   "browser.popout": { params: T.SessionIdParams; result: T.Empty };
   "browser.copy": { params: T.BrowserTabParams; result: T.CopyResult };
   "browser.file_chooser.answer": { params: T.FileChooserAnswerParams; result: T.Empty };
+  "browser.viewport": { params: T.ViewportParams; result: T.Empty };
+  "browser.find": { params: T.FindParams; result: T.FindResult };
+  "browser.hit": { params: T.HitParams; result: T.HitResult };
   "browser.sites.list": { params: T.Empty; result: T.SitesListResult };
   "browser.sites.set": { params: T.SitePermission; result: T.Empty };
   "browser.data.clear": { params: T.DataClearParams; result: T.Empty };
@@ -256,6 +259,9 @@ export const METHODS: readonly { name: string; direction: MethodDirection; needs
   { name: "browser.popout", direction: "request", needsLease: false },
   { name: "browser.copy", direction: "request", needsLease: true },
   { name: "browser.file_chooser.answer", direction: "request", needsLease: true },
+  { name: "browser.viewport", direction: "request", needsLease: false },
+  { name: "browser.find", direction: "request", needsLease: true },
+  { name: "browser.hit", direction: "request", needsLease: false },
   { name: "browser.sites.list", direction: "request", needsLease: false },
   { name: "browser.sites.set", direction: "request", needsLease: false },
   { name: "browser.data.clear", direction: "request", needsLease: false },
@@ -372,7 +378,9 @@ export class GenieClient {
     file_chooser: {
       answer: (params: T.FileChooserAnswerParams): Promise<T.Empty> => this.t.request("browser.file_chooser.answer", params) as Promise<T.Empty>,
     },
+    find: (params: T.FindParams): Promise<T.FindResult> => this.t.request("browser.find", params) as Promise<T.FindResult>,
     handback: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.handback", params) as Promise<T.Empty>,
+    hit: (params: T.HitParams): Promise<T.HitResult> => this.t.request("browser.hit", params) as Promise<T.HitResult>,
     input: (params: T.BrowserInputParams): Promise<T.Empty> => this.t.request("browser.input", params) as Promise<T.Empty>,
     inspect: (params: T.InspectParams): Promise<T.InspectResult> => this.t.request("browser.inspect", params) as Promise<T.InspectResult>,
     navigate: (params: T.NavigateParams): Promise<T.TabIdResult> => this.t.request("browser.navigate", params) as Promise<T.TabIdResult>,
@@ -396,6 +404,7 @@ export class GenieClient {
     },
     tabs: (params: T.SessionIdParams): Promise<T.TabsResult> => this.t.request("browser.tabs", params) as Promise<T.TabsResult>,
     takeover: (params: T.SessionIdParams): Promise<T.Empty> => this.t.request("browser.takeover", params) as Promise<T.Empty>,
+    viewport: (params: T.ViewportParams): Promise<T.Empty> => this.t.request("browser.viewport", params) as Promise<T.Empty>,
   };
   readonly catalog = {
     refresh: (params: T.Empty = {}): Promise<T.CatalogStatus> => this.t.request("catalog.refresh", params) as Promise<T.CatalogStatus>,

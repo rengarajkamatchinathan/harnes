@@ -2380,6 +2380,53 @@
       ],
       "type": "object"
     },
+    "FindParams": {
+      "description": "`browser.find`: find in page (the next match is selected and scrolled into view).",
+      "properties": {
+        "backwards": {
+          "default": false,
+          "type": "boolean"
+        },
+        "query": {
+          "type": "string"
+        },
+        "restart": {
+          "default": false,
+          "description": "Start from the top of the page (a new query) instead of after the current match.",
+          "type": "boolean"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id",
+        "query"
+      ],
+      "type": "object"
+    },
+    "FindResult": {
+      "properties": {
+        "found": {
+          "type": "boolean"
+        },
+        "matches": {
+          "description": "Case-insensitive occurrences in the page's visible text.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "matches",
+        "found"
+      ],
+      "type": "object"
+    },
     "ForkParams": {
       "properties": {
         "message_id": {
@@ -2517,6 +2564,60 @@
       },
       "required": [
         "files"
+      ],
+      "type": "object"
+    },
+    "HitParams": {
+      "description": "`browser.hit`: what is under a screencast point (cursor, link, right-click menu).",
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "session_id",
+        "tab_id",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "HitResult": {
+      "properties": {
+        "cursor": {
+          "description": "The CSS cursor there (`auto` resolved to `text` over text and editable fields).",
+          "type": "string"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "link": {
+          "description": "The link's absolute URL when the point is on one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page_menu": {
+          "description": "The page handled the last right-click itself (its own menu): show none of ours.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cursor",
+        "editable",
+        "page_menu"
       ],
       "type": "object"
     },
@@ -7862,6 +7963,37 @@
       "required": [
         "title",
         "body"
+      ],
+      "type": "object"
+    },
+    "ViewportParams": {
+      "description": "`browser.viewport`: the size the Browser tab shows pages at, so the page fills the\npanel (`Emulation.setDeviceMetricsOverride` on the session's tabs while headless).\nZoom is folded in by the client: a smaller CSS viewport at a larger `device_scale`.",
+      "properties": {
+        "device_scale": {
+          "description": "Device pixels per CSS pixel (the page's `devicePixelRatio`).",
+          "format": "double",
+          "type": "number"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "width": {
+          "description": "CSS pixels.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "width",
+        "height",
+        "device_scale"
       ],
       "type": "object"
     },

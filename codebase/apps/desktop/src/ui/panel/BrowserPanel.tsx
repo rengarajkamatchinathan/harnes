@@ -3,13 +3,16 @@
 // CSS pixels), hand back, stop, pop out, ⋮ menu. While Genie is idle the user can use the
 // page directly; during a turn they take over first.
 //
+// Like a browser: the page is laid out at the panel's size (`browser.viewport`), with zoom (Ctrl +/−/0, Ctrl+wheel), find in page (Ctrl+F), the
+// page's mouse cursor and hovered link, and a right-click menu unless the page has its own.
+//
 // The screencast stream watches the *session*: it is started once when the tab shows and
 // the daemon attaches it to whichever tab the agent has active (including the first one,
 // opened after the panel), so the panel never has to restart it.
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BrowserControl, BrowserStatus, InputEvent, InspectResult, TabInfo } from "@genie/protocol";
+import type { BrowserControl, BrowserStatus, FindResult, HitResult, InputEvent, InspectResult, TabInfo } from "@genie/protocol";
 import { Badge, Banner, Button, EmptyState, IconButton, Input, Menu, type MenuItem } from "@genie/ui";
-import { t } from "../../i18n";
+import { plural, t } from "../../i18n";
 import { useEmitter } from "../../state/emitter";
 import { isBusy } from "../../state/sessionModel";
 import { useApp, useSession } from "../context";
@@ -58,6 +61,57 @@ export function copyChord(e: { key: string; ctrlKey: boolean; metaKey: boolean; 
   if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return null;
   const k = e.key.toLowerCase();
   return k === "c" ? "copy" : k === "x" ? "cut" : null;
+}
+
+/** Browser shortcuts the panel handles itself instead of sending them to the page. */
+export type BrowserChord = "find" | "zoomIn" | "zoomOut" | "zoomReset";
+export function browserChord(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): BrowserChord | null {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
+  switch (e.key) {
+    case "f":
+    case "F":
+      return "find";
+    case "=":
+    case "+":
+      return "zoomIn";
+    case "-":
+    case "_":
+      return "zoomOut";
+    case "0":
+      return "zoomReset";
+    default:
+      return null;
+  }
+}
+
+/** Chrome's zoom levels. */
+export const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+/** The next zoom level in direction `dir` (0 resets to 100%). */
+export function stepZoom(z: number, dir: 1 | -1 | 0): number {
+  if (dir === 0) return 1;
+  if (dir > 0) return ZOOM_STEPS.find((s) => s > z + 1e-6) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  return [...ZOOM_STEPS].reverse().find((s) => s < z - 1e-6) ?? ZOOM_STEPS[0];
+}
+
+/**
+ * The page viewport for a panel of `w`×`h` CSS px: the page is laid out at the panel's size
+ * divided by the zoom, so it fills the panel and zoom works like Chrome's. Scale 1: headless
+ * Chrome's screencast captures at 1× whatever device scale is emulated, so a higher one
+ * would only make pages fetch HiDPI images for nothing.
+ */
+export function viewportFor(w: number, h: number, zoom: number) {
+  return { width: Math.floor(w / zoom), height: Math.floor(h / zoom), device_scale: 1 };
+}
+
+const CURSORS = new Set(
+  "auto default none context-menu help pointer progress wait cell crosshair text vertical-text alias copy move no-drop not-allowed grab grabbing all-scroll col-resize row-resize n-resize e-resize s-resize w-resize ne-resize nw-resize se-resize sw-resize ew-resize ns-resize nesw-resize nwse-resize zoom-in zoom-out".split(" "),
+);
+
+/** A page's CSS cursor as a keyword the canvas can show (`url(...)` images fall back to theirs). */
+export function cssCursor(c: string): string {
+  const k = c.split(",").pop()?.trim() ?? "";
+  return CURSORS.has(k) ? k : "default";
 }
 
 /** base64 JPEG → decoded bitmap (off the main thread where supported). */
@@ -117,6 +171,44 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
   const editing = useRef(false);
   const address = useRef<HTMLInputElement>(null);
   const lastTabs = useRef(0);
+  const view = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomBy = (d: 1 | -1 | 0) => setZoom((z) => stepZoom(z, d));
+  const lastWheelZoom = useRef(0);
+  // The page's cursor and hovered link (`browser.hit`, one probe in flight, trailing).
+  const [cursor, setCursor] = useState("default");
+  const [linkHover, setLinkHover] = useState<string | null>(null);
+  const probing = useRef(false);
+  const probeAt = useRef<{ x: number; y: number; tab: string } | null>(null);
+  // Right-click menu at a point of the view, with what was under the pointer.
+  const [ctx, setCtx] = useState<{ x: number; y: number; hit: HitResult } | null>(null);
+  // Find in page.
+  const [finding, setFinding] = useState(false);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<FindResult | null>(null);
+  const findInput = useRef<HTMLInputElement>(null);
+
+  // The page fills the panel: its size (settled), with the zoom folded in.
+  useEffect(() => {
+    const el = view.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver(([e]) => {
+      const { width, height } = e.contentRect;
+      clearTimeout(timer);
+      timer = setTimeout(() => setSize({ w: width, h: height }), 120);
+    });
+    ro.observe(el);
+    return () => {
+      clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, []);
+  useEffect(() => {
+    if (!size) return;
+    void app.client.browser.viewport({ session_id: sessionId, ...viewportFor(size.w, size.h, zoom) }).catch(() => {});
+  }, [app, sessionId, size, zoom]);
 
   const model = store?.model;
   const raw = model?.browser.frame ?? null;
@@ -155,12 +247,13 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
       .catch(() => {});
   }, [app]);
 
-  // One stream per visible tab (SA-23: JPEG 60, ≤ 1280×800); it follows the agent's active tab.
+  // One stream per visible tab; it follows the agent's active tab. Frames come at the
+  // viewport's size (above), up to 2× SA-23's 1280×800 for a large panel.
   useEffect(() => {
     let id: string | null = null;
     let live = true;
     app.client.browser.screencast
-      .start({ session_id: sessionId, quality: 60, max_width: 1280, max_height: 800 })
+      .start({ session_id: sessionId, quality: 75, max_width: 2560, max_height: 1600 })
       .then((r) => {
         id = r.stream_id;
         if (live) setStream(r.stream_id);
@@ -188,6 +281,12 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
       .catch(() => {});
   }, [app, sessionId]);
   useEffect(refreshTabs, [refreshTabs, actions.length, frame?.tab_id, control]);
+  // A closed popped-out window (or a crashed browser) sends no frames: poll so the daemon
+  // notices and re-opens the tabs here.
+  useEffect(() => {
+    const id = setInterval(refreshTabs, 3000);
+    return () => clearInterval(id);
+  }, [refreshTabs]);
   // Pages change under links and redirects: refresh at most every 1.5 s while frames arrive.
   useEffect(() => {
     if (frame && Date.now() - lastTabs.current > 1500) refreshTabs();
@@ -331,7 +430,138 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
     return { left: c.offsetLeft + hover.x * sx, top: c.offsetTop + hover.y * sy, width: hover.w * sx, height: hover.h * sy };
   })();
 
+  // The page's cursor and hovered link under the pointer.
+  const probe = () => {
+    const at = probeAt.current;
+    probeAt.current = null;
+    if (!at || probing.current) return;
+    probing.current = true;
+    app.client.browser
+      .hit({ session_id: sessionId, tab_id: at.tab, x: at.x, y: at.y })
+      .then((h) => {
+        setCursor(cssCursor(h.cursor));
+        setLinkHover(h.link ?? null);
+      })
+      .catch(() => {})
+      .finally(() => {
+        probing.current = false;
+        if (probeAt.current) setTimeout(probe, 50);
+      });
+  };
+  const probeLater = (e: { clientX: number; clientY: number }) => {
+    const p = point(e);
+    if (!p || !frame) return;
+    probeAt.current = { ...p, tab: frame.tab_id };
+    if (!probing.current) probe();
+  };
+
+  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+  const cmdKey = isMac ? "⌘" : "Ctrl+";
+  const copySelection = () => {
+    if (!frame) return;
+    app.client.browser
+      .copy({ session_id: sessionId, tab_id: frame.tab_id })
+      .then((r) => (r.text ? navigator.clipboard?.writeText(r.text) : undefined))
+      .catch(fail);
+  };
+  const pasteClipboard = () => {
+    keys.current?.focus({ preventScroll: true });
+    if (!navigator.clipboard?.readText) return app.toast({ title: t("browser.pasteBlocked", { key: `${cmdKey}V` }), tone: "info" });
+    navigator.clipboard
+      .readText()
+      .then((text) => text && send({ type: "insert_text", text }))
+      .catch(() => app.toast({ title: t("browser.pasteBlocked", { key: `${cmdKey}V` }), tone: "info" }));
+  };
+  const selectAll = () => {
+    keys.current?.focus({ preventScroll: true });
+    const mods = isMac ? 4 : 2;
+    send({ type: "key", action: "down", key: "a", code: "KeyA", modifiers: mods, text: null });
+    send({ type: "key", action: "up", key: "a", code: "KeyA", modifiers: mods });
+  };
+
+  // Find in page: a new query searches from the top (debounced); Enter / Shift+Enter step.
+  const runFind = (q: string, opts: { backwards?: boolean; restart?: boolean } = {}) => {
+    if (!frame || !q) return;
+    app.client.browser
+      .find({ session_id: sessionId, tab_id: frame.tab_id, query: q, backwards: !!opts.backwards, restart: !!opts.restart })
+      .then(setFound)
+      .catch(fail);
+  };
+  useEffect(() => {
+    if (!finding) return;
+    if (!query) return setFound(null);
+    const id = setTimeout(() => runFind(query, { restart: true }), 200);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finding, query]);
+  const openFind = () => {
+    if (!frame || !interactive) return;
+    setFinding(true);
+    setTimeout(() => {
+      findInput.current?.focus();
+      findInput.current?.select();
+    });
+  };
+  const closeFind = () => {
+    setFinding(false);
+    setFound(null);
+    keys.current?.focus({ preventScroll: true });
+  };
+  const onChord = (c: BrowserChord) => {
+    if (c === "find") openFind();
+    else zoomBy(c === "zoomIn" ? 1 : c === "zoomOut" ? -1 : 0);
+  };
+
+  // Right-click: the click already went to the page; ours opens unless the page showed its own.
+  const openMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const p = point(e);
+    const v = view.current;
+    if (!p || !frame || !v) return;
+    const r = v.getBoundingClientRect();
+    const at = { x: e.clientX - r.left, y: e.clientY - r.top };
+    const tab = frame.tab_id;
+    setTimeout(
+      () =>
+        void app.client.browser
+          .hit({ session_id: sessionId, tab_id: tab, x: p.x, y: p.y })
+          .then((hit) => !hit.page_menu && setCtx({ ...at, hit }))
+          .catch(() => setCtx({ ...at, hit: { cursor: "default", editable: false, page_menu: false } })),
+      80,
+    );
+  };
+  const menuItems = (hit: HitResult): MenuItem[] => {
+    const link = hit.link;
+    const items: MenuItem[] = [];
+    if (link)
+      items.push(
+        {
+          id: "open-link",
+          icon: "plus",
+          label: t("browser.openLinkNewTab"),
+          onSelect: () => void app.client.browser.tab.new({ session_id: sessionId, url: link }).then(settle).catch(fail),
+        },
+        { id: "copy-link", icon: "copy", label: t("browser.copyLink"), onSelect: () => void navigator.clipboard?.writeText(link) },
+      );
+    items.push(
+      { id: "back", icon: "chevronLeft", label: t("browser.back"), separatorBefore: !!link, onSelect: () => step("back") },
+      { id: "forward", icon: "chevronRight", label: t("browser.forward"), onSelect: () => step("forward") },
+      { id: "reload", icon: "refresh", label: t("browser.reload"), onSelect: () => step("reload") },
+      { id: "copy", icon: "copy", label: t("browser.copy"), shortcut: `${cmdKey}C`, separatorBefore: true, onSelect: copySelection },
+    );
+    if (hit.editable) items.push({ id: "paste", label: t("browser.paste"), shortcut: `${cmdKey}V`, onSelect: pasteClipboard });
+    items.push(
+      { id: "select-all", label: t("browser.selectAll"), shortcut: `${cmdKey}A`, onSelect: selectAll },
+      { id: "find", icon: "search", label: t("browser.findInPage"), shortcut: `${cmdKey}F`, separatorBefore: true, keepFocus: true, onSelect: openFind },
+      { id: "zoom-in", label: t("browser.zoomIn"), shortcut: `${cmdKey}+`, onSelect: () => zoomBy(1) },
+      { id: "zoom-out", label: t("browser.zoomOut"), shortcut: `${cmdKey}−`, onSelect: () => zoomBy(-1) },
+    );
+    if (zoom !== 1) items.push({ id: "zoom-reset", label: t("browser.zoomReset"), shortcut: `${cmdKey}0`, onSelect: () => zoomBy(0) });
+    items.push({ id: "inspect", icon: "search", label: t("browser.selectElement"), separatorBefore: true, onSelect: () => app.setSelectingElement(true) });
+    return items;
+  };
+
   // Wheel: a non-passive listener so the panel doesn't scroll while the page does.
+  // Ctrl+wheel (and trackpad pinch) zooms, one step per 150 ms.
   useEffect(() => {
     const c = canvas.current;
     if (!c || !interactive) return;
@@ -339,6 +569,13 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
       const p = point(e);
       if (!p) return;
       e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        if (e.deltaY && Date.now() - lastWheelZoom.current > 150) {
+          lastWheelZoom.current = Date.now();
+          zoomBy(e.deltaY < 0 ? 1 : -1);
+        }
+        return;
+      }
       const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? c.clientHeight : 1;
       send({ type: "wheel", x: p.x, y: p.y, delta_x: e.deltaX * scale, delta_y: e.deltaY * scale });
     };
@@ -362,7 +599,15 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
   const pill = { idle: t("browser.idle"), agent: t("browser.agent"), user: t("browser.user"), handoff: t("browser.handoff"), waiting: t("browser.waiting") }[state];
   const tone = state === "user" || state === "handoff" ? "warning" : state === "agent" || state === "waiting" ? "accent" : "neutral";
   return (
-    <div className="browser">
+    <div
+      className="browser"
+      onKeyDown={(e) => {
+        const c = browserChord(e);
+        if (!c || !hasTab) return;
+        e.preventDefault();
+        onChord(c);
+      }}
+    >
       <div className="browser__bar">
         <Badge tone={tone}>{pill}</Badge>
         <span className="grow" />
@@ -397,9 +642,13 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
           align="right"
           trigger={(p) => <IconButton {...p} icon="more" size="sm" label={t("browser.more")} />}
           items={[
+            { id: "find", icon: "search", label: t("browser.findInPage"), shortcut: `${cmdKey}F`, disabled: !frame || !interactive, keepFocus: true, onSelect: openFind },
+            { id: "zoom-in", label: t("browser.zoomIn"), shortcut: `${cmdKey}+`, disabled: !hasTab, onSelect: () => zoomBy(1) },
+            { id: "zoom-out", label: t("browser.zoomOut"), shortcut: `${cmdKey}−`, disabled: !hasTab, onSelect: () => zoomBy(-1) },
             {
               id: "cookies",
               label: t("browser.keepCookies"),
+              separatorBefore: true,
               hint: t("browser.keepCookiesHint"),
               checked: keepCookies,
               onSelect: () => {
@@ -507,13 +756,48 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
             if (e.key === "Escape") e.currentTarget.blur();
           }}
         />
+        {zoom !== 1 && (
+          <Button size="sm" variant="ghost" title={t("browser.zoomReset")} onClick={() => zoomBy(0)}>
+            {Math.round(zoom * 100)}%
+          </Button>
+        )}
       </form>
-      <div className="browser__view">
+      {finding && (
+        <div className="browser__find" role="search">
+          <Input
+            ref={findInput}
+            className="browser__find-input"
+            aria-label={t("browser.findInPage")}
+            placeholder={t("browser.findPlaceholder")}
+            value={query}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                runFind(query, { backwards: e.shiftKey });
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                closeFind();
+              }
+            }}
+          />
+          <span className="browser__find-count" aria-live="polite">
+            {found && query ? (found.matches ? plural(found.matches, { one: t("browser.findOne"), other: t("browser.findMany") }) : t("browser.findNone")) : ""}
+          </span>
+          <IconButton icon="arrowUp" size="sm" label={t("browser.findPrev")} disabled={!found?.matches} onClick={() => runFind(query, { backwards: true })} />
+          <IconButton icon="arrowDown" size="sm" label={t("browser.findNext")} disabled={!found?.matches} onClick={() => runFind(query)} />
+          <IconButton icon="x" size="sm" label={t("browser.findClose")} onClick={closeFind} />
+        </div>
+      )}
+      <div className="browser__view" ref={view}>
         {frame ? (
           <canvas
             ref={canvas}
             className={`browser__canvas ${inControl ? "is-controlled" : ""} ${selecting ? "is-selecting" : ""}`}
             aria-label={pill}
+            style={interactive && !selecting ? { cursor } : undefined}
             onClick={(e) => selecting && pickAt(e)}
             onMouseDown={(e) => {
               if (selecting) return e.preventDefault();
@@ -523,12 +807,36 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
               mouse(e, "pressed");
             }}
             onMouseUp={(e) => !selecting && interactive && mouse(e, "released")}
-            onMouseMove={(e) => (selecting ? hoverAt(e) : interactive && mouse(e, "moved"))}
-            onMouseLeave={() => setHover(null)}
-            onContextMenu={(e) => interactive && e.preventDefault()}
+            onMouseMove={(e) => {
+              if (selecting) return hoverAt(e);
+              if (!interactive) return;
+              mouse(e, "moved");
+              probeLater(e);
+            }}
+            onMouseLeave={() => {
+              setHover(null);
+              setLinkHover(null);
+            }}
+            onContextMenu={(e) => {
+              if (!interactive) return;
+              e.preventDefault();
+              if (!selecting) openMenu(e);
+            }}
           />
         ) : (
           <EmptyState icon="globe" title={t("browser.idleTitle")} hint={stream && hasTab ? t("browser.loading") : t("browser.idleHint")} />
+        )}
+        {linkHover && !ctx && interactive && !selecting && <div className="browser__status">{linkHover}</div>}
+        {ctx && (
+          <div className="browser__ctx" style={{ left: ctx.x, top: ctx.y }}>
+            <Menu
+              label={t("browser.pageMenu")}
+              open
+              onOpenChange={(o) => !o && setCtx(null)}
+              items={menuItems(ctx.hit)}
+              trigger={(p) => <span {...p} className="browser__ctx-anchor" />}
+            />
+          </div>
         )}
         {box && hover && (
           <div className="browser__pick" style={box} aria-hidden>
@@ -552,21 +860,19 @@ export function BrowserPanel({ sessionId }: { sessionId: string }) {
                 e.preventDefault();
                 return handBack();
               }
-              if (isPasteChord(e)) return;
+              // Find and zoom are the panel's (handled where the event bubbles to).
+              if (isPasteChord(e) || browserChord(e)) return;
               e.preventDefault();
               const clip = copyChord(e);
               if (clip && frame) {
-                app.client.browser
-                  .copy({ session_id: sessionId, tab_id: frame.tab_id })
-                  .then((r) => (r.text ? navigator.clipboard?.writeText(r.text) : undefined))
-                  .catch(fail);
+                copySelection();
                 // Cut still edits the page; copy needs nothing more from it.
                 if (clip === "copy") return;
               }
               send({ type: "key", action: "down", key: e.key, code: e.code, modifiers: modifiers(e), text: keyText(e) });
             }}
             onKeyUp={(e) => {
-              if (e.nativeEvent.isComposing || (inControl && e.key === "Escape") || isPasteChord(e) || copyChord(e) === "copy") return;
+              if (e.nativeEvent.isComposing || (inControl && e.key === "Escape") || isPasteChord(e) || browserChord(e) || copyChord(e) === "copy") return;
               send({ type: "key", action: "up", key: e.key, code: e.code, modifiers: modifiers(e) });
             }}
             onPaste={(e) => {

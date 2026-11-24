@@ -5,7 +5,7 @@ import { coerce, controlFor, keySchema, sectionOf, uiKeys, matches } from "../sr
 import { generatedImages, groupReads, headTail, summarizeTool } from "../src/ui/chat/toolInfo";
 import { describeRules, permissionHeading } from "../src/ui/chat/AskCard";
 import { keyAction } from "../src/ui/chat/Composer";
-import { groupByDate } from "../src/ui/Sidebar";
+import { groupByDate, shortAgo } from "../src/ui/Sidebar";
 import { formFields } from "../src/ui/chat/AskCard";
 import { parseArtifactMessage } from "../src/ui/panel/ArtifactPanel";
 import { addressText, bannerState, copyChord, isPasteChord, keyText, mapPoint, modifiers } from "../src/ui/panel/BrowserPanel";
@@ -107,6 +107,16 @@ describe("chat helpers", () => {
       ["week", ["c"]],
       ["older", ["d"]],
     ]);
+  });
+
+  it("labels chat rows with a compact last-activity time", () => {
+    const now = Date.parse("2026-11-17T12:00:00Z");
+    expect(shortAgo("2026-11-17T11:59:40Z", now)).toBe("now");
+    expect(shortAgo("2026-11-17T11:48:00Z", now)).toBe("12m");
+    expect(shortAgo("2026-11-17T09:00:00Z", now)).toBe("3h");
+    expect(shortAgo("2026-11-15T12:00:00Z", now)).toBe("2d");
+    expect(shortAgo("2026-11-01T12:00:00Z", now)).toMatch(/Nov/);
+    expect(shortAgo("not a date", now)).toBe("");
   });
 
   it("builds elicitation forms with masked sensitive fields", () => {

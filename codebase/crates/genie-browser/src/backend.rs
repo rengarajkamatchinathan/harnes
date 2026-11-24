@@ -122,12 +122,88 @@ pub fn launch_args(cfg: &SystemChromeConfig) -> Vec<String> {
         "--disable-features=Translate,MediaRouter,PasswordManagerOnboarding,AutofillServerCommunication"
             .into(),
         "--window-size=1280,800".into(),
+        // Without this, `--remote-debugging-pipe` and headless set `navigator.webdriver`,
+        // which sites (Google search, reCAPTCHA) treat as a bot.
+        "--disable-blink-features=AutomationControlled".into(),
     ];
     if cfg.headless {
         a.push("--headless=new".into());
     }
     a.push("about:blank".into());
     a
+}
+
+/// The User-Agent a normal (headed) Chrome or Edge of `major` sends on this OS, in Chrome's
+/// reduced format. Headless Chrome sends `HeadlessChrome/…`, which sites block on sight.
+pub fn user_agent(major: u32, edge: bool) -> String {
+    let os = if cfg!(target_os = "windows") {
+        "Windows NT 10.0; Win64; x64"
+    } else if cfg!(target_os = "macos") {
+        "Macintosh; Intel Mac OS X 10_15_7"
+    } else {
+        "X11; Linux x86_64"
+    };
+    let mut ua = format!(
+        "Mozilla/5.0 ({os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+    );
+    if edge {
+        ua.push_str(&format!(" Edg/{major}.0.0.0"));
+    }
+    ua
+}
+
+/// `Emulation.setUserAgentOverride` params for a headless browser's tab, from its
+/// `Browser.getVersion`: the headed User-Agent plus matching client hints (`Sec-CH-UA`
+/// would otherwise name `HeadlessChrome`). `None` for a headed browser.
+pub fn headed_ua_override(version: &Value) -> Option<Value> {
+    let product = version["product"].as_str()?;
+    if !product.starts_with("Headless") {
+        return None;
+    }
+    let full = product.split('/').nth(1)?;
+    let major: u32 = discover::major(full)?;
+    let edge = version["userAgent"]
+        .as_str()
+        .is_some_and(|u| u.contains("Edg/"));
+    let (platform, nav_platform, platform_version) = if cfg!(target_os = "windows") {
+        ("Windows", "Win32", "15.0.0")
+    } else if cfg!(target_os = "macos") {
+        ("macOS", "MacIntel", "14.0.0")
+    } else {
+        ("Linux", "Linux x86_64", "")
+    };
+    let vendor = if edge {
+        "Microsoft Edge"
+    } else {
+        "Google Chrome"
+    };
+    let m = major.to_string();
+    let brands = json!([
+        {"brand": "Not)A;Brand", "version": "8"},
+        {"brand": "Chromium", "version": m},
+        {"brand": vendor, "version": m},
+    ]);
+    let full_list = json!([
+        {"brand": "Not)A;Brand", "version": "8.0.0.0"},
+        {"brand": "Chromium", "version": full},
+        {"brand": vendor, "version": full},
+    ]);
+    Some(json!({
+        "userAgent": user_agent(major, edge),
+        "platform": nav_platform,
+        "userAgentMetadata": {
+            "brands": brands,
+            "fullVersionList": full_list,
+            "fullVersion": full,
+            "platform": platform,
+            "platformVersion": platform_version,
+            "architecture": if cfg!(target_arch = "aarch64") { "arm" } else { "x86" },
+            "bitness": "64",
+            "model": "",
+            "mobile": false,
+            "wow64": false,
+        },
+    }))
 }
 
 /// Profile preferences that switch off password saving, autofill and site permission
@@ -245,8 +321,23 @@ impl SystemChromeBackend {
             .map_err(|e| BrowserError::Launch(e.to_string()))?;
         let mut cfg = self.cfg.clone();
         cfg.headless = self.headless.load(Ordering::SeqCst);
+        let mut args = launch_args(&cfg);
+        if cfg.headless
+            && let Some(major) = discover::version_of(&exe)
+                .await
+                .as_deref()
+                .and_then(discover::major)
+        {
+            // Every frame and worker (reCAPTCHA's iframe included) sends a headed UA.
+            let edge = exe
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().contains("msedge"));
+            let ua = user_agent(major, edge);
+            let at = args.len() - 1; // before the start URL
+            args.insert(at, format!("--user-agent={ua}"));
+        }
         let mut cmd = tokio::process::Command::new(&exe);
-        cmd.args(launch_args(&cfg))
+        cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -356,6 +447,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn headless_ua_looks_headed() {
+        let ua = user_agent(131, false);
+        assert!(ua.contains("Chrome/131.0.0.0 Safari/537.36") && !ua.contains("Headless"));
+        assert!(user_agent(131, true).ends_with(" Edg/131.0.0.0"));
+
+        let v = json!({"product": "HeadlessChrome/131.0.6778.85",
+                       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.6778.85 Safari/537.36"});
+        let o = headed_ua_override(&v).unwrap();
+        assert!(!o["userAgent"].as_str().unwrap().contains("Headless"));
+        let brands = o["userAgentMetadata"]["brands"].to_string();
+        assert!(brands.contains("Google Chrome") && !brands.contains("Headless"));
+        assert_eq!(o["userAgentMetadata"]["fullVersion"], "131.0.6778.85");
+        assert!(headed_ua_override(&json!({"product": "Chrome/131.0.6778.85"})).is_none());
+        assert!(headed_ua_override(&json!({})).is_none());
+    }
+
+    #[test]
     fn args_and_prefs() {
         let cfg = SystemChromeConfig::new(Path::new("/data"));
         let a = launch_args(&cfg);
@@ -366,6 +474,8 @@ mod tests {
         assert!(a.contains(&"--headless=new".to_string()));
         assert!(!a.iter().any(|x| x.contains("remote-debugging-port")));
         assert!(!a.iter().any(|x| x == "--enable-automation"));
+        assert!(a.contains(&"--disable-blink-features=AutomationControlled".to_string()));
+        assert_eq!(a.last().map(String::as_str), Some("about:blank"));
 
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("profile");

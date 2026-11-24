@@ -484,6 +484,18 @@ impl Services {
                                 .map_err(berr)?;
                             to_result(&genie_protocol::api::browser::CopyResult { text })
                         }
+                        n if n == m::BrowserViewport::NAME => {
+                            b.set_viewport(&params::<m::BrowserViewport>(&r)?)
+                                .await
+                                .map_err(berr)?;
+                            empty()
+                        }
+                        n if n == m::BrowserFind::NAME => {
+                            to_result(&b.find(&params::<m::BrowserFind>(&r)?).await.map_err(berr)?)
+                        }
+                        n if n == m::BrowserHit::NAME => {
+                            to_result(&b.hit(&params::<m::BrowserHit>(&r)?).await.map_err(berr)?)
+                        }
                         n if n == m::BrowserFileChooserAnswer::NAME => {
                             b.file_chooser_answer(&params::<m::BrowserFileChooserAnswer>(&r)?)
                                 .await

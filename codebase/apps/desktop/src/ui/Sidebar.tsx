@@ -1,7 +1,7 @@
 // Left sidebar (05 §2.1, §3.1, D54), laid out like Claude Desktop: title-bar strip (sidebar toggle, back/forward, Chat/Code
 // switch), nav rows (New, Search, Projects, Customize), foldable Pinned/Chats sections (Chat) or
 // sessions grouped by repo (Code), row actions, ⌘K search palette, profile footer.
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type React from "react";
 import type { SessionSummary } from "@genie/protocol";
 import { Badge, Button, Dialog, Icon, IconButton, Input, Menu, Switch, Tooltip, type MenuItem } from "@genie/ui";
@@ -10,7 +10,6 @@ import { sameWorkspace, type App } from "../state/app";
 import { useApp } from "./context";
 import { NewCodeSession } from "./code/NewCodeSession";
 import { CommandPalette, modKey } from "./CommandPalette";
-import { GenieMark } from "./GenieMark";
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useShell } from "./shell";
 import { ShareHandoff } from "./Handoff";
 
@@ -34,6 +33,37 @@ export function groupByDate(items: SessionSummary[], now: Date = new Date()): [D
   }
   return (Object.entries(groups) as [DateGroup, SessionSummary[]][]).filter(([, v]) => v.length);
 }
+
+/** Compact "last activity" label for a chat row: now, 5m, 3h, 2d, then "Nov 3". Pure for tests. */
+export function shortAgo(iso: string, now: number = Date.now()): string {
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return "";
+  const mins = Math.floor((now - ts) / 60_000);
+  if (mins < 1) return t("sidebar.justNow");
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// One shared minute tick so every row's relative time stays current without a timer per row.
+let minuteNow = Date.now();
+const minuteSubs = new Set<() => void>();
+let minuteTimer: ReturnType<typeof setInterval> | undefined;
+function subscribeMinute(cb: () => void) {
+  minuteSubs.add(cb);
+  minuteTimer ??= setInterval(() => {
+    minuteNow = Date.now();
+    minuteSubs.forEach((f) => f());
+  }, 60_000);
+  return () => {
+    minuteSubs.delete(cb);
+    if (!minuteSubs.size && minuteTimer) (clearInterval(minuteTimer), (minuteTimer = undefined));
+  };
+}
+const useMinute = () => useSyncExternalStore(subscribeMinute, () => minuteNow);
 
 const STATUS_TONE: Record<string, string> = { running: "dot--running", awaiting_ask: "dot--ask", paused: "dot--ask", interrupted: "dot--interrupted", compacting: "dot--running", interrupting: "dot--running" };
 
@@ -431,6 +461,7 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
   const renameDone = useRef(false);
   const active = app.ui.view === "main" && app.ui.activeSession === s.session_id;
   const untitled = code ? t("sidebar.untitledSession") : t("sidebar.untitled");
+  const ago = shortAgo(s.updated_at, useMinute());
 
   const startRename = () => {
     setTitle(s.title ?? "");
@@ -469,7 +500,7 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
 
   return (
     <div
-      className={`sidebar__row ${code ? "sidebar__row--code" : ""} ${active ? "is-active" : ""} ${fresh ? "is-new" : ""} ${renaming ? "is-renaming" : ""}`}
+      className={`sidebar__row ${code ? "sidebar__row--code" : ""} ${active ? "is-active" : ""} ${fresh ? "is-new" : ""} ${renaming ? "is-renaming" : ""} ${hint ? "" : "has-time"}`}
       onContextMenu={(e) => {
         // Right-click opens the same actions menu as the ··· button.
         if (renaming) return;
@@ -504,13 +535,18 @@ function SessionRow({ s, app, code, fresh, hint }: { s: SessionSummary; app: App
           onKeyDown={(e) => e.key === "F2" && (e.preventDefault(), startRename())}
           aria-current={active ? "page" : undefined}
         >
-          {STATUS_TONE[s.status] ? <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} /> : (
-            <span className="sidebar__mark" aria-hidden>
-              <GenieMark size={14} />
-            </span>
-          )}
+          {/* Only sessions that need attention get a mark; idle ones keep an empty slot so titles align. */}
+          <span className="sidebar__mark" aria-hidden={!STATUS_TONE[s.status]}>
+            {STATUS_TONE[s.status] && <span className={`dot ${STATUS_TONE[s.status]}`} aria-label={s.status} />}
+          </span>
           <span className="sidebar__title">{s.title || untitled}</span>
-          {hint && <span className="sidebar__hint muted">{hint}</span>}
+          {hint ? (
+            <span className="sidebar__hint muted">{hint}</span>
+          ) : (
+            <time className="sidebar__time" dateTime={s.updated_at} title={new Date(s.updated_at).toLocaleString()}>
+              {ago}
+            </time>
+          )}
         </button>
       )}
       <Menu label={t("row.actions")} align="right" items={items} open={menuOpen} onOpenChange={setMenuOpen} trigger={(p) => <IconButton icon="more" size="sm" label={t("row.actions")} className="sidebar__more" {...p} />} />

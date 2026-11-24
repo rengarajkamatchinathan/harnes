@@ -354,7 +354,14 @@ impl Browser {
                 .await;
         }
         let Some(client) = client else { return };
+        let viewport = self.viewport_for(session_id);
         for (t, quality, max_w, max_h, stop) in to_start {
+            // Lay the page out at the panel's size before its first frame.
+            if let Some(v) = viewport
+                && let Err(e) = crate::view::apply(&client, &t.cdp_session, v).await
+            {
+                tracing::warn!(error = %e, tab = %t.tab_id, "viewport override failed");
+            }
             let r = client
                 .call_in(
                     Some(&t.cdp_session),
@@ -492,6 +499,8 @@ impl Browser {
     /// the agent is idle the user can use the page directly (t47).
     pub async fn input(&self, p: &BrowserInputParams) -> Result<(), BrowserError> {
         let s = self.session(&p.session_id);
+        // The browser went away (popped-out window closed): re-open the tabs first.
+        self.recover(&s).await?;
         let tab = s
             .tab(&p.tab_id)
             .ok_or_else(|| BrowserError::Launch(format!("no tab {}", p.tab_id)))?;
@@ -499,7 +508,11 @@ impl Browser {
         if crate::input::takes_control(&p.event) {
             self.user_acted(&s);
         }
-        let client = self.client().await?;
+        // The connection the tab lives on (the daemon's current one may be newer).
+        let client = match s.client().filter(|c| !c.is_closed()) {
+            Some(c) => c,
+            None => self.client().await?,
+        };
         let (method, params) = crate::input::to_cdp(&p.event);
         // Fire and forget keeps input-to-frame latency low; order is kept by the pipe.
         client.send(Some(&tab.cdp_session), method, params);

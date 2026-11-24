@@ -205,6 +205,15 @@ struct Shared {
     stale: bool,
     next_tab: u32,
     client: Option<CdpClient>,
+    /// The Browser tab's size (`browser.viewport`), applied to tabs as they are shown.
+    viewport: Option<crate::view::Viewport>,
+    /// Last known URL per tab, to re-open the tabs when the browser went away.
+    urls: HashMap<String, String>,
+    /// Tabs detached outside our tools, recently: closing the popped-out window detaches
+    /// every tab just before the connection drops, and recovery re-opens them.
+    lost: Vec<(TabHandle, Instant)>,
+    /// The active tab when tabs started going away (`lost`).
+    lost_active: Option<(String, Instant)>,
 }
 
 #[derive(Default)]
@@ -234,6 +243,10 @@ pub(crate) struct Ops {
     approved_downloads: HashSet<String>,
 }
 
+/// How long a tab detached outside our tools is kept for re-opening: a closed window
+/// detaches its tabs and then drops the connection a moment later.
+const LOST_FOR: Duration = Duration::from_secs(10);
+
 /// One Genie session's browser state.
 pub struct BrowserSession {
     pub id: String,
@@ -257,6 +270,14 @@ impl BrowserSession {
     pub fn control(&self) -> Control {
         self.with(|s| s.control.unwrap_or(Control::Agent))
             .unwrap_or(Control::Agent)
+    }
+
+    pub(crate) fn viewport(&self) -> Option<crate::view::Viewport> {
+        self.with(|s| s.viewport).flatten()
+    }
+
+    pub(crate) fn set_viewport(&self, v: crate::view::Viewport) {
+        self.with(|s| s.viewport = Some(v));
     }
 
     pub(crate) fn set_control(&self, c: Control) {
@@ -283,6 +304,18 @@ impl BrowserSession {
     pub fn tab(&self, tab_id: &str) -> Option<TabHandle> {
         self.with(|s| s.tabs.iter().find(|t| t.tab_id == tab_id).cloned())
             .flatten()
+    }
+
+    /// Tabs detached outside our tools within [`LOST_FOR`].
+    fn recently_lost(&self) -> Vec<TabHandle> {
+        self.with(|g| {
+            g.lost
+                .iter()
+                .filter(|(_, at)| at.elapsed() < LOST_FOR)
+                .map(|(t, _)| t.clone())
+                .collect()
+        })
+        .unwrap_or_default()
     }
 
     fn owns_target(&self, target_id: &str) -> bool {
@@ -326,6 +359,8 @@ pub struct Browser {
     pub(crate) console: StdMutex<crate::console::ConsoleLog>,
     /// Cookies were cleared at the first start (Keep cookies off).
     cookies_cleared: std::sync::atomic::AtomicBool,
+    /// Serialises re-opening tabs on a new browser (recovery, pop out).
+    reopening: tokio::sync::Mutex<()>,
 }
 
 /// A pending file picker (SA-24).
@@ -388,6 +423,16 @@ pub(crate) async fn attach_page(c: &CdpClient, target: &str) -> Result<String, C
         .await?;
     let sid = str_at(&a, &["sessionId"]).unwrap_or("").to_string();
     c.call_in(Some(&sid), "Page.enable", json!({})).await?;
+    // Headless: client hints (`Sec-CH-UA`, `navigator.userAgentData`) matching the headed
+    // User-Agent of the launch flags; sites challenge `HeadlessChrome` on sight.
+    if let Ok(v) = c.call("Browser.getVersion", json!({})).await
+        && let Some(o) = crate::backend::headed_ua_override(&v)
+        && let Err(e) = c
+            .call_in(Some(&sid), "Emulation.setUserAgentOverride", o)
+            .await
+    {
+        tracing::warn!(error = %e, "user agent override failed");
+    }
     if let Err(e) = c
         .call_in(
             Some(&sid),
@@ -431,6 +476,7 @@ impl Browser {
             chooser_seq: AtomicU64::new(0),
             console: StdMutex::new(crate::console::ConsoleLog::default()),
             cookies_cleared: std::sync::atomic::AtomicBool::new(false),
+            reopening: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -612,6 +658,18 @@ impl Browser {
                             .iter()
                             .find(|t| t.cdp_session == cdp)
                             .map(|t| t.tab_id.clone());
+                        let now = Instant::now();
+                        g.lost.retain(|(_, at)| now.duration_since(*at) < LOST_FOR);
+                        if let Some(t) = g.tabs.iter().find(|t| t.cdp_session == cdp) {
+                            g.lost.push((t.clone(), now));
+                        }
+                        if !g
+                            .lost_active
+                            .as_ref()
+                            .is_some_and(|(_, at)| now.duration_since(*at) < LOST_FOR)
+                        {
+                            g.lost_active = g.active.clone().map(|a| (a, now));
+                        }
                         g.tabs.retain(|t| t.cdp_session != cdp);
                         if g.active.is_some() && g.active == gone {
                             g.active = g.tabs.last().map(|t| t.tab_id.clone());
@@ -741,7 +799,8 @@ impl Browser {
         tab_id: &str,
     ) -> Result<String, BrowserError> {
         let s = self.session(session_id);
-        if s.control() != Control::User {
+        // While the agent is idle the page is the user's to use directly (t47).
+        if s.control() != Control::User && self.host.turn_active(session_id) {
             return Err(BrowserError::Launch(
                 "copying from the page needs you in control (Take over)".into(),
             ));
@@ -854,7 +913,13 @@ impl Browser {
     /// profile keeps cookies, so sign-ins survive (unsaved form input doesn't). The next
     /// tool result tells the agent the page may have changed.
     pub async fn popout(&self, session_id: &str) -> Result<(), BrowserError> {
-        if !self.backend.headed() {
+        let _reopening = self.reopening.lock().await;
+        // The popped-out window was closed: pop out again (re-open the tabs headed).
+        let gone = self
+            .session(session_id)
+            .client()
+            .is_some_and(|c| c.is_closed());
+        if !self.backend.headed() || gone {
             let sessions: Vec<Arc<BrowserSession>> = self
                 .sessions
                 .lock()
@@ -862,15 +927,25 @@ impl Browser {
                 .unwrap_or_default();
             let mut open = Vec::new();
             for s in &sessions {
-                let Some(c) = s.client().filter(|c| !c.is_closed()) else {
+                if s.tabs().is_empty() {
                     continue;
-                };
+                }
+                let c = s.client().filter(|c| !c.is_closed());
+                let known = s.with(|g| g.urls.clone()).unwrap_or_default();
                 let mut tabs = Vec::new();
                 for t in s.tabs() {
-                    let url = target_info(&c, &t.target_id)
-                        .await
-                        .map(|(u, _)| u)
-                        .unwrap_or_default();
+                    let live = match &c {
+                        Some(c) => target_info(c, &t.target_id)
+                            .await
+                            .map(|(u, _)| u)
+                            .unwrap_or_default(),
+                        None => String::new(),
+                    };
+                    let url = if live.is_empty() {
+                        known.get(&t.tab_id).cloned().unwrap_or_default()
+                    } else {
+                        live
+                    };
                     tabs.push((t.tab_id, url));
                 }
                 open.push((s.clone(), tabs, s.active_tab().map(|t| t.tab_id)));
@@ -955,6 +1030,10 @@ impl Browser {
         let Some(s) = self.existing(session_id) else {
             return TabsResult { tabs: vec![] };
         };
+        // The panel polls this: a closed popped-out window comes back into the panel.
+        if let Err(e) = self.recover(&s).await {
+            tracing::warn!(error = %e, "re-opening the session's tabs failed");
+        }
         let c = s.with(|g| g.client.clone()).flatten();
         let active = s.active_tab().map(|t| t.tab_id);
         let mut tabs = Vec::new();
@@ -963,6 +1042,9 @@ impl Browser {
                 Some(c) => target_info(c, &t.target_id).await.unwrap_or_default(),
                 None => Default::default(),
             };
+            if is_web(&url) {
+                s.with(|g| g.urls.insert(t.tab_id.clone(), url.clone()));
+            }
             tabs.push(TabInfo {
                 active: active.as_deref() == Some(t.tab_id.as_str()),
                 tab_id: t.tab_id,
@@ -1048,9 +1130,73 @@ impl Browser {
         }
     }
 
+    /// The session's browser went away (the user closed the popped-out window, a crash):
+    /// start it again and re-open the session's tabs at their last known URLs, so the
+    /// Browser tab, take over and pop out keep working. Cookies live in the profile, so
+    /// sign-ins survive.
+    pub(crate) async fn recover(&self, s: &BrowserSession) -> Result<(), BrowserError> {
+        let dead = |s: &BrowserSession| {
+            s.client().is_some_and(|c| c.is_closed())
+                && (!s.tabs().is_empty() || !s.recently_lost().is_empty())
+        };
+        if !dead(s) {
+            return Ok(());
+        }
+        let _reopening = self.reopening.lock().await;
+        if !dead(s) {
+            return Ok(()); // pop out or another caller re-opened them meanwhile
+        }
+        let c = self.client().await?;
+        let known = s.with(|g| g.urls.clone()).unwrap_or_default();
+        let lost_active = s
+            .with(|g| g.lost_active.clone())
+            .flatten()
+            .filter(|(_, at)| at.elapsed() < LOST_FOR)
+            .map(|(a, _)| a);
+        let active = s.active_tab().map(|t| t.tab_id).or(lost_active);
+        // The tabs still listed plus those that went away with the window, in tab order.
+        let mut reopen = s.tabs();
+        for t in s.recently_lost() {
+            if !reopen.iter().any(|x| x.tab_id == t.tab_id) {
+                reopen.push(t);
+            }
+        }
+        reopen.sort_by_key(|t| t.tab_id.trim_start_matches('t').parse::<u32>().unwrap_or(0));
+        let mut handles = Vec::new();
+        for t in reopen {
+            let url = known
+                .get(&t.tab_id)
+                .filter(|u| is_web(u))
+                .cloned()
+                .unwrap_or_else(|| "about:blank".into());
+            let r = c.call("Target.createTarget", json!({"url": url})).await?;
+            let target = str_at(&r, &["targetId"]).unwrap_or("").to_string();
+            let sid = attach_page(&c, &target).await?;
+            handles.push(TabHandle {
+                tab_id: t.tab_id,
+                target_id: target,
+                cdp_session: sid,
+            });
+        }
+        s.with(|g| {
+            let keep = active.filter(|a| handles.iter().any(|t| &t.tab_id == a));
+            g.active = keep.or_else(|| handles.last().map(|t| t.tab_id.clone()));
+            g.tabs = handles;
+            g.client = Some(c.clone());
+            g.stale = true;
+            g.handed_back = true;
+            g.lost.clear();
+            g.lost_active = None;
+        });
+        tracing::info!(session = %s.id, "browser went away; tabs re-opened");
+        self.sync_casts(&s.id).await;
+        Ok(())
+    }
+
     /// The live connection with the session attached to it, as an agent action would
     /// (tabs from an older connection are dropped).
     async fn user_client(&self, s: &BrowserSession) -> Result<CdpClient, BrowserError> {
+        self.recover(s).await?;
         let c = self.client().await?;
         let changed = s
             .with(|g| {
